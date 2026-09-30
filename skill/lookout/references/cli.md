@@ -1,0 +1,48 @@
+# Lookout CLI reference
+
+Every command prints one JSON object on stdout. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. Use `python -m lookout` in place of `lookout` when the command is not on the PATH.
+
+## Daily run
+
+| Command | Returns |
+|---|---|
+| `lookout due [--max-age-days N] [--no-refresh]` | Refreshes facts, then `projects` (`id`, `name`, `reason`), `up_to_date`, `problems`, `portfolio` (`due`, `reason`) and `next`. Cards older than N days (default 14) count as `stale`. |
+| `lookout context <id>` | `project` (`id`, `name`, `path`, `status`, `status_note`), `facts`, `previous_card` (`version`, `created_at`, `card`) or null, `since_previous_card` (`days`, `commit_count`, `commits` as "YYYY-MM-DD subject", newest first) or null, `feedback` (`id`, `title`, `value`, `at`). |
+| `lookout card put <id> --file <path>` | Saves a new card version: `saved`, `version`, `warnings`, `rated_items` (`id`, `title`). `--file -` reads stdin; `--json '<object>'` passes it inline. |
+| `lookout card put <id> --file <path> --merge` | Same, but the document holds only changed top-level fields; all others come from the previous card. A list replaces the previous list completely. |
+| `lookout card show <id>` | The current card with `version` and `created_at`. |
+| `lookout portfolio context` | `projects` (compact facts and card per project), `previous_portfolio`, `feedback` for all items. |
+| `lookout portfolio put --file <path> [--merge]` | Saves the brief; unknown project ids are refused with the list of valid ids. |
+| `lookout portfolio show` | The current brief. |
+| `lookout schema card` / `lookout schema portfolio` | The JSON schema of a document. |
+
+Rated items (card `suggestions`; portfolio `patterns`, `synergies`, `new_apps`, `park_or_revive`) get an `id` when saved. Send that `id` again to keep an item's identity and its rating.
+
+Feedback values: `up` (the owner likes it), `later` (not now; hidden for 14 days), `down` (rejected; never suggest again).
+
+## Facts
+
+| Command | Returns |
+|---|---|
+| `lookout facts show <id>` | `head`, `branch`, `commits` (`total`, `first`, `last`, `last_7d`, `last_30d`, `last_90d`, `weekly`: 26 weekly counts, oldest first), `remotes`, `has_remote`, `upstream`, `ahead`, `behind`, `dirty` (`files`, `modified`, `untracked`, `deleted`, `lines_added`, `lines_removed`, `oldest_change`, `newest_change`), `worktrees`, `branches` (`merged_count`, `unmerged`), `ci` (`state`: `green`, `red`, `running`, `none`, `unknown`), `docs_mtime`, `last_work`. A folder that is not a git repository has `ok: false` and `error`. |
+| `lookout facts refresh [<id> ...] [--no-ci]` | Measures again; `refreshed` lists `id`, `ok`, `error`, `changed`. |
+
+## Projects
+
+| Command | Effect |
+|---|---|
+| `lookout projects list` | All projects with `status`, `status_note`, `has_card`, `card_updated_at`, `facts_collected_at`. |
+| `lookout projects discover <folder>` | Git repositories directly inside the folder that are not registered, newest first: `path`, `suggested_id`, `last_commit`. Registers nothing. |
+| `lookout projects add <path> [--id ID] [--name NAME]` | Registers a folder and measures its facts. The id defaults to the folder name in lowercase. |
+| `lookout projects status <id> <active|parked|done|archived> [--note TEXT]` | The owner's intent. Archived projects disappear from runs and the main page. |
+| `lookout projects rename <id> <name>` | Changes the display name. |
+| `lookout projects remove <id>` | Stops watching and deletes that project's stored cards. Only when the owner asks. |
+
+## App
+
+| Command | Effect |
+|---|---|
+| `lookout status` | Data directory, database, number of projects and cards, web app URL and whether it runs. |
+| `lookout open` | Starts the web app in the background if needed and opens it in the browser. |
+| `lookout serve [--port N]` | Runs the web app in the foreground (default port 8455, or `LOOKOUT_PORT`). |
+| `lookout autostart on|off|status` | Windows: starts the web app at sign-in. |
