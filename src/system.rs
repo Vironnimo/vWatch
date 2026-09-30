@@ -1,7 +1,7 @@
-//! Where Lookout lives on disk and how it plugs into Windows.
+//! Where Watchtower lives on disk and how it plugs into Windows.
 //!
-//! Lookout is one folder: the exe, `data\` with the database and `skill\lookout\`
-//! with the Skill for agents. `LOOKOUT_HOME` moves the data folder elsewhere.
+//! Watchtower is one folder: the exe, `data\` with the database and `skill\watchtower\`
+//! with the Skill for agents. `WATCHTOWER_HOME` moves the data folder elsewhere.
 
 use std::path::{Path, PathBuf};
 
@@ -9,23 +9,23 @@ use serde_json::{json, Value};
 
 /// The Skill for agents, embedded so the exe always carries the matching version.
 const SKILL_FILES: &[(&str, &str)] = &[
-    ("SKILL.md", include_str!("../skill/lookout/SKILL.md")),
+    ("SKILL.md", include_str!("../skill/watchtower/SKILL.md")),
     (
         "references/cli.md",
-        include_str!("../skill/lookout/references/cli.md"),
+        include_str!("../skill/watchtower/references/cli.md"),
     ),
     (
         "references/card-guide.md",
-        include_str!("../skill/lookout/references/card-guide.md"),
+        include_str!("../skill/watchtower/references/card-guide.md"),
     ),
     (
         "references/portfolio-guide.md",
-        include_str!("../skill/lookout/references/portfolio-guide.md"),
+        include_str!("../skill/watchtower/references/portfolio-guide.md"),
     ),
 ];
 
 pub fn exe_path() -> PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("Lookout.exe"))
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("Watchtower.exe"))
 }
 
 pub fn app_dir() -> PathBuf {
@@ -36,7 +36,7 @@ pub fn app_dir() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    let dir = std::env::var_os("LOOKOUT_HOME")
+    let dir = std::env::var_os("WATCHTOWER_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| app_dir().join("data"));
     let _ = std::fs::create_dir_all(&dir);
@@ -44,11 +44,11 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn db_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("lookout.db")
+    data_dir.join("watchtower.db")
 }
 
 pub fn skill_dir() -> PathBuf {
-    app_dir().join("skill").join("lookout")
+    app_dir().join("skill").join("watchtower")
 }
 
 /// Write the embedded Skill next to the exe, touching only files whose content differs.
@@ -90,7 +90,7 @@ mod win {
     use winreg::{RegKey, RegValue};
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    const RUN_VALUE: &str = "Lookout";
+    const RUN_VALUE: &str = "Watchtower";
 
     pub fn autostart_enabled() -> bool {
         RegKey::predef(HKEY_CURRENT_USER)
@@ -233,7 +233,7 @@ pub fn autostart_enabled() -> bool {
     false
 }
 
-/// Open Lookout when the owner signs in to Windows.
+/// Open Watchtower when the owner signs in to Windows.
 pub fn set_autostart(on: bool) -> std::io::Result<()> {
     #[cfg(windows)]
     return win::set_autostart(on, &exe_path());
@@ -246,7 +246,7 @@ pub fn set_autostart(on: bool) -> std::io::Result<()> {
     }
 }
 
-/// Whether `lookout` is on the owner's PATH, so agents can call it by name.
+/// Whether `watchtower` is on the owner's PATH, so agents can call it by name.
 pub fn agent_access_enabled() -> bool {
     #[cfg(windows)]
     return win::path_contains(&app_dir());

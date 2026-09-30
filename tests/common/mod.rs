@@ -5,10 +5,10 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use lookout::facts;
-use lookout::store::Store;
-use lookout::Lookout;
 use serde_json::{json, Value};
+use watchtower::facts;
+use watchtower::store::Store;
+use watchtower::Watchtower;
 
 pub fn git_at(repo: &Path, args: &[&str], date: &str) {
     let out = Command::new("git")
@@ -63,13 +63,13 @@ impl Clock {
 }
 
 /// A service on a temporary database with a fixed clock (2026-09-30 08:00 UTC) and no CI lookups.
-pub fn service(dir: &Path) -> (Lookout, Clock) {
+pub fn service(dir: &Path) -> (Watchtower, Clock) {
     let clock = Clock(Arc::new(Mutex::new(
         Utc.with_ymd_and_hms(2026, 9, 30, 8, 0, 0).unwrap(),
     )));
     let tick = clock.clone();
-    let store = Store::open(&dir.join("lookout.db")).unwrap();
-    let svc = Lookout::with_parts(
+    let store = Store::open(&dir.join("watchtower.db")).unwrap();
+    let svc = Watchtower::with_parts(
         store,
         Box::new(move || *tick.0.lock().unwrap()),
         Box::new(|path, today, _ci| facts::collect(path, today, false)),

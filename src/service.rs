@@ -1,4 +1,4 @@
-//! Lookout's single owner of behavior, used by both the app window and the CLI.
+//! Watchtower's single owner of behavior, used by both the app window and the CLI.
 //!
 //! Owns project registration, fact refreshes, deciding which projects need a new
 //! interpretation, the context an agent reads before writing a card, card and
@@ -43,15 +43,15 @@ const DISCOVER_DEPTH: usize = 2;
 const RECENT_DAYS: i64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LookoutError {
+pub struct WatchtowerError {
     pub code: String,
     pub message: String,
     pub hint: Option<String>,
 }
 
-impl LookoutError {
+impl WatchtowerError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        LookoutError {
+        WatchtowerError {
             code: code.into(),
             message: message.into(),
             hint: None,
@@ -72,27 +72,30 @@ impl LookoutError {
     }
 }
 
-impl std::fmt::Display for LookoutError {
+impl std::fmt::Display for WatchtowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
 
-impl std::error::Error for LookoutError {}
+impl std::error::Error for WatchtowerError {}
 
-impl From<rusqlite::Error> for LookoutError {
+impl From<rusqlite::Error> for WatchtowerError {
     fn from(e: rusqlite::Error) -> Self {
-        LookoutError::new("storage_error", format!("Lookout's database failed: {e}"))
-            .hint("Try again in a moment.")
+        WatchtowerError::new(
+            "storage_error",
+            format!("Watchtower's database failed: {e}"),
+        )
+        .hint("Try again in a moment.")
     }
 }
 
-pub type Result<T> = std::result::Result<T, LookoutError>;
+pub type Result<T> = std::result::Result<T, WatchtowerError>;
 pub type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 /// Measures one repository: (path, today, with_ci) -> facts.
 pub type Collector = Box<dyn Fn(&str, NaiveDate, bool) -> Value + Send + Sync>;
 
-pub struct Lookout {
+pub struct Watchtower {
     store: Store,
     clock: Clock,
     collect: Collector,
@@ -191,7 +194,7 @@ fn title_of(item: &Value) -> String {
     }
 }
 
-/// The ids Lookout keeps for a saved document's items, for the agent's reply.
+/// The ids Watchtower keeps for a saved document's items, for the agent's reply.
 fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
     kind.items()
         .iter()
@@ -360,10 +363,10 @@ fn pick(v: &Value, keys: &[&str]) -> Value {
     )
 }
 
-impl Lookout {
-    /// Lookout on a database file, measuring with git and the real clock.
-    pub fn open(db: &Path) -> Result<Lookout> {
-        let svc = Lookout::with_parts(
+impl Watchtower {
+    /// Watchtower on a database file, measuring with git and the real clock.
+    pub fn open(db: &Path) -> Result<Watchtower> {
+        let svc = Watchtower::with_parts(
             Store::open(db)?,
             Box::new(Utc::now),
             Box::new(facts::collect),
@@ -409,8 +412,8 @@ impl Lookout {
         Ok(())
     }
 
-    pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> Lookout {
-        Lookout {
+    pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> Watchtower {
+        Watchtower {
             store,
             clock,
             collect,
@@ -442,7 +445,7 @@ impl Lookout {
             known.join(", ")
         };
         Err(
-            LookoutError::new("project_not_found", format!("No project with id '{id}'."))
+            WatchtowerError::new("project_not_found", format!("No project with id '{id}'."))
                 .hint(format!("Known project ids: {known}.")),
         )
     }
@@ -468,7 +471,7 @@ impl Lookout {
         let resolved = resolve(path);
         let resolved_str = resolved.to_string_lossy().into_owned();
         if !resolved.is_dir() {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "path_missing",
                 format!("Folder does not exist: {resolved_str}"),
             ));
@@ -479,7 +482,7 @@ impl Lookout {
             .into_iter()
             .find(|p| same_path(&p.path, &resolved_str))
         {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "already_registered",
                 format!("This folder is already registered as '{}'.", p.id),
             ));
@@ -502,15 +505,16 @@ impl Lookout {
         };
         if !valid_project_id(&id) {
             return Err(
-                LookoutError::new("invalid_id", format!("Invalid project id '{id}'."))
+                WatchtowerError::new("invalid_id", format!("Invalid project id '{id}'."))
                     .hint("Use lowercase letters, digits and hyphens, at most 40 characters."),
             );
         }
         if self.store.project(&id)?.is_some() {
-            return Err(
-                LookoutError::new("id_taken", format!("The id '{id}' is already used."))
-                    .hint("Pass another id with --id."),
-            );
+            return Err(WatchtowerError::new(
+                "id_taken",
+                format!("The id '{id}' is already used."),
+            )
+            .hint("Pass another id with --id."));
         }
         self.store
             .add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
@@ -554,7 +558,7 @@ impl Lookout {
         self.project(id)?;
         let name = name.trim();
         if name.is_empty() {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "invalid_name",
                 "The name must not be empty.",
             ));
@@ -570,7 +574,7 @@ impl Lookout {
         if let Some(d) = due {
             if NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
                 return Err(
-                    LookoutError::new("invalid_date", format!("'{d}' is not a date."))
+                    WatchtowerError::new("invalid_date", format!("'{d}' is not a date."))
                         .hint("Write the due date as YYYY-MM-DD."),
                 );
             }
@@ -588,10 +592,11 @@ impl Lookout {
     pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
         let project = self.project(id)?;
         if !STATUSES.contains(&status) {
-            return Err(
-                LookoutError::new("invalid_status", format!("Unknown status '{status}'."))
-                    .hint(format!("Use one of: {}.", STATUSES.join(", "))),
-            );
+            return Err(WatchtowerError::new(
+                "invalid_status",
+                format!("Unknown status '{status}'."),
+            )
+            .hint(format!("Use one of: {}.", STATUSES.join(", "))));
         }
         self.store.set_status(
             id,
@@ -609,7 +614,7 @@ impl Lookout {
     pub fn discover(&self, root: &str) -> Result<Value> {
         let base = resolve(root);
         if !base.is_dir() {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "path_missing",
                 format!("Folder does not exist: {}", base.to_string_lossy()),
             ));
@@ -623,7 +628,7 @@ impl Lookout {
             }
         } else {
             std::fs::read_dir(&base).map_err(|e| {
-                LookoutError::new(
+                WatchtowerError::new(
                     "path_unreadable",
                     format!("Cannot read {}: {e}", base.to_string_lossy()),
                 )
@@ -737,9 +742,9 @@ impl Lookout {
             return Ok(f);
         }
         self.refresh_facts(Some(&[id.to_owned()]), true)?;
-        self.store
-            .facts(id)?
-            .ok_or_else(|| LookoutError::new("facts_missing", format!("Could not measure '{id}'.")))
+        self.store.facts(id)?.ok_or_else(|| {
+            WatchtowerError::new("facts_missing", format!("Could not measure '{id}'."))
+        })
     }
 
     pub fn facts(&self, id: &str) -> Result<Value> {
@@ -820,7 +825,7 @@ impl Lookout {
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
                 Some(_) => None,
             };
-            // cards written before Lookout added a field lack it; the next card fills it
+            // cards written before Watchtower added a field lack it; the next card fills it
             let new_fields = card
                 .as_ref()
                 .map(|c| Kind::Card.missing_fields(&c.data))
@@ -861,10 +866,10 @@ impl Lookout {
         // cards that only gain new fields do not change what the brief builds on
         let brief_affected = projects.iter().any(|e| e["reason"] != "new_fields");
         let next = if any_due {
-            "For each project listed: `lookout context <id>`, study the repository, then `lookout card put <id> --file <card.json>`. \
-             Afterwards: `lookout portfolio context` and `lookout portfolio put --file <portfolio.json>`."
+            "For each project listed: `watchtower context <id>`, study the repository, then `watchtower card put <id> --file <card.json>`. \
+             Afterwards: `watchtower portfolio context` and `watchtower portfolio put --file <portfolio.json>`."
         } else if portfolio_reason.is_some() {
-            "Every card is current; only the portfolio brief is due: `lookout portfolio context`, then `lookout portfolio put --file <portfolio.json>`."
+            "Every card is current; only the portfolio brief is due: `watchtower portfolio context`, then `watchtower portfolio put --file <portfolio.json>`."
         } else {
             "Nothing is due. Every card and the portfolio brief are current."
         };
@@ -903,7 +908,7 @@ impl Lookout {
             .map(feedback_json)
             .collect();
         let next = format!(
-            "Write the card with `lookout card put {id} --file <card.json>`{}",
+            "Write the card with `watchtower card put {id} --file <card.json>`{}",
             if card.is_some() {
                 " (add --merge to send only the fields that changed)."
             } else {
@@ -927,7 +932,7 @@ impl Lookout {
             return Ok(payload);
         }
         let Some(previous) = previous else {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "nothing_to_merge",
                 format!("There is no previous {what} to merge into."),
             )
@@ -949,8 +954,8 @@ impl Lookout {
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
         let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
-            LookoutError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint(format!("Fix the listed fields and send the card again.{merged} `lookout schema card` prints the full schema."))
+            WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
+                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
         let changed = changed_fields(previous.as_ref().map(|c| &c.data), &clean);
         if dry_run {
@@ -976,8 +981,8 @@ impl Lookout {
     pub fn card(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let card = self.store.latest_card(id)?.ok_or_else(|| {
-            LookoutError::new("no_card", format!("Project '{id}' has no card yet."))
-                .hint(format!("Run `lookout context {id}` and write one."))
+            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet."))
+                .hint(format!("Run `watchtower context {id}` and write one."))
         })?;
         Ok(
             json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}),
@@ -1037,7 +1042,7 @@ impl Lookout {
             "owner_last_opened": self.store.pref("last_visit")?,
             "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
-            "next": "Write the brief with `lookout portfolio put --file <portfolio.json>`.",
+            "next": "Write the brief with `watchtower portfolio put --file <portfolio.json>`.",
         }))
     }
 
@@ -1052,8 +1057,8 @@ impl Lookout {
             "portfolio brief",
         )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
-            LookoutError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint("Fix the listed fields and send it again. `lookout schema portfolio` prints the full schema.")
+            WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
+                .hint("Fix the listed fields and send it again. `watchtower schema portfolio` prints the full schema.")
         })?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
         let items = |key: &str| clean[key].as_array().cloned().unwrap_or_default();
@@ -1076,7 +1081,7 @@ impl Lookout {
         if !unknown.is_empty() {
             let mut known = known;
             known.sort();
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "unknown_project",
                 format!(
                     "The brief names unknown project ids: {}.",
@@ -1084,7 +1089,7 @@ impl Lookout {
                 ),
             )
             .hint(format!(
-                "Use the ids from `lookout portfolio context`: {}.",
+                "Use the ids from `watchtower portfolio context`: {}.",
                 known.join(", ")
             )));
         }
@@ -1101,8 +1106,8 @@ impl Lookout {
 
     pub fn portfolio(&self) -> Result<Value> {
         let p = self.store.latest_portfolio()?.ok_or_else(|| {
-            LookoutError::new("no_portfolio", "No portfolio brief has been written yet.")
-                .hint("Run `lookout portfolio context` and write one.")
+            WatchtowerError::new("no_portfolio", "No portfolio brief has been written yet.")
+                .hint("Run `watchtower portfolio context` and write one.")
         })?;
         Ok(json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data}))
     }
@@ -1110,7 +1115,7 @@ impl Lookout {
     // ---------- feedback and preferences ----------
     /// Records the owner's reaction to an item of the current cards or brief: a rating
     /// (`up`, `later`, `down`) of a suggestion or idea, `answered` (the answer is the note)
-    /// or `done` for a question, `done` for a focus item. Lookout keeps the item as it read,
+    /// or `done` for a question, `done` for a focus item. Watchtower keeps the item as it read,
     /// so agents still see what was rated after it left the card. `value: None` withdraws
     /// the reaction; `note: None` keeps the note already stored.
     pub fn set_feedback(
@@ -1128,24 +1133,25 @@ impl Lookout {
             .feedback()?
             .into_iter()
             .find(|f| f.item_id == item_id);
-        let (project_id, item) = match (self.find_item(item_id)?, &existing) {
-            (Some((project, item)), _) => (project, Some(item)),
-            (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
-            (None, None) => {
-                return Err(LookoutError::new(
+        let (project_id, item) =
+            match (self.find_item(item_id)?, &existing) {
+                (Some((project, item)), _) => (project, Some(item)),
+                (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
+                (None, None) => return Err(WatchtowerError::new(
                     "unknown_item",
                     format!("No current card or brief has an item with id '{item_id}'."),
                 )
-                .hint("Use an id from `lookout card show <id>` or `lookout portfolio show`."))
-            }
-        };
+                .hint(
+                    "Use an id from `watchtower card show <id>` or `watchtower portfolio show`.",
+                )),
+            };
         let kind = item
             .as_ref()
             .and_then(|i| i["kind"].as_str())
             .unwrap_or("suggestion");
         let allowed = reactions_for(kind);
         if !allowed.contains(&value) {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "invalid_feedback",
                 format!("'{value}' does not fit a {kind}."),
             )
@@ -1160,7 +1166,7 @@ impl Lookout {
         };
         if value == "answered" && note.is_empty() {
             return Err(
-                LookoutError::new("answer_missing", "An answer needs its text.")
+                WatchtowerError::new("answer_missing", "An answer needs its text.")
                     .hint("Send the answer as the note, or mark the question `done`."),
             );
         }
@@ -1232,7 +1238,7 @@ impl Lookout {
 
     pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
         if !PREFS.contains(&key) {
-            return Err(LookoutError::new(
+            return Err(WatchtowerError::new(
                 "invalid_pref",
                 format!("Unknown preference '{key}'."),
             ));

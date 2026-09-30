@@ -1,16 +1,16 @@
 [package]
-name = "lookout"
+name = "watchtower"
 version = "0.2.0"
 edition = "2021"
 description = "Morning overview of all your agent-built software projects"
 publish = false
 
 [lib]
-name = "lookout"
+name = "watchtower"
 path = "src/lib.rs"
 
 [[bin]]
-name = "Lookout"
+name = "Watchtower"
 path = "src/main.rs"
 
 [features]

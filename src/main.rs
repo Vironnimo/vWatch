@@ -4,8 +4,8 @@
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.len() > 1 {
-        lookout::system::attach_console();
-        std::process::exit(lookout::cli::main(args));
+        watchtower::system::attach_console();
+        std::process::exit(watchtower::cli::main(args));
     }
-    lookout::app::run();
+    watchtower::app::run();
 }

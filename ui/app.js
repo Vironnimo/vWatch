@@ -132,7 +132,7 @@
       if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
       if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
     }
-    lines.push('', `Der Befund stammt aus Lookout (Stand ${fmtDate(S.today)}). Prüfe ihn zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
+    lines.push('', `Der Befund stammt aus Watchtower (Stand ${fmtDate(S.today)}). Prüfe ihn zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
     return lines.join('\n');
   }
 
@@ -634,7 +634,7 @@
     if (hidden.length) parts.push(`Ausgeblendet: ${hidden.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-unhide="${esc(id)}">einblenden</button>`).join(' · ')}`);
     if (ratedCount) parts.push(`${ratedCount} ${ratedCount === 1 ? 'bewerteter Vorschlag' : 'bewertete Vorschläge'} ${showRated ? (ratedCount === 1 ? 'wird angezeigt' : 'werden angezeigt') : 'ausgeblendet'} <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'anzeigen'}</button>`);
     if (archived.length) parts.push(`Archiviert: ${archived.map(p => plink(p.id)).join(', ')}`);
-    parts.push(`Karten schreiben Agents mit <code class="mono">lookout</code> · Fakten misst die App selbst`);
+    parts.push(`Karten schreiben Agents mit <code class="mono">watchtower</code> · Fakten misst die App selbst`);
     $('#foot').innerHTML = parts.map(x => `<span>${x}</span>`).join('');
   }
 
@@ -662,8 +662,8 @@
   }
 
   function renderEmpty() {
-    return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll Lookout im Blick behalten?</h2>
-      <p class="muted">Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein einzelnes Projekt. Lookout zeigt dir die gefundenen Git-Repos zum Abhaken und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
+    return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll Watchtower im Blick behalten?</h2>
+      <p class="muted">Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein einzelnes Projekt. Watchtower zeigt dir die gefundenen Git-Repos zum Abhaken und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
       ${discBusyOrListing('main') ? '' : '<div class="actions"><button class="btn primary" type="button" data-pick data-target="main">Ordner wählen …</button></div>'}
       ${discHtml('main')}</div>`;
   }
@@ -688,11 +688,11 @@
         ${discBusyOrListing('panel') ? '' : '<div class="actions"><button class="btn" type="button" data-pick data-target="panel">Projekte hinzufügen …</button></div>'}
         ${discHtml('panel')}</section>
       <section class="mod"><div class="mod-head"><div><h2>Start</h2></div></div>
-        ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'Lookout geht auf, sobald du dich bei Windows anmeldest.')}</section>
-      <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „lookout“.</div></div></div>
-        ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den Lookout-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
-        <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. Lookout hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
-        <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Danach in vBot einen täglichen Schedule anlegen, etwa „Führe den täglichen Lookout-Lauf durch.“</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
+        ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'Watchtower geht auf, sobald du dich bei Windows anmeldest.')}</section>
+      <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „watchtower“.</div></div></div>
+        ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den Watchtower-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
+        <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. Watchtower hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
+        <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Danach in vBot einen täglichen Schedule anlegen, etwa „Führe den täglichen Watchtower-Lauf durch.“</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
       <section class="mod"><div class="mod-head"><div><h2>Über</h2></div></div>
         <dl class="kv"><dt>Version</dt><dd class="mono">${esc(st.version || '')}</dd><dt>Programm</dt><dd class="mono">${esc(st.exe || '')}</dd><dt>Daten</dt><dd class="mono">${esc(st.data_dir || '')}</dd></dl></section>
     </aside>`;
@@ -747,7 +747,7 @@
   }
   async function load(visit) {
     try { S = await call('state', { visit }); render(); }
-    catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Lookout konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
+    catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
     if (!shown) { shown = true; call('ready').catch(() => {}); }
   }
   let refreshing = false;

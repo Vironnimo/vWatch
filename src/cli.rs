@@ -11,13 +11,13 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 
 use crate::cards::{self, Kind};
-use crate::service::{Lookout, LookoutError, Result, DEFAULT_MAX_AGE_DAYS};
+use crate::service::{Result, Watchtower, WatchtowerError, DEFAULT_MAX_AGE_DAYS};
 use crate::system;
 
 #[derive(Parser)]
 #[command(
-    name = "lookout",
-    bin_name = "lookout",
+    name = "watchtower",
+    bin_name = "watchtower",
     version,
     about = "Morning overview of all your agent-built projects. Every command prints JSON."
 )]
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Where Lookout keeps its data and how many projects it watches
+    /// Where Watchtower keeps its data and how many projects it watches
     Status,
     /// Register and manage the watched projects
     Projects {
@@ -206,23 +206,25 @@ fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
         (None, Some("-")) => {
             let mut buf = Vec::new();
             stdin.read_to_end(&mut buf).map_err(|e| {
-                LookoutError::new("file_unreadable", format!("Cannot read stdin: {e}."))
+                WatchtowerError::new("file_unreadable", format!("Cannot read stdin: {e}."))
             })?;
             (decode(&buf), "stdin".to_owned())
         }
         (None, Some(file)) => {
             let bytes = std::fs::read(file).map_err(|e| {
-                LookoutError::new("file_unreadable", format!("Cannot read {file}: {e}."))
+                WatchtowerError::new("file_unreadable", format!("Cannot read {file}: {e}."))
             })?;
             (decode(&bytes), file.to_owned())
         }
         (None, None) => {
-            return Err(LookoutError::new("missing_document", "No document given.")
-                .hint("Pass --file <path>, --file - for stdin, or --json '<object>'."))
+            return Err(
+                WatchtowerError::new("missing_document", "No document given.")
+                    .hint("Pass --file <path>, --file - for stdin, or --json '<object>'."),
+            )
         }
     };
     serde_json::from_str(&text).map_err(|e| {
-        LookoutError::new("invalid_json", format!("{origin} is not valid JSON: {e}."))
+        WatchtowerError::new("invalid_json", format!("{origin} is not valid JSON: {e}."))
             .hint("Write the JSON to a file with a file-writing tool rather than a shell heredoc, which can change backslashes, and use forward slashes in paths.")
     })
 }
@@ -236,7 +238,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         return Ok(json!({"schema": cards::json_schema(kind)}));
     }
     let db = system::db_path(data_dir);
-    let svc = Lookout::open(&db)?;
+    let svc = Watchtower::open(&db)?;
     Ok(match cmd {
         Cmd::Schema { .. } => unreachable!("handled above"),
         Cmd::Status => {
@@ -252,7 +254,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 "skill_dir": skill.map(|d| d.to_string_lossy().into_owned()),
                 "projects": list.len(),
                 "with_card": list.iter().filter(|p| p["has_card"] == json!(true)).count(),
-                "hint": if list.is_empty() { json!("No projects yet. The owner adds them in the Lookout app, or run `lookout projects add <path>` when the owner asks.") } else { Value::Null },
+                "hint": if list.is_empty() { json!("No projects yet. The owner adds them in the Watchtower app, or run `watchtower projects add <path>` when the owner asks.") } else { Value::Null },
             })
         }
         Cmd::Projects { action } => match action {

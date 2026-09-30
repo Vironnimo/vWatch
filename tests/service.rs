@@ -41,7 +41,7 @@ fn morning_run_cycle() {
         .ends_with("second"));
 
     svc.put_card("demo", card(), false, false).unwrap();
-    // a card written before Lookout added a field is due once to fill it
+    // a card written before Watchtower added a field is due once to fill it
     let mut older = svc.card("demo").unwrap()["card"].clone();
     older.as_object_mut().unwrap().remove("handbook");
     older["suggestions"][0]
@@ -208,7 +208,7 @@ fn invalid_cards_are_refused_with_field_paths() {
         .add_card(
             "demo",
             &svc.now(),
-            &lookout::store::CardBasis {
+            &watchtower::store::CardBasis {
                 fingerprint: &stored.fingerprint,
                 head: None,
                 ci: None,
@@ -474,19 +474,19 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
     let ci = Arc::new(Mutex::new("green"));
     let seen = ci.clone();
     let collect = move |path: &str, today, _ci| {
-        let mut f = lookout::facts::collect(path, today, false);
+        let mut f = watchtower::facts::collect(path, today, false);
         f["ci"] = json!({"state": *seen.lock().unwrap()});
         f
     };
     let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
         .unwrap()
         .to_utc();
-    let store = lookout::store::Store::open(&tmp.path().join("lookout.db")).unwrap();
-    let svc = lookout::Lookout::with_parts(store, Box::new(move || now), Box::new(collect));
+    let store = watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap();
+    let svc = watchtower::Watchtower::with_parts(store, Box::new(move || now), Box::new(collect));
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
-    let reasons = |svc: &lookout::Lookout| {
+    let reasons = |svc: &watchtower::Watchtower| {
         svc.due(14, true).unwrap()["projects"]
             .as_array()
             .unwrap()
@@ -617,9 +617,9 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
         .iter()
         .any(|f| f["id"] == fid && f["item"]["kind"] == "focus" && f["project"] == "demo"));
 
-    // cards written before questions had ids get them when Lookout opens
+    // cards written before questions had ids get them when Watchtower opens
     let stored = svc.store().latest_card("other").unwrap().unwrap();
-    let basis = lookout::store::CardBasis {
+    let basis = watchtower::store::CardBasis {
         fingerprint: &stored.fingerprint,
         head: None,
         ci: None,
@@ -633,7 +633,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
             &card_with(json!({"waiting_on_you": [{"title": "Alt?"}]})),
         )
         .unwrap();
-    let reopened = lookout::Lookout::open(&tmp.path().join("lookout.db")).unwrap();
+    let reopened = watchtower::Watchtower::open(&tmp.path().join("watchtower.db")).unwrap();
     assert!(
         reopened.card("other").unwrap()["card"]["waiting_on_you"][0]["id"]
             .as_str()

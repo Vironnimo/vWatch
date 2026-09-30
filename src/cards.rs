@@ -1,7 +1,7 @@
 //! The two documents agents write: a project card and the portfolio brief.
 //!
 //! One schema description drives validation and the JSON schema that
-//! `lookout schema` prints. Validation is lenient about extras: unknown fields
+//! `watchtower schema` prints. Validation is lenient about extras: unknown fields
 //! are dropped and reported as warnings, while missing or malformed fields fail
 //! with their path. Items the owner reacts to (suggestions and questions on a
 //! card; focus items, patterns, synergies, app ideas and verdicts in the brief)

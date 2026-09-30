@@ -559,7 +559,7 @@ fn dir_size(dir: &Path) -> u64 {
 }
 
 /// Space in folders a build or package manager recreates, at the top of the repository and one level
-/// below. Walking them is slow, so Lookout measures this once a day.
+/// below. Walking them is slow, so Watchtower measures this once a day.
 pub fn space(path: &str, today: NaiveDate) -> Value {
     let repo = Path::new(path);
     let mut found: Vec<(String, u64)> = Vec::new();

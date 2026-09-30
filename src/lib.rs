@@ -1,4 +1,4 @@
-//! Lookout: a morning overview of all your agent-built software projects.
+//! Watchtower: a morning overview of all your agent-built software projects.
 //!
 //! Facts are measured from git (`facts`), agents write interpretation (`cards`)
 //! through the CLI (`cli`), and the window (`app`) shows both. `service` owns all
@@ -12,4 +12,4 @@ pub mod service;
 pub mod store;
 pub mod system;
 
-pub use service::{Lookout, LookoutError};
+pub use service::{Watchtower, WatchtowerError};

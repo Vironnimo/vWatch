@@ -1,4 +1,4 @@
-/* Lookout window. Three styles: the "handover" reads top to bottom (focus, projects, decisions and news side by side, ideas), the "control room" is a card grid with a side column, the "handbook" lists every project for reference; a shared right-hand drawer holds each project's full record. */
+/* Watchtower window. Three styles: the "handover" reads top to bottom (focus, projects, decisions and news side by side, ideas), the "control room" is a card grid with a side column, the "handbook" lists every project for reference; a shared right-hand drawer holds each project's full record. */
 :root {
   --bg: #f4f2ee;
   --surface: #ffffff;

@@ -4,9 +4,9 @@ use serde_json::{json, Value};
 
 fn run(home: &std::path::Path, args: &[&str]) -> (i32, Value) {
     let mut out = Vec::new();
-    let mut argv = vec!["lookout"];
+    let mut argv = vec!["watchtower"];
     argv.extend_from_slice(args);
-    let code = lookout::cli::run(argv, home, &mut std::io::empty(), &mut out);
+    let code = watchtower::cli::run(argv, home, &mut std::io::empty(), &mut out);
     (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
 }
 

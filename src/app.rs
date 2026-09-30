@@ -1,4 +1,4 @@
-//! The Lookout window: a Tauri shell around `ui/` that reaches the service through commands.
+//! The Watchtower window: a Tauri shell around `ui/` that reaches the service through commands.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,12 +7,12 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::service::{Lookout, LookoutError};
+use crate::service::{Watchtower, WatchtowerError};
 use crate::store::ChangeWatch;
 use crate::system;
 
 struct AppState {
-    service: Arc<Lookout>,
+    service: Arc<Watchtower>,
     watch: ChangeWatch,
 }
 
@@ -25,7 +25,7 @@ fn internal(e: impl std::fmt::Display) -> Value {
 /// Run service work off the UI thread.
 async fn work<F>(state: &State<'_, AppState>, f: F) -> Reply
 where
-    F: FnOnce(&Lookout) -> Result<Value, LookoutError> + Send + 'static,
+    F: FnOnce(&Watchtower) -> Result<Value, WatchtowerError> + Send + 'static,
 {
     let svc = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || f(&svc))
@@ -182,8 +182,8 @@ fn show_main(app: &AppHandle) {
 pub fn run() {
     let data = system::data_dir();
     let db = system::db_path(&data);
-    let service = Lookout::open(&db).expect("Lookout cannot open its database");
-    let watch = ChangeWatch::open(&db).expect("Lookout cannot open its database");
+    let service = Watchtower::open(&db).expect("Watchtower cannot open its database");
+    let watch = ChangeWatch::open(&db).expect("Watchtower cannot open its database");
     let _ = system::export_skill();
 
     tauri::Builder::default()
@@ -217,7 +217,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Lookout")
+                .title("Watchtower")
                 .inner_size(1280.0, 880.0)
                 .min_inner_size(720.0, 520.0)
                 .center()
@@ -237,5 +237,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("Lookout could not start its window");
+        .expect("Watchtower could not start its window");
 }
