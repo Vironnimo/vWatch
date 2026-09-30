@@ -197,6 +197,16 @@ fn title_of(item: &Value) -> String {
 }
 
 /// The ids Watchtower keeps for a saved document's items, for the agent's reply.
+/// The items of a dated list (`date`, `title`) from `from` on.
+fn dated_since(list: &Value, from: &str) -> Vec<Value> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| i["date"].as_str().is_some_and(|d| d >= from))
+        .map(|i| pick(i, &["date", "title"]))
+        .collect()
+}
+
 fn idea_json(i: &Idea) -> Value {
     json!({"id": i.id, "text": i.text, "added_at": i.added_at})
 }
@@ -1022,6 +1032,8 @@ impl Watchtower {
     pub fn portfolio_context(&self) -> Result<Value> {
         let mut rows = Vec::new();
         let previous = self.store.latest_portfolio()?;
+        // changes and milestones from the start of the review week on, the material for `week_review`
+        let week_from = self.review_week().1.to_string();
         for p in self.store.projects()? {
             if p.status == "archived" {
                 continue;
@@ -1048,6 +1060,8 @@ impl Watchtower {
                     "decisions": c["decisions"],
                     "suggestions": picked("suggestions", &["id", "type", "title", "why"]),
                     "cross_project_hints": c["cross_project_hints"],
+                    "recent_changes": dated_since(&c["recent_changes"], &week_from),
+                    "milestones": dated_since(&c["milestones"], &week_from),
                 })
             });
             rows.push(json!({
