@@ -68,6 +68,13 @@ fn morning_run_cycle() {
         "{}",
         r["warnings"]
     );
+    let prose = json!({"handbook": {"run": [{"what": "Tests", "how": "Im Ordner: `cargo test`"}]}});
+    let r = svc.put_card("demo", prose, true, true).unwrap();
+    assert!(
+        r["warnings"].to_string().contains("backticks"),
+        "{}",
+        r["warnings"]
+    );
     clock.advance(Duration::days(15));
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "stale");
 }

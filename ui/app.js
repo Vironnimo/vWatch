@@ -461,7 +461,8 @@
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
     const inst = h.installed ? `<div class="hb-inst">Installiert: <b>${esc(h.installed.version)}</b> <span class="mono faint">${esc(h.installed.path)}</span></div>` : '';
     return {
-      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : ''),
+      // label on top, the command below at full width, one line per command; copying takes it as written
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${esc(r.how.split('; ').join('\n'))}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono'),
       read: kv(h.read_first, 'path', 'why', 'mono'),

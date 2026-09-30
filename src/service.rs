@@ -992,6 +992,20 @@ impl Watchtower {
             .filter(|f| lacking.contains(f))
             .collect();
         let mut warnings = warnings;
+        // commands in backticks inside a sentence: the owner copies `how` as it stands
+        let prose: Vec<&str> = clean["handbook"]["run"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| r["how"].as_str().is_some_and(|h| h.contains('`')))
+            .filter_map(|r| r["what"].as_str())
+            .collect();
+        if !prose.is_empty() {
+            warnings.push(format!(
+                "handbook.run: `how` of \"{}\" contains backticks, as if commands were quoted inside a sentence. `how` must be exactly what the owner types or opens, since Watchtower copies it as it stands; send the whole handbook with only the commands in `how`.",
+                prose.join("\", \"")
+            ));
+        }
         if !unfilled.is_empty() {
             warnings.push(format!(
                 "The previous card lacked {} and this card does not fill them, so they are saved empty. Send them with --merge (a list or the handbook in full).",

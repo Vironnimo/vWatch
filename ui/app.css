@@ -310,15 +310,19 @@ details > summary::-webkit-details-marker { display: none; }
 /* handbook: how to start a project, how it is built, where things are */
 .hb-sec { margin-top: 14px; }
 .hb-sec h3 { font-family: var(--font-body); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; margin-bottom: 6px; }
-.hb-sec .kv { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
+.hb-sec .kv { grid-template-columns: minmax(0, 16em) minmax(0, 1fr); }
+.sheet .hb-sec .kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.sheet .hb-sec .kv dd { margin-bottom: 8px; }
 .hb-sec .kv dt.mono { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
 .hb-sec .kv dt.term { color: var(--text); font-weight: 600; }
-.hb-runs { display: grid; gap: 6px; }
-.hb-run { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: 10px; align-items: baseline; font-size: 13.5px; }
-.hb-run .w { color: var(--text-2); }
-.hb-in { display: block; font-size: 11.5px; }
+.hb-runs { display: grid; gap: 12px; }
+.hb-run { display: grid; gap: 4px; min-width: 0; font-size: 13.5px; }
+.hb-run .w { color: var(--text-2); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.hb-in { font-size: 11.5px; }
+.hb-run .cmd { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.hb-run .cmd .linkish { flex: none; font-size: 12.5px; padding-top: 4px; }
 .timeline.chron li { grid-template-columns: 124px 14px 1fr; }
-.hb-run code { font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; overflow-wrap: anywhere; }
+.hb-run code { flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.6; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hb-arch { font-size: 14px; color: var(--text-2); }
 .hb-inst { font-size: 13.5px; margin-bottom: 6px; overflow-wrap: anywhere; }
 .hb-inst .mono { font-size: 12px; }
@@ -341,8 +345,6 @@ details.hb > summary:hover h2 { color: var(--accent); }
 .sheet .path .linkish { font-size: inherit; color: var(--text-3); text-align: left; }
 @media (max-width: 520px) {
   .sheets { grid-template-columns: minmax(0, 1fr); }
-  .hb-run { grid-template-columns: minmax(0, 1fr) auto; }
-  .hb-run .w { grid-column: 1 / -1; }
 }
 
 /* handing a task to a coding agent */
