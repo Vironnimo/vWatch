@@ -145,6 +145,8 @@ details > summary::-webkit-details-marker { display: none; }
 .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; padding: 8px 0; min-width: 0; }
 .row .t { font-weight: 500; }
 .row .d { grid-column: 1 / -1; font-size: 13.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.row .badges:empty { display: none; }
+.row.resting .t .plink { font-weight: 600; }
 .safety { width: 100%; border-collapse: collapse; font-size: 14px; }
 .safety th { text-align: left; font-weight: 500; font-size: 12px; color: var(--text-3); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
 .safety td { padding: 9px 10px 9px 0; vertical-align: top; }

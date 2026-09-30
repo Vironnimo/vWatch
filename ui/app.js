@@ -182,6 +182,27 @@
   }
 
   // what the facts say about a project, as a few short badges
+  const bytes = n => n >= 1e9 ? `${(n / 1e9).toLocaleString('de-DE', { maximumFractionDigits: 1 })} GB` : `${Math.round(n / 1e6).toLocaleString('de-DE')} MB`;
+  const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
+  // two lines of work that change the same files will conflict when merged
+  const lineName = l => l.kind === 'main' ? 'ungesicherte Arbeit im Hauptordner' : l.kind === 'worktree' ? `Worktree ${l.name}` : `Branch ${l.name}`;
+  const collisions = p => (p.facts && p.facts.collisions) || [];
+  const collisionText = c => `${lineName(c.a)} und ${lineName(c.b)} ändern ${plural(c.count, 'gleiche Datei', 'gleiche Dateien')}: ${c.files.join(', ')}${c.count > c.files.length ? ' …' : ''}`;
+  function collisionTag(p) {
+    const list = collisions(p);
+    return list.length ? `<span class="tag warn" title="${esc(list.map(collisionText).join('\n'))}">${list.length === 1 ? 'Überschneidung' : `${list.length} Überschneidungen`}</span>` : '';
+  }
+  const bareVersion = v => String(v || '').trim().replace(/^v/i, '');
+  // the newest tag, the work since, and whether the installed copy is older
+  function releaseText(p) {
+    const r = p.facts && p.facts.release;
+    if (!r) return null;
+    const installed = p.card && p.card.handbook && p.card.handbook.installed;
+    const inst = installed && installed.version && bareVersion(installed.version) !== bareVersion(r.tag) ? ` · installiert ist ${installed.version}` : '';
+    return `${r.tag}${r.date ? ` vom ${fmtDate(r.date)}` : ''} · ${r.commits_since ? `${plural(r.commits_since, 'Commit', 'Commits')} seither` : 'nichts seither'}${inst}`;
+  }
+  const unreleasedTag = p => { const r = p.facts && p.facts.release; return r && r.commits_since >= 10 ? `<span class="tag" title="${esc(releaseText(p))}">${num(r.commits_since)} seit ${esc(r.tag)}</span>` : ''; };
+
   function signals(p) {
     const f = p.facts || {};
     if (!f.is_git) return `<span class="tag">${f.error === 'path_missing' ? 'Ordner fehlt' : 'kein Git'}</span>`;
@@ -192,6 +213,7 @@
     if (s.ahead) out.push(`<span class="tag warn">${s.ahead} ungepusht</span>`);
     if (s.ci === 'red') out.push('<span class="tag bad">CI rot</span>');
     if (!out.length) out.push('<span class="tag good">gesichert</span>');
+    out.push(collisionTag(p));
     return out.join('');
   }
   const risk = p => { const s = safety(p); return (p.facts && p.facts.is_git && !s.remote ? 2 : 0) + (s.level === 'bad' ? 2 : s.level === 'warn' ? 1 : 0) + (s.ci === 'red' ? 1 : 0) + (s.ahead ? 1 : 0); };
@@ -267,11 +289,36 @@
       return `<tr><td>${plink(p.id)}</td>
         <td>${s.remote ? `<span class="tag good">${esc(p.facts.remotes.map(r => r.name).join(', '))}</span>` : '<span class="tag bad">kein Remote</span>'}</td>
         <td>${unsaved || '<span class="faint">sauber</span>'}</td>
-        <td>${s.leftovers ? `<span class="faint">${esc(s.leftovers)}</span>` : ''}</td>
+        <td>${s.leftovers ? `<span class="faint">${esc(s.leftovers)}</span>` : ''} ${collisionTag(p)}</td>
         <td>${ci[1] ? `<span class="tag ${ci[1]}">${ci[0]}</span>` : `<span class="faint">${ci[0]}</span>`}</td></tr>`;
     }).join('');
     if (!rows) return '';
     return mod('safety', 'Sicherheitslage', 'Was verloren ginge, wenn heute die Platte stirbt oder ein Agent falsch auscheckt', `<div class="tablewrap"><table class="safety"><thead><tr><th>Projekt</th><th>Backup</th><th>Ungesichert</th><th>Liegengeblieben</th><th>CI</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+  }
+
+  // what the agents did overnight, with the signs that something went wrong
+  function blockNight() {
+    const rows = byLastWork(visible()).filter(p => p.facts && p.facts.night && (p.facts.night.commits || p.facts.night.uncommitted_touched)).map(p => {
+      const n = p.facts.night;
+      const warn = [n.reverts ? `<span class="tag warn">${plural(n.reverts, 'Revert', 'Reverts')}</span>` : '', (p.facts.ci || {}).state === 'red' ? '<span class="tag bad">CI rot</span>' : '', collisionTag(p)].join('');
+      const what = [n.commits ? `${plural(n.commits, 'Commit', 'Commits')}, +${num(n.lines_added)}/−${num(n.lines_removed)} Zeilen` : '', n.uncommitted_touched ? `${plural(n.uncommitted_touched, 'Datei', 'Dateien')} ohne Commit bearbeitet` : ''].filter(Boolean).join(' · ');
+      return `<div class="row"><div class="t">${plink(p.id)}</div><div class="badges">${warn}</div><div class="d">${what}</div></div>`;
+    }).join('');
+    return mod('night', 'Seit gestern Abend', rows ? 'Was seit gestern 18 Uhr passiert ist, über alle Branches und Worktrees' : null, rows ? `<div class="list">${rows}</div>` : '<p class="faint">Seit gestern 18 Uhr war Ruhe.</p>');
+  }
+
+  // build output and installed packages that can be recreated; freeing them is safe, most of all in resting projects
+  function blockSpace() {
+    const list = visible().filter(p => p.facts && p.facts.space && p.facts.space.total_bytes >= 1e8).sort((a, b) => b.facts.space.total_bytes - a.facts.space.total_bytes);
+    const total = list.reduce((a, p) => a + p.facts.space.total_bytes, 0);
+    if (total < 1e9) return '';
+    const rows = list.map(p => {
+      const sp = p.facts.space, phase = p.card && p.card.phase;
+      const resting = phase === 'dormant' || phase === 'done' || p.status === 'parked' || p.status === 'done';
+      const dirs = sp.dirs.slice(0, 4).map(d => `<button class="linkish mono" type="button" data-external="${esc(p.path + '\\' + d.path.replace(/\//g, '\\'))}" title="Im Explorer öffnen">${esc(d.path)}</button> ${bytes(d.bytes)}`).join(' · ');
+      return `<div class="row${resting ? ' resting' : ''}"><div class="t">${plink(p.id)}${resting ? ' <span class="tag good">ruht, gefahrlos frei</span>' : ''}</div><div class="mono">${bytes(sp.total_bytes)}</div><div class="d">${dirs}</div></div>`;
+    }).join('');
+    return mod('space', 'Platz', `${bytes(total)} in Build- und Paketordnern, die sich neu erzeugen lassen. Einmal am Tag gemessen`, `<div class="list">${rows}</div>`);
   }
 
   function blockPulse() {
@@ -326,7 +373,7 @@
     const n = visible().length;
     const greeting = (S.portfolio && S.portfolio.greeting) || `Guten Morgen. ${n} ${n === 1 ? 'Projekt' : 'Projekte'} im Blick.`;
     const fresh = isNew(S.portfolio_updated_at) ? '<span class="pill new">neu</span>' : '';
-    const aside = blockRecent() + blockPulse();
+    const aside = blockNight() + blockRecent() + blockPulse();
     return `<div class="handover">
       <div class="greet"><div class="kicker">Übergabe · ${n} ${n === 1 ? 'Projekt' : 'Projekte'} ${fresh}</div><h2>${esc(greeting)}</h2></div>
       ${missingCardsNote()}
@@ -344,6 +391,8 @@
       s.unsaved ? `<span class="tag ${s.level}">${num(p.facts.dirty.files)} Dateien offen</span>` : '',
       s.ahead ? `<span class="tag warn">${s.ahead} ungepusht</span>` : '',
       s.ci === 'red' ? '<span class="tag bad">CI rot</span>' : '',
+      collisionTag(p),
+      unreleasedTag(p),
       p.status !== 'active' ? `<span class="tag">${esc(STATUS[p.status])}</span>` : '',
       p.card_outdated ? '<span class="tag">seit Karte geändert</span>' : '',
     ].join('');
@@ -374,8 +423,8 @@
       <div class="kpi"><div class="v">${waiting}</div><div class="l">Entscheidungen offen</div></div></div>`;
     const grid = mod('cards', 'Projekte', 'Sortiert nach letzter Arbeit. Klick öffnet den Steckbrief', `<div class="grid">${byLastWork(list).map(card).join('')}</div>`);
     return `${mod('kpis', 'Lage auf einen Blick', null, kpis)}
-      <div class="board"><div>${grid}${blockSafety()}${blockRecent()}${blockPulse()}</div>
-      <aside class="side">${blockFocus()}${blockWaiting(1)}${blockAcross()}</aside></div>`;
+      <div class="board"><div>${grid}${blockSafety()}${blockRecent()}${blockPulse()}${blockSpace()}</div>
+      <aside class="side">${blockFocus()}${blockNight()}${blockWaiting(1)}${blockAcross()}</aside></div>`;
   }
 
   // ---------- handbook ----------
@@ -447,6 +496,10 @@
       <dt>Backup</dt><dd>${f.has_remote ? esc(f.remotes.map(r => `${r.name}: ${r.url}`).join(', ')) : '<span class="tag bad">kein Remote</span>'}</dd>
       <dt>Ungesichert</dt><dd>${s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : 'sauber'}</dd>
       <dt>Liegengeblieben</dt><dd>${esc(s.leftovers || 'nichts')}</dd>
+      ${releaseText(p) ? `<dt>Release</dt><dd>${esc(releaseText(p))}</dd>` : ''}
+      ${collisions(p).length ? `<dt>Überschneidungen</dt><dd>${collisions(p).map(c => `<div>${esc(collisionText(c))}</div>`).join('')}</dd>` : ''}
+      ${f.night && (f.night.commits || f.night.uncommitted_touched) ? `<dt>Seit gestern Abend</dt><dd>${[f.night.commits ? `${plural(f.night.commits, 'Commit', 'Commits')}, +${num(f.night.lines_added)}/−${num(f.night.lines_removed)}` : '', f.night.reverts ? plural(f.night.reverts, 'Revert', 'Reverts') : '', f.night.uncommitted_touched ? `${plural(f.night.uncommitted_touched, 'Datei', 'Dateien')} ohne Commit bearbeitet` : ''].filter(Boolean).join(' · ')}</dd>` : ''}
+      ${f.space && f.space.total_bytes ? `<dt>Platz</dt><dd>${bytes(f.space.total_bytes)} neu erzeugbar: ${f.space.dirs.slice(0, 4).map(d => `${esc(d.path)} ${bytes(d.bytes)}`).join(' · ')}</dd>` : ''}
       <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
     let body = `<button class="close" data-close type="button">Schließen</button>
