@@ -18,6 +18,8 @@ Get-Process -Name Lookout -ErrorAction SilentlyContinue |
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 Copy-Item -Force (Join-Path $repo 'target\release\Lookout.exe') $exe
+# `status` writes the embedded Skill next to the exe, so agents get the new one right away.
+& $exe status | Out-Null
 
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Lookout.lnk'
 $shell = New-Object -ComObject WScript.Shell

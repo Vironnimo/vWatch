@@ -30,8 +30,8 @@ fn facts_describe_history_backup_and_unsaved_work() {
     let d = &f["dirty"];
     assert_eq!((d["files"].as_u64(), d["untracked"].as_u64(), d["modified"].as_u64()), (Some(2), Some(1), Some(1)));
     assert_eq!((d["lines_added"].as_u64(), d["lines_removed"].as_u64()), (Some(2 + 3), Some(1)));
-    // unsaved work is at risk since the last commit at the earliest
-    assert!(d["oldest_change"].as_str().unwrap() >= "2026-09-29", "{}", d["oldest_change"]);
+    // only files edited after the last commit (2026-09-29 10:00) date the unsaved work
+    assert!(d["oldest_change"].as_str().unwrap() > "2026-09-29T12", "{}", d["oldest_change"]);
     // uncommitted edits count as work
     assert_eq!(f["last_work"].as_str().unwrap(), chrono::Local::now().date_naive().to_string());
 }

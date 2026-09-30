@@ -200,19 +200,20 @@ fn dirty(repo: &Path, has_head: bool) -> Dirty {
         }
     }
 
-    // Work is at risk only since the last commit; files copied in keep far older mtimes.
-    let floor = if has_head {
+    // Files copied in keep far older mtimes, so only edits after the last commit date the work;
+    // when every file is older, the work is at risk since that commit.
+    let last_commit = if has_head {
         git(repo, &["log", "-1", "--format=%ct"]).and_then(|s| s.trim().parse::<u64>().ok()).map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
     } else {
         None
     };
-    let mtimes: Vec<SystemTime> = paths
-        .iter()
-        .filter_map(|p| std::fs::metadata(repo.join(p)).and_then(|m| m.modified()).ok())
-        .map(|t| floor.map_or(t, |f| t.max(f)))
-        .collect();
-    let oldest = mtimes.iter().min().copied();
-    let newest = mtimes.iter().max().copied();
+    let mtimes: Vec<SystemTime> = paths.iter().filter_map(|p| std::fs::metadata(repo.join(p)).and_then(|m| m.modified()).ok()).collect();
+    let after_commit = mtimes.iter().copied().filter(|t| last_commit.is_none_or(|c| *t > c));
+    let (oldest, newest) = match (after_commit.clone().min(), after_commit.max()) {
+        (Some(oldest), Some(newest)) => (Some(oldest), Some(newest)),
+        _ if mtimes.is_empty() => (None, None),
+        _ => (last_commit, last_commit),
+    };
     Dirty {
         value: json!({
             "files": paths.len(), "modified": modified, "untracked": untracked, "deleted": deleted,
@@ -227,9 +228,11 @@ fn worktrees(repo: &Path) -> Value {
     let mut items: Vec<Value> = Vec::new();
     for line in git(repo, &["worktree", "list", "--porcelain"]).unwrap_or_default().lines() {
         if let Some(path) = line.strip_prefix("worktree ") {
-            items.push(json!({"path": path, "branch": null, "prunable": false}));
+            items.push(json!({"path": path, "branch": null, "head": null, "prunable": false}));
         } else if let Some(current) = items.last_mut() {
-            if let Some(branch) = line.strip_prefix("branch ") {
+            if let Some(head) = line.strip_prefix("HEAD ") {
+                current["head"] = json!(head);
+            } else if let Some(branch) = line.strip_prefix("branch ") {
                 current["branch"] = json!(branch.strip_prefix("refs/heads/").unwrap_or(branch));
             } else if line.starts_with("prunable") {
                 current["prunable"] = json!(true);
@@ -242,14 +245,16 @@ fn worktrees(repo: &Path) -> Value {
 }
 
 fn branches(repo: &Path, current: Option<&str>) -> Value {
-    let fmt = "--format=%(refname:short)\t%(committerdate:short)";
+    let fmt = "--format=%(refname:short)\t%(committerdate:short)\t%(objectname)";
     let merged = git(repo, &["branch", "--merged", "HEAD", fmt]).unwrap_or_default();
     let merged_count = merged.lines().filter_map(|l| l.split('\t').next()).filter(|n| !n.is_empty() && Some(*n) != current).count();
     let mut unmerged = Vec::new();
     for line in git(repo, &["branch", "--no-merged", "HEAD", fmt]).unwrap_or_default().lines() {
-        let (name, last) = line.split_once('\t').unwrap_or((line, ""));
+        let mut parts = line.split('\t');
+        let (name, last, head) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        let text = |s: &str| if s.is_empty() { Value::Null } else { json!(s) };
         if !name.is_empty() {
-            unmerged.push(json!({"name": name, "last": if last.is_empty() { Value::Null } else { json!(last) }}));
+            unmerged.push(json!({"name": name, "last": text(last), "head": text(head)}));
         }
     }
     json!({"merged_count": merged_count, "unmerged": unmerged})
@@ -322,9 +327,13 @@ fn ci_state(runs: &[Value]) -> Value {
         return json!({"state": "none"});
     };
     let failing: Vec<&str> = latest.iter().filter(|(_, s)| *s == "red").map(|(r, _)| r["workflowName"].as_str().unwrap_or("")).collect();
+    let workflows: Vec<Value> = latest
+        .iter()
+        .map(|(r, s)| json!({"name": r["workflowName"], "state": s, "conclusion": r["conclusion"], "at": r["createdAt"], "url": r["url"]}))
+        .collect();
     json!({
         "state": state, "workflow": run["workflowName"], "title": run["displayTitle"],
-        "at": run["createdAt"], "url": run["url"], "failing": failing,
+        "at": run["createdAt"], "url": run["url"], "failing": failing, "workflows": workflows,
     })
 }
 
@@ -396,10 +405,20 @@ pub fn last_commit_date(path: &str) -> Option<String> {
     (!out.is_empty()).then(|| out.to_owned())
 }
 
-/// What must change before a project needs a fresh interpretation.
+/// What must change before a project needs a fresh interpretation. Commits in extra worktrees
+/// and unmerged branches count too; without either the key keeps its original form.
 pub fn fingerprint(facts: &Value) -> String {
     let d = &facts["dirty"];
-    let key = json!([facts["head"], d["files"], d["lines_added"], d["lines_removed"], facts["ahead"], facts["docs_mtime"], facts["ok"]]);
+    let mut key = json!([facts["head"], d["files"], d["lines_added"], d["lines_removed"], facts["ahead"], facts["docs_mtime"], facts["ok"]]);
+    let side_heads: Vec<&Value> = [&facts["worktrees"]["items"], &facts["branches"]["unmerged"]]
+        .into_iter()
+        .flat_map(|list| list.as_array().into_iter().flatten())
+        .map(|item| &item["head"])
+        .filter(|h| h.is_string())
+        .collect();
+    if !side_heads.is_empty() {
+        key.as_array_mut().expect("the key is a list").push(json!(side_heads));
+    }
     let digest = Sha1::digest(key.to_string().as_bytes());
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
@@ -429,6 +448,8 @@ mod tests {
         let ci = ci_state(&runs);
         assert_eq!((ci["state"].as_str(), ci["workflow"].as_str()), (Some("red"), Some("quality")));
         assert_eq!(ci["failing"], json!(["quality"]));
+        let states: Vec<(&str, &str)> = ci["workflows"].as_array().unwrap().iter().map(|w| (w["name"].as_str().unwrap(), w["state"].as_str().unwrap())).collect();
+        assert_eq!(states, [("docs", "green"), ("quality", "red")]);
         assert_eq!(ci_state(&runs[..2])["state"], "green");
         assert_eq!(ci_state(&[r("build", "in_progress", "", "push")])["state"], "running");
         assert_eq!(ci_state(&runs[..1])["state"], "none");

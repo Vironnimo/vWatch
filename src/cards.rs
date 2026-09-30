@@ -66,7 +66,7 @@ use Default::{Empty, Filled, Null, Required, Text};
 const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", TEXT, Text(""))];
 const MILESTONE: &[Field] = &[f("date", Ty::Date, Required), f("title", SHORT, Required)];
 const OPEN_END: &[Field] = &[
-    f("kind", Ty::Enum(&["worktree", "branch", "uncommitted", "flagged", "todo", "plan", "other"]), Text("other")),
+    f("kind", Ty::Enum(&["worktree", "branch", "uncommitted", "unpushed", "ci", "flagged", "todo", "plan", "other"]), Text("other")),
     f("title", words(10), Required),
     f("detail", TEXT, Text("")),
     f("source", TEXT, Text("")),

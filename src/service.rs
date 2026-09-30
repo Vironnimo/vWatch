@@ -505,7 +505,13 @@ impl Lookout {
             let reason = match &card {
                 None => Some("no_card"),
                 Some(c) if stored.as_ref().is_some_and(|s| s.fingerprint != c.fingerprint) => Some("changed"),
-                Some(c) if stored.as_ref().and_then(|s| settled_ci(&s.data)).is_some_and(|now| c.ci.as_deref().is_some_and(|then| then != now)) => {
+                // a card written while CI was unsettled is due once CI turns red
+                Some(c)
+                    if stored.as_ref().and_then(|s| settled_ci(&s.data)).is_some_and(|now| match c.ci.as_deref() {
+                        Some(then) => then != now,
+                        None => now == "red",
+                    }) =>
+                {
                     Some("ci_changed")
                 }
                 Some(c) if reactions.iter().any(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question" && f.at > c.created_at) => {
@@ -591,7 +597,8 @@ impl Lookout {
         Ok(if payload.is_object() { extend(previous.clone(), payload) } else { payload })
     }
 
-    pub fn put_card(&self, id: &str, payload: Value, merge: bool) -> Result<Value> {
+    /// Validates and saves a card; with `dry_run` only validates and reports what would be saved.
+    pub fn put_card(&self, id: &str, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
         self.project(id)?;
         let previous = self.store.latest_card(id)?;
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
@@ -599,6 +606,9 @@ impl Lookout {
             LookoutError::new("invalid_card", format!("The card was not saved: {}", problems.join("; ")))
                 .hint("Fix the listed fields and send the card again. `lookout schema card` prints the full schema.")
         })?;
+        if dry_run {
+            return Ok(json!({"saved": false, "dry_run": true, "project": id, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}));
+        }
         let stored = self.stored_facts(id)?;
         let version = self.store.add_card(id, &self.now(), &stored.fingerprint, stored.data["head"].as_str(), settled_ci(&stored.data), &clean)?;
         Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
@@ -659,7 +669,7 @@ impl Lookout {
         }))
     }
 
-    pub fn put_portfolio(&self, payload: Value, merge: bool) -> Result<Value> {
+    pub fn put_portfolio(&self, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
         let previous = self.store.latest_portfolio()?;
         let payload = Self::merged(previous.as_ref().map(|p| &p.data), payload, merge, "portfolio brief")?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload).map_err(|problems| {
@@ -683,6 +693,9 @@ impl Lookout {
             known.sort();
             return Err(LookoutError::new("unknown_project", format!("The brief names unknown project ids: {}.", unknown.join(", ")))
                 .hint(format!("Use the ids from `lookout portfolio context`: {}.", known.join(", "))));
+        }
+        if dry_run {
+            return Ok(json!({"saved": false, "dry_run": true, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}));
         }
         let version = self.store.add_portfolio(&self.now(), &clean)?;
         Ok(json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}))

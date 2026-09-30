@@ -145,6 +145,9 @@ struct DocArgs {
     /// Send only changed top-level fields; the rest is kept from the previous version
     #[arg(long)]
     merge: bool,
+    /// Check the document and show what would be saved, without saving it
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -208,6 +211,8 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
     Ok(match cmd {
         Cmd::Schema { .. } => unreachable!("handled above"),
         Cmd::Status => {
+            // A freshly installed exe hands out its own Skill before the window ever starts.
+            let skill = system::export_skill().ok();
             let projects = svc.list_projects()?;
             let list = projects.as_array().cloned().unwrap_or_default();
             json!({
@@ -215,6 +220,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 "exe": system::exe_path().to_string_lossy(),
                 "data_dir": data_dir.to_string_lossy(),
                 "database": db.to_string_lossy(),
+                "skill_dir": skill.map(|d| d.to_string_lossy().into_owned()),
                 "projects": list.len(),
                 "with_card": list.iter().filter(|p| p["has_card"] == json!(true)).count(),
                 "hint": if list.is_empty() { json!("No projects yet. The owner adds them in the Lookout app, or run `lookout projects add <path>` when the owner asks.") } else { Value::Null },
@@ -238,12 +244,12 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         Cmd::Due { max_age_days, no_refresh } => svc.due(max_age_days, !no_refresh)?,
         Cmd::Context { id } => svc.context(&id)?,
         Cmd::Card { action } => match action {
-            CardCmd::Put { id, doc } => svc.put_card(&id, read_document(&doc, stdin)?, doc.merge)?,
+            CardCmd::Put { id, doc } => svc.put_card(&id, read_document(&doc, stdin)?, doc.merge, doc.dry_run)?,
             CardCmd::Show { id } => svc.card(&id)?,
         },
         Cmd::Portfolio { action } => match action {
             PortfolioCmd::Context => svc.portfolio_context()?,
-            PortfolioCmd::Put { doc } => svc.put_portfolio(read_document(&doc, stdin)?, doc.merge)?,
+            PortfolioCmd::Put { doc } => svc.put_portfolio(read_document(&doc, stdin)?, doc.merge, doc.dry_run)?,
             PortfolioCmd::Show => svc.portfolio()?,
         },
         Cmd::Feedback { project } => json!({"feedback": svc.feedback(project.as_deref())?}),
