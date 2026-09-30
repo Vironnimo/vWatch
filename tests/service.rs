@@ -51,6 +51,23 @@ fn morning_run_cycle() {
     svc.store().rewrite_latest_card("demo", &older).unwrap();
     let entry = json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["suggestions[].done_when", "handbook"]});
     assert_eq!(svc.due(14, true).unwrap()["projects"][0], entry);
+    assert_eq!(
+        svc.context("demo").unwrap()["new_fields"],
+        entry["new_fields"]
+    );
+    // a merge that leaves them out is told so, and their defaults do not count as changes
+    let r = svc
+        .put_card("demo", json!({"headline": "Neu"}), true, true)
+        .unwrap();
+    assert_eq!(
+        (&r["unfilled_fields"], &r["changed_fields"]),
+        (&entry["new_fields"], &json!(["headline"]))
+    );
+    assert!(
+        r["warnings"][0].as_str().unwrap().contains("saved empty"),
+        "{}",
+        r["warnings"]
+    );
     clock.advance(Duration::days(15));
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "stale");
 }

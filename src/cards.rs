@@ -166,7 +166,7 @@ const REENTRY: &[Field] = &[
     f("done_when", DONE_WHEN, Text("")),
 ];
 const RUN: &[Field] = &[
-    f("what", words(6), Required),
+    f("what", words(8), Required),
     f("how", COMMAND, Required),
     f("folder", TEXT, Text("")),
 ];

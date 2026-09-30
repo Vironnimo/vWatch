@@ -215,7 +215,12 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
 }
 
 /// The top-level fields whose content differs from the previous version (all of them for a first version).
-fn changed_fields(previous: Option<&Value>, clean: &Value) -> Vec<String> {
+fn changed_fields(kind: Kind, previous: Option<&Value>, clean: &Value) -> Vec<String> {
+    // compare against the previous version with today's defaults filled in, so fields the schema
+    // gained since do not count as changes
+    let previous = previous
+        .map(|p| cards::validate(kind, p, &top_fields(p)).map_or_else(|_| p.clone(), |(c, _)| c));
+    let previous = previous.as_ref();
     let map = clean.as_object().into_iter().flatten();
     map.filter(|(k, v)| previous.is_none_or(|p| p.get(k.as_str()) != Some(v)))
         .map(|(k, _)| k.clone())
@@ -926,6 +931,7 @@ impl Watchtower {
             "today": self.today().to_string(),
             "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
             "facts": extend(json!({"collected_at": stored.collected_at}), stored.data),
+            "new_fields": card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)),
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": c.data})),
             "since_previous_card": since,
             "feedback": feedback,
@@ -964,11 +970,28 @@ impl Watchtower {
             WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
-        let changed = changed_fields(previous.as_ref().map(|c| &c.data), &clean);
+        let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
+        // fields the previous card lacked and this save did not send end up empty; say so
+        let lacking = previous
+            .as_ref()
+            .map(|c| Kind::Card.missing_fields(&c.data))
+            .unwrap_or_default();
+        let unfilled: Vec<String> = Kind::Card
+            .missing_fields(&payload)
+            .into_iter()
+            .filter(|f| lacking.contains(f))
+            .collect();
+        let mut warnings = warnings;
+        if !unfilled.is_empty() {
+            warnings.push(format!(
+                "The previous card lacked {} and this card does not fill them, so they are saved empty. Send them with --merge (a list or the handbook in full).",
+                unfilled.join(", ")
+            ));
+        }
         if dry_run {
             let items = dry_items(Kind::Card, &payload, &clean);
             return Ok(
-                json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "warnings": warnings, "items": items}),
+                json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": items}),
             );
         }
         let stored = self.stored_facts(id)?;
@@ -981,7 +1004,7 @@ impl Watchtower {
         };
         let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
         Ok(
-            json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
+            json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
         )
     }
 
