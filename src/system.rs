@@ -12,6 +12,7 @@ const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/lookout/SKILL.md")),
     ("references/cli.md", include_str!("../skill/lookout/references/cli.md")),
     ("references/card-guide.md", include_str!("../skill/lookout/references/card-guide.md")),
+    ("references/portfolio-guide.md", include_str!("../skill/lookout/references/portfolio-guide.md")),
 ];
 
 pub fn exe_path() -> PathBuf {

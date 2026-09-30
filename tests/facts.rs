@@ -34,6 +34,13 @@ fn facts_describe_history_backup_and_unsaved_work() {
     assert!(d["oldest_change"].as_str().unwrap() > "2026-09-29T12", "{}", d["oldest_change"]);
     // uncommitted edits count as work
     assert_eq!(f["last_work"].as_str().unwrap(), chrono::Local::now().date_naive().to_string());
+
+    // with an upstream that has only the first commit, the two later ones are unpushed
+    common::git(&repo, &["remote", "add", "origin", "https://example.invalid/demo.git"]);
+    common::git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD~2"]);
+    common::git(&repo, &["branch", "-u", "origin/main"]);
+    let f = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!((f["ahead"].as_u64(), f["behind"].as_u64(), f["unpushed_since"].as_str()), (Some(2), Some(0), Some("2026-09-10")));
 }
 
 #[test]

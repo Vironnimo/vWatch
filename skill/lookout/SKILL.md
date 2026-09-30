@@ -25,12 +25,13 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 - **The daily run** (a scheduled task, or the owner asks you to update Lookout): follow "Daily run" below.
 - **Add projects:** the owner usually adds projects in the Lookout window. When the owner asks you to, `lookout projects discover <folder>` lists git repositories there that are not watched yet and `lookout projects add <path>` registers one. Add only the projects the owner named or confirmed.
 - **The owner changes a project's intent** ("park needle-net", "gusto is done"): `lookout projects status <id> <active|parked|done|archived> --note "<reason>"`.
+- **The owner asks for a card of a project that is not due:** run `lookout context <id>`, check the previous card against the repository as the card guide describes, and confirm or correct it with `lookout card put <id> --merge`.
 - **Questions about projects:** `lookout card show <id>`, `lookout facts show <id>`, `lookout portfolio show`, `lookout feedback`. Answer from these; say when a card is old or missing.
 
 ## Daily run
 
 1. Run `lookout due`. It refreshes the facts and returns:
-   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent) or `stale` (the card is old).
+   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs, null for cards written before Lookout recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent) or `stale` (the card is old).
    - `problems`: projects whose folder is gone. Mention them in your report; do not write cards for them.
    - `portfolio.due`: whether the cross-project brief needs rewriting.
    If nothing is due, report that in one sentence and stop.
@@ -38,10 +39,10 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 3. For each due project:
    1. `lookout context <id>`: the project, its current facts, the previous card, the commits since that card, and the owner's reactions: ratings from all projects and replies to this card's questions.
    2. Study the repository read-only, as the card guide describes. For `changed` or `stale`, start from the previous card and what changed instead of re-reading everything. If nothing relevant changed, confirm the card with `lookout card put <id> --merge --json '{}'`, adding only the fields you corrected. For `ci_changed`, find out what the CI change means (`facts.ci`, the failing run) and update only the fields it affects with `--merge`. For `answered`, work the owner's replies into the card with `--merge` (see the rules).
-   3. Write the card as JSON to a temporary file and run `lookout card put <id> --file <path>`. When only some fields changed, send just those with `--merge`. A list you send replaces the whole list, so include the items you keep, with their `id`.
-   4. Read the result. On `invalid_card`, fix the named fields and send again (`--dry-run` checks a card without saving it). Take `warnings` about ignored fields seriously: that content was dropped.
-   If you can delegate to sub-agents, you may give each due project to one. Each needs this Skill, the card guide and the project id, and returns only whether its card was saved.
-4. When all cards are written and `portfolio.due` was true (or any card changed), run `lookout portfolio context`, then write the brief as `references/card-guide.md` → "The portfolio brief" describes, and save it with `lookout portfolio put --file <path>`.
+   3. Write the card as JSON in UTF-8 to a temporary file named after the project (for example `lookout-card-<id>.json`) and run `lookout card put <id> --file <path>`. Inside JSON strings, write Windows paths with forward slashes or double backslashes. When only some fields changed, send just those with `--merge`. A list you send replaces the whole list, so include the items you keep, with their `id`.
+   4. Read the result. On `invalid_card`, fix the named fields and send again (`--dry-run` checks a card without saving it). Every save creates a new card version, so check with `--dry-run` and save each card once. Take `warnings` seriously: ignored fields were dropped, and kept text over its word limit should be shortened when you next send that field.
+   If you can delegate to sub-agents, you may give each due project to one. Give each this Skill, the project id, its `reason` and `changes` from `due`; it reads the card guide, saves the card and returns whether it was saved and anything urgent it found.
+4. When all cards are written and `portfolio.due` was true (or any card changed), read `references/portfolio-guide.md` completely, run `lookout portfolio context`, write the brief as the guide describes and save it with `lookout portfolio put --file <path>`.
 5. Report in a few lines: which cards you updated, anything urgent (risk of losing work, something time-bound today) and the brief's three focus items. The owner reads the details in Lookout, so do not repeat whole cards.
 
 ## Rules

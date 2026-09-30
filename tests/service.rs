@@ -69,12 +69,14 @@ fn invalid_cards_are_refused_with_field_paths() {
     assert_eq!(svc.card("demo").unwrap_err().code, "no_card");
     let saved = svc.put_card("demo", card_with(json!({"colour": "blue", "vision": {"statement": "Ziel", "size": 3}})), false, false).unwrap();
     assert_eq!(saved["warnings"], json!(["ignored unknown field: colour", "ignored unknown field: vision.size"]));
-    // with --merge, a problem in a field the agent did not send is marked as inherited
     let stored = svc.store().latest_card("demo").unwrap().unwrap();
     let old = card_with(json!({"health_notes": ["wort ".repeat(31)]}));
     svc.store().add_card("demo", &svc.now(), &lookout::store::CardBasis { fingerprint: &stored.fingerprint, head: None, ci: None, parts: &json!(null) }, &old).unwrap();
-    let err = svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap_err();
-    assert!(err.message.contains("health_notes[0]: Text should have at most 30 words, has 31 (from the previous card)"), "{}", err.message);
+    // with --merge, text the agent did not send is kept despite a newer word limit, with a warning
+    let kept = svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap();
+    assert!(kept["warnings"][0].as_str().unwrap().contains("health_notes[0] (31 of 30 words)"), "{}", kept["warnings"]);
+    let err = svc.put_card("demo", json!({"health_notes": ["wort ".repeat(31)]}), true, false).unwrap_err();
+    assert!(err.message.contains("health_notes[0]: Text should have at most 30 words, has 31"), "{}", err.message);
 }
 
 #[test]

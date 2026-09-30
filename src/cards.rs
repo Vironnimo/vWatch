@@ -189,16 +189,17 @@ impl Kind {
 }
 
 /// Validate a document and assign ids to rated items. Returns (clean document, warnings)
-/// or the list of problems as "path: message".
-pub fn validate(kind: Kind, data: &Value) -> Result<(Value, Vec<String>), Vec<String>> {
+/// or the list of problems as "path: message". Word limits are not enforced on the
+/// top-level fields in `kept`, text carried over unchanged from the previous version that
+/// may predate a limit; such text only earns a warning.
+pub fn validate(kind: Kind, data: &Value, kept: &[String]) -> Result<(Value, Vec<String>), Vec<String>> {
     if !data.is_object() {
         return Err(vec!["(document): the document must be a JSON object".into()]);
     }
-    let mut problems = Vec::new();
-    let mut warnings = Vec::new();
-    let clean = check_obj(kind.fields(), data, "", &mut problems, &mut warnings);
-    if !problems.is_empty() {
-        return Err(problems);
+    let mut ctx = Ctx { problems: Vec::new(), unknown: Vec::new(), over: Vec::new(), kept, enforce_words: true };
+    let clean = check_obj(kind.fields(), data, "", &mut ctx);
+    if !ctx.problems.is_empty() {
+        return Err(ctx.problems);
     }
     let mut clean = clean.expect("a valid object yields a value");
     let mut seen = HashSet::new();
@@ -215,40 +216,61 @@ pub fn validate(kind: Kind, data: &Value) -> Result<(Value, Vec<String>), Vec<St
             }
         }
     }
-    Ok((clean, warnings.into_iter().map(|p| format!("ignored unknown field: {p}")).collect()))
+    let warnings = ctx
+        .unknown
+        .iter()
+        .map(|p| format!("ignored unknown field: {p}"))
+        .chain(ctx.over.iter().map(|p| format!("kept from the previous version although over its word limit: {p}; shorten it when you next send that field")))
+        .collect();
+    Ok((clean, warnings))
+}
+
+struct Ctx<'a> {
+    problems: Vec<String>,
+    unknown: Vec<String>,
+    /// Kept texts over their word limit, as "path (N of M words)".
+    over: Vec<String>,
+    kept: &'a [String],
+    enforce_words: bool,
+}
+
+fn fail(ctx: &mut Ctx, path: &str, msg: String) -> Option<Value> {
+    ctx.problems.push(format!("{path}: {msg}"));
+    None
 }
 
 fn join(path: &str, name: &str) -> String {
     if path.is_empty() { name.to_owned() } else { format!("{path}.{name}") }
 }
 
-fn check_obj(fields: &[Field], value: &Value, path: &str, problems: &mut Vec<String>, unknown: &mut Vec<String>) -> Option<Value> {
+fn check_obj(fields: &[Field], value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
     let Some(map) = value.as_object() else {
-        problems.push(format!("{}: Input should be an object", if path.is_empty() { "(document)" } else { path }));
-        return None;
+        return fail(ctx, if path.is_empty() { "(document)" } else { path }, "Input should be an object".into());
     };
     for key in map.keys() {
         if !fields.iter().any(|f| f.name == key) {
-            unknown.push(join(path, key));
+            ctx.unknown.push(join(path, key));
         }
     }
     let mut out = Map::new();
     for field in fields {
         let here = join(path, field.name);
+        let outer = ctx.enforce_words;
+        if path.is_empty() {
+            ctx.enforce_words = !ctx.kept.iter().any(|k| k == field.name);
+        }
         let given = map.get(field.name).filter(|v| !v.is_null() || matches!(field.ty, Ty::Nullable(_)));
         let result = match given {
-            Some(v) => check(&field.ty, v, &here, problems, unknown),
+            Some(v) => check(&field.ty, v, &here, ctx),
             None => match field.default {
-                Required => {
-                    problems.push(format!("{here}: Field required"));
-                    None
-                }
+                Required => fail(ctx, &here, "Field required".into()),
                 Empty => Some(json!([])),
                 Null => Some(Value::Null),
                 Text(s) => Some(json!(s)),
-                Filled => check(&field.ty, &json!({}), &here, problems, unknown),
+                Filled => check(&field.ty, &json!({}), &here, ctx),
             },
         };
+        ctx.enforce_words = outer;
         if let Some(v) = result {
             out.insert(field.name.to_owned(), v);
         }
@@ -256,66 +278,64 @@ fn check_obj(fields: &[Field], value: &Value, path: &str, problems: &mut Vec<Str
     Some(Value::Object(out))
 }
 
-fn check(ty: &Ty, value: &Value, path: &str, problems: &mut Vec<String>, unknown: &mut Vec<String>) -> Option<Value> {
-    let mut fail = |msg: String| {
-        problems.push(format!("{path}: {msg}"));
-        None
-    };
+fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
     match ty {
         Ty::Nullable(inner) => {
-            if value.is_null() { Some(Value::Null) } else { check(inner, value, path, problems, unknown) }
+            if value.is_null() { Some(Value::Null) } else { check(inner, value, path, ctx) }
         }
         Ty::Str { min, max, words } => match value.as_str() {
-            None => fail("Input should be a string".into()),
-            Some(s) if s.chars().count() < *min => fail(format!("String should have at least {min} character")),
-            Some(s) if s.chars().count() > *max => fail(format!("String should have at most {max} characters")),
+            None => fail(ctx, path, "Input should be a string".into()),
+            Some(s) if s.chars().count() < *min => fail(ctx, path, format!("String should have at least {min} character")),
+            Some(s) if s.chars().count() > *max => fail(ctx, path, format!("String should have at most {max} characters")),
             Some(s) if words.is_some_and(|w| word_count(s) > w) => {
-                fail(format!("Text should have at most {} words, has {}", words.unwrap_or_default(), word_count(s)))
+                let (limit, n) = (words.unwrap_or_default(), word_count(s));
+                if ctx.enforce_words {
+                    fail(ctx, path, format!("Text should have at most {limit} words, has {n}"))
+                } else {
+                    ctx.over.push(format!("{path} ({n} of {limit} words)"));
+                    Some(json!(s))
+                }
             }
             Some(s) => Some(json!(s)),
         },
         Ty::Date => match value.as_str() {
             Some(s) if s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() => Some(json!(s)),
-            _ => fail("Input should be a date as YYYY-MM-DD".into()),
+            _ => fail(ctx, path, "Input should be a date as YYYY-MM-DD".into()),
         },
         Ty::Id => match value.as_str() {
             Some(s) if valid_item_id(s) => Some(json!(s)),
-            _ => fail("Input should be an id of 3-64 characters: lowercase letters, digits, ':', '_' or '-'".into()),
+            _ => fail(ctx, path, "Input should be an id of 3-64 characters: lowercase letters, digits, ':', '_' or '-'".into()),
         },
         Ty::Enum(options) => match value.as_str() {
             Some(s) if options.contains(&s) => Some(json!(s)),
             _ => {
                 let quoted: Vec<String> = options.iter().map(|o| format!("'{o}'")).collect();
-                fail(format!("Input should be one of {}", quoted.join(", ")))
+                fail(ctx, path, format!("Input should be one of {}", quoted.join(", ")))
             }
         },
         Ty::Int { min, max } => {
             let n = value.as_i64().or_else(|| value.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64));
             match n {
-                None => fail("Input should be a whole number".into()),
-                Some(n) if n < *min || n > *max => fail(format!("Input should be between {min} and {max}")),
+                None => fail(ctx, path, "Input should be a whole number".into()),
+                Some(n) if n < *min || n > *max => fail(ctx, path, format!("Input should be between {min} and {max}")),
                 Some(n) => Some(json!(n)),
             }
         }
         Ty::List(item, max) => {
-            let Some(items) = value.as_array() else { return fail("Input should be a list".into()) };
+            let Some(items) = value.as_array() else { return fail(ctx, path, "Input should be a list".into()) };
             if let Some(max) = max {
                 if items.len() > *max {
-                    return fail(format!("List should have at most {max} items"));
+                    return fail(ctx, path, format!("List should have at most {max} items"));
                 }
             }
-            let before = problems.len();
-            let out: Vec<Value> = items
-                .iter()
-                .enumerate()
-                .filter_map(|(i, v)| check(item, v, &format!("{path}[{i}]"), problems, unknown))
-                .collect();
-            (problems.len() == before).then(|| Value::Array(out))
+            let before = ctx.problems.len();
+            let out: Vec<Value> = items.iter().enumerate().filter_map(|(i, v)| check(item, v, &format!("{path}[{i}]"), ctx)).collect();
+            (ctx.problems.len() == before).then(|| Value::Array(out))
         }
         Ty::Obj(fields) => {
-            let before = problems.len();
-            let out = check_obj(fields, value, path, problems, unknown);
-            if problems.len() == before { out } else { None }
+            let before = ctx.problems.len();
+            let out = check_obj(fields, value, path, ctx);
+            if ctx.problems.len() == before { out } else { None }
         }
     }
 }

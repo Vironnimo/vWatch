@@ -134,14 +134,16 @@ fn remotes(repo: &Path) -> Vec<(String, String)> {
     seen
 }
 
-fn upstream(repo: &Path) -> (Value, Value, Value) {
+/// (upstream, ahead, behind, date of the oldest unpushed commit)
+fn upstream(repo: &Path) -> (Value, Value, Value, Value) {
     let Some(up) = git(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]) else {
-        return (Value::Null, Value::Null, Value::Null);
+        return (Value::Null, Value::Null, Value::Null, Value::Null);
     };
     let counts = git(repo, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]).unwrap_or_default();
     let nums: Vec<u64> = counts.split_whitespace().filter_map(|n| n.parse().ok()).collect();
     let (behind, ahead) = if nums.len() == 2 { (json!(nums[0]), json!(nums[1])) } else { (Value::Null, Value::Null) };
-    (json!(up.trim()), ahead, behind)
+    let oldest = git(repo, &["log", "--reverse", "--format=%cs", "@{upstream}..HEAD"]).and_then(|out| out.lines().next().map(str::to_owned));
+    (json!(up.trim()), ahead, behind, json!(oldest))
 }
 
 struct Dirty {
@@ -372,7 +374,7 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
     let commits = if head.is_some() { commits(repo, today) } else { empty_commits() };
     let remotes = remotes(repo);
     let dirty = dirty(repo, head.is_some());
-    let (upstream, ahead, behind) = upstream(repo);
+    let (upstream, ahead, behind, unpushed_since) = upstream(repo);
     let newest_local = dirty.newest.map(|t| DateTime::<Local>::from(t).date_naive().to_string());
     let last_work = [commits["last"].as_str().map(str::to_owned), newest_local].into_iter().flatten().max();
     json!({
@@ -380,7 +382,7 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
         "commits": commits,
         "remotes": remotes.iter().map(|(n, u)| json!({"name": n, "url": u})).collect::<Vec<_>>(),
         "has_remote": !remotes.is_empty(),
-        "upstream": upstream, "ahead": ahead, "behind": behind,
+        "upstream": upstream, "ahead": ahead, "behind": behind, "unpushed_since": unpushed_since,
         "dirty": dirty.value,
         "worktrees": worktrees(repo),
         "branches": branches(repo, branch.as_deref()),

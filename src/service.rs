@@ -164,6 +164,18 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
         .collect()
 }
 
+fn top_fields(doc: &Value) -> Vec<String> {
+    doc.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// With --merge, the previous version's fields the agent did not send: they are kept unchanged.
+fn kept_fields(previous: Option<&Value>, sent: Option<&[String]>) -> Vec<String> {
+    match (previous, sent) {
+        (Some(previous), Some(sent)) => top_fields(previous).into_iter().filter(|f| !sent.contains(f)).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// With --merge, the top-level fields the agent actually sent.
 fn sent_fields(payload: &Value, merge: bool) -> Option<Vec<String>> {
     merge.then(|| payload.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default())
@@ -273,13 +285,13 @@ impl Lookout {
         };
         for p in self.store.projects()? {
             if let Some(card) = self.store.latest_card(&p.id)?.filter(|c| missing(Kind::Card, &c.data)) {
-                if let Ok((clean, _)) = cards::validate(Kind::Card, &card.data) {
+                if let Ok((clean, _)) = cards::validate(Kind::Card, &card.data, &top_fields(&card.data)) {
                     self.store.rewrite_latest_card(&p.id, &clean)?;
                 }
             }
         }
         if let Some(pf) = self.store.latest_portfolio()?.filter(|p| missing(Kind::Portfolio, &p.data)) {
-            if let Ok((clean, _)) = cards::validate(Kind::Portfolio, &pf.data) {
+            if let Ok((clean, _)) = cards::validate(Kind::Portfolio, &pf.data, &top_fields(&pf.data)) {
                 self.store.rewrite_latest_portfolio(&clean)?;
             }
         }
@@ -560,11 +572,11 @@ impl Lookout {
             };
             match reason {
                 Some("changed") => {
-                    let mut entry = json!({"id": p.id, "name": p.name, "reason": "changed"});
-                    if let (Some(before), Some(now)) = (card.as_ref().and_then(|c| c.basis.as_ref()), &stored) {
-                        entry["changes"] = json!(facts::changes(before, &facts::basis(&now.data)));
-                    }
-                    projects.push(entry);
+                    let changes = match (card.as_ref().and_then(|c| c.basis.as_ref()), &stored) {
+                        (Some(before), Some(now)) => json!(facts::changes(before, &facts::basis(&now.data))),
+                        _ => Value::Null,
+                    };
+                    projects.push(json!({"id": p.id, "name": p.name, "reason": "changed", "changes": changes}));
                 }
                 Some(reason) => projects.push(json!({"id": p.id, "name": p.name, "reason": reason})),
                 None => up_to_date.push(json!(p.id)),
@@ -577,9 +589,11 @@ impl Lookout {
             Some(_) => None,
         };
         let any_due = !projects.is_empty();
-        let next = if any_due || portfolio_reason.is_some() {
+        let next = if any_due {
             "For each project listed: `lookout context <id>`, study the repository, then `lookout card put <id> --file <card.json>`. \
              Afterwards: `lookout portfolio context` and `lookout portfolio put --file <portfolio.json>`."
+        } else if portfolio_reason.is_some() {
+            "Every card is current; only the portfolio brief is due: `lookout portfolio context`, then `lookout portfolio put --file <portfolio.json>`."
         } else {
             "Nothing is due. Every card and the portfolio brief are current."
         };
@@ -646,8 +660,9 @@ impl Lookout {
         self.project(id)?;
         let previous = self.store.latest_card(id)?;
         let sent = sent_fields(&payload, merge);
+        let kept = kept_fields(previous.as_ref().map(|c| &c.data), sent.as_deref());
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
-        let (clean, warnings) = cards::validate(Kind::Card, &payload).map_err(|problems| {
+        let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
             LookoutError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `lookout schema card` prints the full schema."))
@@ -726,8 +741,9 @@ impl Lookout {
     pub fn put_portfolio(&self, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
         let previous = self.store.latest_portfolio()?;
         let sent = sent_fields(&payload, merge);
+        let kept = kept_fields(previous.as_ref().map(|p| &p.data), sent.as_deref());
         let payload = Self::merged(previous.as_ref().map(|p| &p.data), payload, merge, "portfolio brief")?;
-        let (clean, warnings) = cards::validate(Kind::Portfolio, &payload).map_err(|problems| {
+        let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
             LookoutError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint("Fix the listed fields and send it again. `lookout schema portfolio` prints the full schema.")
         })?;

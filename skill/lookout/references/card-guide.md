@@ -2,7 +2,7 @@
 
 The owner opens Lookout every morning. A card succeeds when, after ten seconds, the owner knows what state the project is in, what is at risk, what waits for them and what the sensible next step is, and when every sentence is specific to this project. A card fails when it is generic, restates what the owner already knows, or says something that is not true.
 
-All text is German, addressed as "du". Dates are `YYYY-MM-DD`. `lookout schema card` prints the exact JSON schema.
+All text is German, addressed as "du". Dates are `YYYY-MM-DD`. `lookout schema card` prints the exact JSON schema. The portfolio brief has its own guide, `portfolio-guide.md`.
 
 ## What Lookout already shows
 
@@ -26,6 +26,8 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 
 `one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Lookout checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `lookout schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
 
+Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12; `reentry.next_step` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. `source` and `evidence` have no word limit.
+
 **Each finding has one home.** Unfinished work (uncommitted or unpushed changes, a branch, a half-done plan) goes into `open_ends`; a risk or rot that is not unfinished work into `health_notes`; a decision into `waiting_on_you`; a proposal for new work into `suggestions`. The obvious fix of a finding (commit it, push it, merge it) is not a separate suggestion, and the step named in `reentry` never reappears as one. `headline` and `reentry` may point to the most important finding in their own words; do not repeat it in further fields.
 
 - `one_liner` (≤ 15 words): what the project is, in plain words. "Wartungslog fürs Fahrrad, das an Kettenwechsel und Reifendruck erinnert."
@@ -36,35 +38,21 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 - `recent_changes` (3-6, newest first): recent **themes**, not single commits. `title` (≤ 8 words) names the effect a user would notice; `detail` is one sentence. For uncommitted work, date it by the file times and say it is not committed.
 - `milestones` (up to 8, oldest first; fewer for a young project): the big steps of the project's whole life, releases included.
 - `features` (5-10, ≤ 8 words each): what the app can actually do today, not what is planned.
-- `open_ends`: concrete unfinished things you found, each with `kind` (`worktree`, `branch`, `uncommitted`, `unpushed`, `ci`, `flagged`, `todo`, `plan`, `other`), `title` (≤ 10 words), `detail` (one sentence), `source` (file path or git ref; for a finding from Lookout's facts, `facts: <field>`, e.g. `facts: has_remote`) and `age_days`: days since the oldest evidence, such as `dirty.oldest_change` for uncommitted work, the oldest unpushed commit, the first red run, or `commits.first` for a missing remote; null when nothing dates it. Prefer what matters: forgotten finished work, risks, promises in docs that were never kept. Leave out trivia.
+- `open_ends`: concrete unfinished things you found, each with `kind` (`worktree`, `branch`, `uncommitted`, `unpushed`, `ci`, `flagged`, `todo`, `plan`, `other`), `title` (≤ 10 words), `detail` (one sentence), `source` (file path or git ref; for a finding from Lookout's facts, `facts: <field>`, e.g. `facts: has_remote`) and `age_days`: days since the oldest evidence, such as `dirty.oldest_change` for uncommitted work, `unpushed_since` for unpushed commits, the first red run, or `commits.first` for a missing remote; null when nothing dates it. Prefer what matters: forgotten finished work, risks, promises in docs that were never kept. Leave out trivia.
 - `waiting_on_you`: decisions or answers only the owner can give (a provider to choose, a key to obtain, a direction to pick), each a question (≤ 12 words) with its `source`. Not tasks an agent could do. Usually 0-3 per project, the most consequential first; more only when each one blocks progress. Ask so that a short answer settles it; the owner can answer or dismiss each question in Lookout. Keep a still-open question's `id` when you send it again, and remove questions the owner answered or marked `done`.
 - `vision`: `statement` is the project's own stated goal in one sentence; `progress_note` says in one sentence how far along it is against that goal; `progress_pct` only when the docs make it derivable (for example completed phases), otherwise null.
 - `reentry`: if the owner opened this project today, the **one** most sensible concrete step (`next_step`, ≤ 20 words), its `effort` (`15min`, `1h`, `half-day`, `day+`) and `why` (one sentence).
 - `health_notes`: concrete risks or rot you found, one sentence each: failing checks and why, docs that contradict the code, dependencies that will break, a bug you can point to. May be empty.
-- `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions. If the previous card has no `decisions`, check the docs for them.
-- `suggestions` (2-4): see below.
+- `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions. If the previous card has no `decisions`, check the docs for them; most projects have none, and then the list stays empty.
+- `suggestions` (up to 4; fewer when fewer findings deserve one): see below.
 - `cross_project_hints`: things that look reusable in, or overlap with, other kinds of projects; one sentence each. The portfolio brief builds on them.
 
 ## Suggestions
 
 A suggestion is worth showing when the owner reads it and thinks "right, I had not seen that". Each has `type` (`next`, `feature`, `cleanup`, `park`), `title` (≤ 8 words), `why` (one sentence, ≤ 25 words), `evidence` (what you saw, with file paths or commits) and `effort` (`S`, `M`, `L`).
 
-- Ground every suggestion in a finding. "Erinnerung reparieren: der Zeitplan rechnet Monate als 30 Tage (src/schedule.ts:42)" is good. "Fehlerbehandlung verbessern" is not.
+- Ground every suggestion in a finding. "Erinnerung reparieren: der Zeitplan rechnet Monate als 30 Tage (src/schedule.ts, addMonths)" is good. "Fehlerbehandlung verbessern" is not. In `evidence` and `source`, name files, functions and commits rather than line numbers, which move with every edit.
 - Features should follow the project's own vision or the owner's notes, not your taste.
 - `park` is welcome when honest: the scope is complete, or everything left needs people, money or decisions rather than code.
 - Check the owner's ratings in `context` first (see the Skill's rules). To keep a suggestion from the previous card, send it again with its `id`; a suggestion without `id` counts as new.
 - Replace suggestions that are done or no longer true.
-
-## The portfolio brief
-
-`lookout portfolio context` shows every project side by side (compact facts and card; `lookout card show <id>` has the full card), the previous brief, all of the owner's reactions and `owner_last_opened` (when the owner last opened Lookout). If that is older than the previous brief, the owner has not seen it: carry over its focus items that still matter instead of treating them as known. The brief is where you see what nobody sees while inside one project. Card contents count as sources: cite them as the card's statement ("laut gusto-Karte …") and check in the facts or the repository what the brief depends on. A card marked `outdated` was written before the latest facts; trust the facts where they disagree. `lookout schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
-
-- `greeting` (one sentence): a friendly, slightly playful summary of this morning's state, true to the data.
-- `focus` (3; fewer only when fewer things need attention): what deserves the owner's attention today, each with `project`, `title` (an action, ≤ 8 words), `why` (≤ 25 words) and `effort`. Aim for one thing that is urgent (risk of losing work, something due today), one quick win, and one thing that would feel good; urgency wins over the mix. An unfinished focus item may stay, with the same `id`, as long as it is still among the most important things.
-- `patterns` (2-4): recurring behaviour or risk across projects, each with `title`, `why`, `projects`, `evidence` and `severity` (`info`, `warn`, `risk`). Example: two projects pin the same outdated framework version, and both fail CI because of it.
-- `synergies` (2-4): concrete reuse or combination between named projects, with `effort`. Example: one project plans its own login while another already has a finished, tested one.
-- `new_apps` (0-3): new app ideas that follow from the portfolio and the owner's evident needs, each with `title`, `pitch`, `because` and `effort`. Only with evidence; none is better than a random idea.
-- `park_or_revive`: an honest verdict (`park`, `revive`, `finish`, `archive`) with `why` for quiet or stuck projects. Respect the owner's status: do not tell them to revive a project they parked.
-- `attention_note` (one sentence): where the owner's work goes versus where it is needed.
-
-Items you keep from the previous brief keep their `id`; check each kept item's `why` and `evidence` against today's facts and cards, and correct or drop what is no longer true. Items rated `down` never come back; `later` items wait 14 days; focus items marked `done` are finished.
