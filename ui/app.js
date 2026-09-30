@@ -14,9 +14,15 @@
     pulse: 'Puls', voices: 'Die Projekte melden sich', kpis: 'Lage auf einen Blick', cards: 'Projekte',
   };
 
-  let S = null;           // server state
+  let S = null;           // state from the app core
   let showRated = false;  // show suggestions the owner already rated away
-  let openId = null;
+  let openId = null;      // project whose drawer is open
+  let panelOpen = false;  // settings panel
+  let settings = null;    // autostart, agent access, paths
+  let disc = null;        // project search: { target, root, candidates, checked:Set, busy }
+  let confirmRemove = null;
+  let lastVersion = null;
+  let shown = false;
 
   // ---------- helpers ----------
   const $ = sel => document.querySelector(sel);
@@ -201,7 +207,7 @@
   function missingCardsNote() {
     const missing = visible().filter(p => !p.card);
     if (!missing.length) return '';
-    return `<div class="note" style="margin-top:24px">${missing.length === 1 ? 'Ein Projekt hat' : `${missing.length} Projekte haben`} noch keine Einschätzung: ${missing.map(p => plink(p.id)).join(', ')}. Der nächste Agent-Lauf schreibt sie (<code>lookout due</code> zeigt, was ansteht).</div>`;
+    return `<div class="note" style="margin-top:24px">${missing.length === 1 ? 'Ein Projekt hat' : `${missing.length} Projekte haben`} noch keine Einschätzung: ${missing.map(p => plink(p.id)).join(', ')}. Der nächste Agent-Lauf schreibt sie. <button class="linkish" type="button" data-open-settings>Wie richte ich den Lauf ein?</button></div>`;
   }
 
   // ---------- handover ----------
@@ -273,12 +279,12 @@
       <dt>Backup</dt><dd>${f.has_remote ? esc(f.remotes.map(r => `${r.name}: ${r.url}`).join(', ')) : '<span class="tag bad">kein Remote</span>'}</dd>
       <dt>Ungesichert</dt><dd>${s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : 'sauber'}</dd>
       <dt>Liegengeblieben</dt><dd>${esc(s.leftovers || 'nichts')}</dd>
-      <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <a href="${esc(f.ci.url)}" target="_blank" rel="noopener">Lauf öffnen</a>` : ''}</dd>
+      <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
     let body = `<button class="close" data-close type="button">Schließen</button>
       <h2 class="pname">${dot(p.id)}${esc(p.name)} ${phasePill(p)}${isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : ''}</h2>
       ${c ? `<div class="one">${esc(c.one_liner)}</div>` : ''}
-      <div class="stack">${c && c.stack ? `${esc(c.stack)} · ` : ''}${esc(p.path)}</div>
+      <div class="stack">${c && c.stack ? `${esc(c.stack)} · ` : ''}<button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
       ${statusBar}
       ${c && c.personality ? `<div class="say">„${esc(c.personality)}“</div>` : ''}
       <div style="margin-top:14px">${spark(weekly(p), color(p.id), 48)}${c && c.phase_evidence ? `<div class="faint" style="font-size:12.5px">${esc(c.phase_evidence)}</div>` : ''}</div>`;
@@ -329,29 +335,93 @@
     $('#foot').innerHTML = parts.map(x => `<span>${x}</span>`).join('');
   }
 
-  function renderEmpty() {
-    return `<div class="empty"><h2>Noch keine Projekte im Blick</h2>
-      <p class="muted">Registriere deine Projekte im Terminal. Lookout misst dann sofort die Git-Fakten, und ein Agent schreibt beim nächsten Lauf die Einschätzungen.</p>
-      <p><code>lookout projects discover C:\\Development\\projects</code> zeigt Kandidaten, <code>lookout projects add &lt;pfad&gt;</code> registriert einen.</p></div>`;
+  // ---------- adding projects ----------
+  const RECENT_DAYS = 120;  // pre-select repositories with a commit in this window
+  function discHtml(target) {
+    if (!disc || disc.target !== target) return '';
+    if (disc.busy) return `<p class="muted disc-msg">${esc(disc.busy)}</p>`;
+    if (!disc.candidates.length) return `<p class="muted disc-msg">In <span class="mono">${esc(disc.root)}</span> liegen keine Git-Repos, die Lookout noch nicht kennt.</p>`;
+    const n = disc.checked.size, all = n === disc.candidates.length;
+    const rows = disc.candidates.map(c => `<label class="disc-row"><input type="checkbox" data-disc="${esc(c.path)}" ${disc.checked.has(c.path) ? 'checked' : ''}><span class="t">${esc(c.name)}</span><span class="faint">${c.last_commit ? `letzter Commit ${ago(c.last_commit)}` : 'noch kein Commit'}</span></label>`).join('');
+    return `<div class="disc"><div class="disc-head"><span>${disc.candidates.length} Git-Repos in <span class="mono">${esc(disc.root)}</span></span><button class="linkish" type="button" data-disc-all>${all ? 'keins' : 'alle'} auswählen</button></div>
+      <div class="disc-list">${rows}</div>
+      <div class="actions"><button class="btn primary" type="button" data-disc-add ${n ? '' : 'disabled'}>${n === 1 ? '1 Projekt' : `${n} Projekte`} hinzufügen</button><button class="btn" type="button" data-disc-cancel>Abbrechen</button></div></div>`;
   }
 
+  function renderEmpty() {
+    return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll Lookout im Blick behalten?</h2>
+      <p class="muted">Wähle den Ordner, in dem deine Projekte liegen. Lookout findet die Git-Repos darin und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
+      <div class="actions"><button class="btn primary" type="button" data-pick="folder" data-target="main">Projektordner wählen</button><button class="btn" type="button" data-pick="single" data-target="main">Einzelnes Projekt hinzufügen</button></div>
+      ${discHtml('main')}</div>`;
+  }
+
+  // ---------- settings panel ----------
+  function toggle(key, on, label, sub) {
+    return `<div class="setting"><div><div class="t">${esc(label)}</div>${sub ? `<div class="d">${esc(sub)}</div>` : ''}</div><button class="toggle" type="button" role="switch" aria-checked="${on}" data-setting="${key}" aria-label="${esc(label)}"><span></span></button></div>`;
+  }
+  const copyLine = (text, label) => `<div class="copyline"><code class="mono">${esc(text)}</code><button class="btn" type="button" data-copy="${esc(text)}" aria-label="${esc(label)} kopieren">Kopieren</button></div>`;
+
+  function panelHtml() {
+    const st = settings || {};
+    const projects = S.projects.map(p => `<div class="prow"><div class="pmain"><div class="pname-s">${dot(p.id)}<b>${esc(p.name)}</b>${p.status !== 'active' ? `<span class="tag">${esc(STATUS[p.status])}</span>` : ''}</div><div class="d mono">${esc(p.path)}</div></div>
+      ${confirmRemove === p.id
+        ? `<div class="confirm"><span>Karten und Verlauf werden gelöscht.</span><button class="btn danger" type="button" data-remove="${esc(p.id)}">Entfernen</button><button class="btn" type="button" data-remove-cancel>Behalten</button></div>`
+        : `<button class="linkish" type="button" data-remove-ask="${esc(p.id)}">entfernen</button>`}</div>`).join('');
+    return `<div class="scrim" data-close-panel></div><aside class="drawer panel" role="dialog" aria-modal="true" aria-label="Einstellungen">
+      <button class="close" data-close-panel type="button">Schließen</button>
+      <h2 class="pname">Einstellungen</h2>
+      <section class="mod"><div class="mod-head"><div><h2>Projekte</h2><div class="sub">${S.projects.length ? `${S.projects.length} im Blick. Status und Notiz setzt du im Steckbrief eines Projekts.` : 'Noch keine.'}</div></div></div>
+        <div class="plist">${projects}</div>
+        <div class="actions"><button class="btn" type="button" data-pick="folder" data-target="panel">Ordner durchsuchen …</button><button class="btn" type="button" data-pick="single" data-target="panel">Einzelnes Projekt …</button></div>
+        ${discHtml('panel')}</section>
+      <section class="mod"><div class="mod-head"><div><h2>Start</h2></div></div>
+        ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'Lookout geht auf, sobald du dich bei Windows anmeldest.')}</section>
+      <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „lookout“.</div></div></div>
+        ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den Lookout-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
+        <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. Lookout hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
+        <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Danach in vBot einen täglichen Schedule anlegen, etwa „Führe den täglichen Lookout-Lauf durch.“</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
+      <section class="mod"><div class="mod-head"><div><h2>Über</h2></div></div>
+        <dl class="kv"><dt>Version</dt><dd class="mono">${esc(st.version || '')}</dd><dt>Programm</dt><dd class="mono">${esc(st.exe || '')}</dd><dt>Daten</dt><dd class="mono">${esc(st.data_dir || '')}</dd></dl></section>
+    </aside>`;
+  }
+  function renderPanel(keepScroll) {
+    const root = $('#panel-root');
+    if (!panelOpen) { root.innerHTML = ''; return; }
+    const prev = root.querySelector('.drawer');
+    const top = keepScroll && prev ? prev.scrollTop : 0;
+    root.innerHTML = panelHtml();
+    root.querySelector('.drawer').scrollTop = top;
+  }
+  async function openPanel() {
+    closeDrawer();
+    panelOpen = true;
+    renderPanel(false);
+    try { settings = await call('settings'); renderPanel(true); } catch (e) { toast(errText(e)); }
+  }
+  function closePanel() {
+    panelOpen = false;
+    confirmRemove = null;
+    if (disc && disc.target === 'panel') disc = null;
+    renderPanel(false);
+  }
+
+  // ---------- page ----------
   function render() {
     const d = new Date(S.today + 'T12:00:00');
     $('#date').textContent = d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const collected = S.projects.map(p => p.facts_collected_at).filter(Boolean).sort()[0];
     $('#fresh').textContent = collected ? `Fakten von vor ${minutesAgo(collected)} Min` : '';
+    $('#refresh').hidden = $('.switch').hidden = !S.projects.length;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
     $('#view').innerHTML = !S.projects.length ? renderEmpty() : S.prefs.style === 'board' ? renderBoard() : renderHandover();
     renderFoot();
     if (openId) openDrawer(openId, true);
+    if (panelOpen) renderPanel(true);
   }
 
-  // ---------- server calls ----------
-  async function api(path, body) {
-    const res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`${res.status}`);
-    return res.json();
-  }
+  // ---------- calls into the app ----------
+  const call = (cmd, args) => window.__TAURI__.core.invoke(cmd, args || {});
+  const errText = e => (e && e.message) || String(e);
   let toastTimer = null;
   function toast(text, undo) {
     const t = $('#toast');
@@ -362,13 +432,24 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
   async function load(visit) {
-    try { S = await api(`/api/state${visit ? '?visit=true' : ''}`); render(); }
-    catch (e) { $('#view').innerHTML = '<p class="note" style="margin-top:30px">Die Lookout-App antwortet nicht. Läuft <code>lookout serve</code>?</p>'; }
+    try { S = await call('state', { visit }); render(); }
+    catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Lookout konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
+    if (!shown) { shown = true; call('ready').catch(() => {}); }
+  }
+  let refreshing = false;
+  async function refreshFacts() {
+    if (refreshing || !S || !S.projects.length) return;
+    refreshing = true;
+    const b = $('#refresh');
+    b.disabled = true; b.textContent = 'Misst …';
+    try { S = await call('refresh'); render(); } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
+    b.disabled = false; b.textContent = 'Aktualisieren';
+    refreshing = false;
   }
   async function setFeedback(el, v) {
     const id = el.dataset.item, prev = S.feedback[id] ? S.feedback[id].value : null;
     const value = prev === v ? null : v;
-    const send = val => api('/api/feedback', { item_id: id, value: val, project_id: el.dataset.project || null, title: el.dataset.title });
+    const send = val => call('set_feedback', { item_id: id, value: val, project_id: el.dataset.project || null, title: el.dataset.title });
     try {
       await send(value);
       if (value) S.feedback[id] = { value, at: new Date().toISOString() }; else delete S.feedback[id];
@@ -380,43 +461,118 @@
       });
     } catch (e) { toast('Speichern hat nicht geklappt.'); }
   }
-  async function setPref(key, value) { S.prefs[key] = value; render(); try { await api('/api/prefs', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
+  async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
+  async function setStatus(status, note) {
+    try { await call('set_status', { id: openId, status, note }); await load(false); }
+    catch (e) { toast('Status nicht gespeichert.'); }
+  }
+
+  function rerenderDisc() { if (disc && disc.target === 'panel') renderPanel(true); else render(); }
+  async function pick(kind, target) {
+    let path;
+    try { path = await call('pick_folder'); } catch (e) { toast(errText(e)); return; }
+    if (!path) return;
+    if (kind === 'single') { await addPaths([path], target); return; }
+    disc = { target, root: path, candidates: [], checked: new Set(), busy: 'Suche Git-Repos …' };
+    rerenderDisc();
+    try {
+      const found = await call('discover', { root: path });
+      const recent = found.filter(c => c.last_commit && daysSince(c.last_commit) <= RECENT_DAYS);
+      disc = { target, root: path, candidates: found, checked: new Set((recent.length ? recent : found).map(c => c.path)), busy: null };
+    } catch (e) { disc = null; toast(errText(e)); }
+    rerenderDisc();
+  }
+  async function addPaths(paths, target) {
+    disc = { ...(disc || { target, root: '', candidates: [], checked: new Set() }), busy: paths.length === 1 ? 'Füge hinzu und messe …' : `Füge ${paths.length} Projekte hinzu und messe …` };
+    rerenderDisc();
+    try {
+      const res = await call('add_projects', { paths });
+      disc = null;
+      await load(false);
+      if (res.failed.length) toast(res.failed.map(f => f.error.message).join(' '));
+      else toast(res.added.length === 1 ? `${res.added[0].name} ist jetzt im Blick.` : `${res.added.length} Projekte sind jetzt im Blick.`);
+    } catch (e) { disc.busy = null; rerenderDisc(); toast(errText(e)); }
+  }
+  async function setSetting(key, on) {
+    try {
+      settings = await call(key === 'autostart' ? 'set_autostart' : 'set_agent_access', { on });
+      renderPanel(true);
+    } catch (e) { toast('Nicht geändert: ' + errText(e)); }
+  }
+  async function removeProject(id) {
+    const p = byId(id);
+    try {
+      await call('remove_project', { id });
+      confirmRemove = null;
+      await load(false);
+      toast(`${p ? p.name : id} ist nicht mehr im Blick.`);
+    } catch (e) { toast(errText(e)); }
+  }
 
   document.addEventListener('click', async e => {
-    const sw = e.target.closest('.switch button');
+    const t = e.target;
+    const sw = t.closest('.switch button');
     if (sw) { setPref('style', sw.dataset.style); window.scrollTo(0, 0); return; }
-    const fbBtn = e.target.closest('.fb button');
+    const fbBtn = t.closest('.fb button');
     if (fbBtn) { e.stopPropagation(); setFeedback(fbBtn.parentElement, fbBtn.dataset.v); return; }
-    const hide = e.target.closest('[data-hide]');
+    const hide = t.closest('[data-hide]');
     if (hide) { const id = hide.dataset.hide; setPref('hidden_modules', [...hiddenMods(), id]); toast(`„${MOD_TITLES[id]}“ ausgeblendet.`, () => setPref('hidden_modules', [...hiddenMods()].filter(x => x !== id))); return; }
-    const unhide = e.target.closest('[data-unhide]');
+    const unhide = t.closest('[data-unhide]');
     if (unhide) { setPref('hidden_modules', [...hiddenMods()].filter(x => x !== unhide.dataset.unhide)); return; }
-    if (e.target.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
-    const st = e.target.closest('[data-status]');
-    if (st && openId) {
-      try { await api(`/api/projects/${encodeURIComponent(openId)}/status`, { status: st.dataset.status, note: $('#status-note').value }); await load(false); }
-      catch (err) { toast('Status nicht gespeichert.'); }
-      return;
-    }
-    const op = e.target.closest('[data-open]');
+    if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
+    const st = t.closest('[data-status]');
+    if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return; }
+    if (t.closest('[data-open-settings]')) { openPanel(); return; }
+    if (t.closest('[data-close-panel]')) { closePanel(); return; }
+    const pk = t.closest('[data-pick]');
+    if (pk) { pick(pk.dataset.pick, pk.dataset.target); return; }
+    if (t.closest('[data-disc-all]')) { disc.checked = disc.checked.size === disc.candidates.length ? new Set() : new Set(disc.candidates.map(c => c.path)); rerenderDisc(); return; }
+    if (t.closest('[data-disc-add]')) { addPaths([...disc.checked], disc.target); return; }
+    if (t.closest('[data-disc-cancel]')) { disc = null; render(); return; }
+    const setting = t.closest('[data-setting]');
+    if (setting) { setSetting(setting.dataset.setting, setting.getAttribute('aria-checked') !== 'true'); return; }
+    const copy = t.closest('[data-copy]');
+    if (copy) { navigator.clipboard.writeText(copy.dataset.copy).then(() => toast('Kopiert.'), () => toast('Kopieren hat nicht geklappt.')); return; }
+    const ask = t.closest('[data-remove-ask]');
+    if (ask) { confirmRemove = ask.dataset.removeAsk; renderPanel(true); return; }
+    if (t.closest('[data-remove-cancel]')) { confirmRemove = null; renderPanel(true); return; }
+    const rm = t.closest('[data-remove]');
+    if (rm) { removeProject(rm.dataset.remove); return; }
+    const ext = t.closest('[data-external]');
+    if (ext) { call('open_external', { target: ext.dataset.external }).catch(err => toast(errText(err))); return; }
+    const op = t.closest('[data-open]');
     if (op) { openDrawer(op.dataset.open); return; }
-    if (e.target.closest('[data-close]')) { closeDrawer(); }
+    if (t.closest('[data-close]')) { closeDrawer(); }
   });
   document.addEventListener('change', async e => {
+    if (e.target.matches('[data-disc]')) {
+      const path = e.target.dataset.disc;
+      if (e.target.checked) disc.checked.add(path); else disc.checked.delete(path);
+      rerenderDisc();
+      return;
+    }
     if (e.target.id === 'status-note' && openId) {
       const p = byId(openId);
-      try { await api(`/api/projects/${encodeURIComponent(openId)}/status`, { status: p.status, note: e.target.value }); p.status_note = e.target.value; toast('Notiz gespeichert.'); }
+      try { await call('set_status', { id: openId, status: p.status, note: e.target.value }); p.status_note = e.target.value; toast('Notiz gespeichert.'); }
       catch (err) { toast('Notiz nicht gespeichert.'); }
     }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
-  $('#refresh').addEventListener('click', async () => {
-    const b = $('#refresh');
-    b.disabled = true; b.textContent = 'Misst …';
-    try { S = await api('/api/refresh', {}); render(); } catch (err) { toast('Aktualisieren hat nicht geklappt.'); }
-    b.disabled = false; b.textContent = 'Aktualisieren';
-  });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && S) load(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (panelOpen) closePanel(); else closeDrawer(); } });
+  $('#refresh').addEventListener('click', refreshFacts);
 
-  load(true);
+  // Reload when anything wrote to the database, such as an agent saving a card.
+  const typing = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && a.type !== 'checkbox') || a.tagName === 'TEXTAREA'); };
+  async function watch() {
+    let v;
+    try { v = await call('data_version'); } catch (e) { return; }
+    if (typing()) return;
+    const changed = lastVersion !== null && v !== lastVersion;
+    lastVersion = v;
+    if (changed && S && !refreshing) await load(false);
+  }
+  setInterval(watch, 2500);
+  setInterval(refreshFacts, 20 * 60 * 1000);
+  window.addEventListener('focus', () => { if (S) load(true); });
+
+  load(true).then(refreshFacts);
 })();

@@ -1,0 +1,51 @@
+[package]
+name = "lookout"
+version = "0.2.0"
+edition = "2021"
+description = "Morning overview of all your agent-built software projects"
+publish = false
+
+[lib]
+name = "lookout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "Lookout"
+path = "src/main.rs"
+
+[features]
+default = ["custom-protocol"]
+# Serve the embedded ui/ folder; without it Tauri expects a dev server.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+sha1 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

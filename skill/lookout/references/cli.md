@@ -1,6 +1,6 @@
 # Lookout CLI reference
 
-Every command prints one JSON object on stdout. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. Use `python -m lookout` in place of `lookout` when the command is not on the PATH.
+Every command prints one JSON object on stdout. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. When `lookout` is not found, call `%LOCALAPPDATA%\Programs\Lookout\Lookout.exe` with the same arguments.
 
 ## Daily run
 
@@ -32,17 +32,16 @@ Feedback values: `up` (the owner likes it), `later` (not now; hidden for 14 days
 | Command | Effect |
 |---|---|
 | `lookout projects list` | All projects with `status`, `status_note`, `has_card`, `card_updated_at`, `facts_collected_at`. |
-| `lookout projects discover <folder>` | Git repositories directly inside the folder that are not registered, newest first: `path`, `suggested_id`, `last_commit`. Registers nothing. |
+| `lookout projects discover <folder>` | Git repositories directly inside the folder that are not registered, newest first: `path`, `name`, `suggested_id`, `last_commit`. Registers nothing. |
 | `lookout projects add <path> [--id ID] [--name NAME]` | Registers a folder and measures its facts. The id defaults to the folder name in lowercase. |
 | `lookout projects status <id> <active|parked|done|archived> [--note TEXT]` | The owner's intent. Archived projects disappear from runs and the main page. |
 | `lookout projects rename <id> <name>` | Changes the display name. |
 | `lookout projects remove <id>` | Stops watching and deletes that project's stored cards. Only when the owner asks. |
 
-## App
+## Status
 
-| Command | Effect |
+| Command | Returns |
 |---|---|
-| `lookout status` | Data directory, database, number of projects and cards, web app URL and whether it runs. |
-| `lookout open` | Starts the web app in the background if needed and opens it in the browser. |
-| `lookout serve [--port N]` | Runs the web app in the foreground (default port 8455, or `LOOKOUT_PORT`). |
-| `lookout autostart on|off|status` | Windows: starts the web app at sign-in. |
+| `lookout status` | `version`, `exe`, `data_dir`, `database`, `projects` (count), `with_card` (count) and a `hint` when no project is registered yet. |
+
+The Lookout window itself is opened by the owner; there is no command to start or stop it. It shows new cards and facts within a few seconds of a command writing them.

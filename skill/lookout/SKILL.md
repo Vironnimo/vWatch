@@ -14,14 +14,16 @@ Lookout holds two kinds of data:
 
 ## Calling Lookout
 
-Run `lookout <command>`. If that command is not found, use `python -m lookout <command>`; both use the same data. Every command prints one JSON object. `"ok": true` means success. `"ok": false` comes with `error.code`, `error.message` and usually `error.hint`: follow the hint and try again. Never read or write Lookout's database or files directly.
+Run `lookout <command>`. If `lookout` is not found, call the program by its full path: `%LOCALAPPDATA%\Programs\Lookout\Lookout.exe` (bash: `"$LOCALAPPDATA/Programs/Lookout/Lookout.exe"`). If that file does not exist either, stop and tell the owner that Lookout is not installed or lives elsewhere; turning on "Für Agents aufrufbar" in Lookout's settings makes `lookout` available by name.
+
+Every command prints one JSON object. `"ok": true` means success. `"ok": false` comes with `error.code`, `error.message` and usually `error.hint`: follow the hint and try again. Never read or write Lookout's database or files directly. `lookout status` shows the version, the data folder and how many projects have a card.
 
 The full command list with JSON shapes is in `references/cli.md`. Read only the section you need.
 
 ## What do you need to do?
 
 - **The daily run** (a scheduled task, or the owner asks you to update Lookout): follow "Daily run" below.
-- **Add projects:** `lookout projects discover <folder>` lists git repositories there that are not watched yet; `lookout projects add <path>` registers one. Add only the projects the owner named or confirmed.
+- **Add projects:** the owner usually adds projects in the Lookout window. When the owner asks you to, `lookout projects discover <folder>` lists git repositories there that are not watched yet and `lookout projects add <path>` registers one. Add only the projects the owner named or confirmed.
 - **The owner changes a project's intent** ("park needle-net", "gusto is done"): `lookout projects status <id> <active|parked|done|archived> --note "<reason>"`.
 - **Questions about projects:** `lookout card show <id>`, `lookout facts show <id>`, `lookout portfolio show`, `lookout feedback`. Answer from these; say when a card is old or missing.
 
