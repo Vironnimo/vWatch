@@ -22,7 +22,8 @@ CREATE INDEX IF NOT EXISTS cards_by_project ON cards(project_id, id);
 CREATE TABLE IF NOT EXISTS portfolio(
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback(
-  item_id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, value TEXT NOT NULL, at TEXT NOT NULL);
+  item_id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, value TEXT NOT NULL, at TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '', item TEXT);
 CREATE TABLE IF NOT EXISTS prefs(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ";
 
@@ -62,12 +63,16 @@ pub struct StoredPortfolio {
     pub data: Value,
 }
 
+/// The owner's reaction to an item an agent wrote: a rating or a reply to a question.
 pub struct Feedback {
     pub item_id: String,
     pub project_id: Option<String>,
     pub title: String,
     pub value: String,
     pub at: String,
+    pub note: String,
+    /// The item as it read when the owner reacted, with its `kind`; missing for older reactions.
+    pub item: Option<Value>,
 }
 
 pub struct Store {
@@ -101,10 +106,13 @@ impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let db = open(path)?;
         db.execute_batch(SCHEMA)?;
-        // Databases from before cards remembered their CI state.
-        let has_ci: bool = db.query_row("SELECT COUNT(*) FROM pragma_table_info('cards') WHERE name = 'ci'", [], |r| r.get(0))?;
-        if !has_ci {
-            db.execute_batch("ALTER TABLE cards ADD COLUMN ci TEXT")?;
+        // Columns added after the first release.
+        for (table, column, decl) in [("cards", "ci", "TEXT"), ("feedback", "note", "TEXT NOT NULL DEFAULT ''"), ("feedback", "item", "TEXT")] {
+            let present: bool =
+                db.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
+            if !present {
+                db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+            }
         }
         Ok(Store { db: Mutex::new(db) })
     }
@@ -189,6 +197,22 @@ impl Store {
         })
     }
 
+    /// Replaces the stored content of a project's latest card, keeping its version and date.
+    pub fn rewrite_latest_card(&self, id: &str, data: &Value) -> Result<()> {
+        self.with(|db| {
+            db.execute(
+                "UPDATE cards SET data = ?2 WHERE id = (SELECT MAX(id) FROM cards WHERE project_id = ?1)",
+                params![id, data.to_string()],
+            )
+            .map(drop)
+        })
+    }
+
+    /// Replaces the stored content of the latest brief, keeping its version and date.
+    pub fn rewrite_latest_portfolio(&self, data: &Value) -> Result<()> {
+        self.with(|db| db.execute("UPDATE portfolio SET data = ?1 WHERE id = (SELECT MAX(id) FROM portfolio)", [data.to_string()]).map(drop))
+    }
+
     // portfolio
     pub fn add_portfolio(&self, at: &str, data: &Value) -> Result<i64> {
         self.with(|db| {
@@ -207,23 +231,37 @@ impl Store {
     }
 
     // feedback
-    pub fn set_feedback(&self, item_id: &str, project_id: Option<&str>, title: &str, value: Option<&str>, at: &str) -> Result<()> {
-        self.with(|db| match value {
-            None => db.execute("DELETE FROM feedback WHERE item_id = ?1", [item_id]).map(drop),
-            Some(value) => db
-                .execute(
-                    "INSERT INTO feedback(item_id, project_id, title, value, at) VALUES(?1, ?2, ?3, ?4, ?5)
-                     ON CONFLICT(item_id) DO UPDATE SET value = excluded.value, at = excluded.at, title = excluded.title",
-                    params![item_id, project_id, title, value, at],
-                )
-                .map(drop),
+    pub fn set_feedback(&self, f: &Feedback) -> Result<()> {
+        self.with(|db| {
+            db.execute(
+                "INSERT INTO feedback(item_id, project_id, title, value, at, note, item) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(item_id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title, value = excluded.value,
+                 at = excluded.at, note = excluded.note, item = excluded.item",
+                params![f.item_id, f.project_id, f.title, f.value, f.at, f.note, f.item.as_ref().map(Value::to_string)],
+            )
+            .map(drop)
         })
     }
 
+    pub fn delete_feedback(&self, item_id: &str) -> Result<()> {
+        self.with(|db| db.execute("DELETE FROM feedback WHERE item_id = ?1", [item_id]).map(drop))
+    }
+
+    /// All reactions, newest first.
     pub fn feedback(&self) -> Result<Vec<Feedback>> {
         self.with(|db| {
-            db.prepare("SELECT item_id, project_id, title, value, at FROM feedback ORDER BY at DESC")?
-                .query_map([], |r| Ok(Feedback { item_id: r.get(0)?, project_id: r.get(1)?, title: r.get(2)?, value: r.get(3)?, at: r.get(4)? }))?
+            db.prepare("SELECT item_id, project_id, title, value, at, note, item FROM feedback ORDER BY at DESC")?
+                .query_map([], |r| {
+                    Ok(Feedback {
+                        item_id: r.get(0)?,
+                        project_id: r.get(1)?,
+                        title: r.get(2)?,
+                        value: r.get(3)?,
+                        at: r.get(4)?,
+                        note: r.get(5)?,
+                        item: r.get::<_, Option<String>>(6)?.map(json),
+                    })
+                })?
                 .collect()
         })
     }

@@ -3,9 +3,10 @@
 //! One schema description drives validation and the JSON schema that
 //! `lookout schema` prints. Validation is lenient about extras: unknown fields
 //! are dropped and reported as warnings, while missing or malformed fields fail
-//! with their path. Items people rate (suggestions, patterns, synergies, app
-//! ideas, verdicts) carry a stable `id`; new items get one, and an agent keeps
-//! an item's identity by sending its previous id again.
+//! with their path. Items the owner reacts to (suggestions and questions on a
+//! card; focus items, patterns, synergies, app ideas and verdicts in the brief)
+//! carry a stable `id`; new items get one, and an agent keeps an item's identity
+//! by sending its previous id again.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -71,7 +72,7 @@ const OPEN_END: &[Field] = &[
     f("source", TEXT, Text("")),
     f("age_days", Ty::Nullable(&Ty::Int { min: 0, max: 100_000 }), Null),
 ];
-const QUESTION: &[Field] = &[f("title", words(12), Required), f("source", TEXT, Text(""))];
+const QUESTION: &[Field] = &[f("id", Ty::Nullable(&Ty::Id), Null), f("title", words(12), Required), f("source", TEXT, Text(""))];
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&TEXT), Null),
     f("progress_note", Ty::Nullable(&TEXT), Null),
@@ -106,6 +107,7 @@ const CARD: &[Field] = &[
 ];
 
 const FOCUS: &[Field] = &[
+    f("id", Ty::Nullable(&Ty::Id), Null),
     f("project", SHORT, Required),
     f("title", words(8), Required),
     f("why", WHY, Required),
@@ -158,11 +160,17 @@ impl Kind {
         }
     }
 
-    /// The lists whose items people rate, with the prefix of generated ids.
-    pub fn rated(self) -> &'static [(&'static str, &'static str)] {
+    /// The lists whose items carry ids: (list, prefix of generated ids, item kind).
+    pub fn items(self) -> &'static [(&'static str, &'static str, &'static str)] {
         match self {
-            Kind::Card => &[("suggestions", "sg")],
-            Kind::Portfolio => &[("patterns", "pt"), ("synergies", "sy"), ("new_apps", "ap"), ("park_or_revive", "vd")],
+            Kind::Card => &[("suggestions", "sg", "suggestion"), ("waiting_on_you", "q", "question")],
+            Kind::Portfolio => &[
+                ("focus", "fc", "focus"),
+                ("patterns", "pt", "pattern"),
+                ("synergies", "sy", "synergy"),
+                ("new_apps", "ap", "new_app"),
+                ("park_or_revive", "vd", "verdict"),
+            ],
         }
     }
 
@@ -188,7 +196,7 @@ pub fn validate(kind: Kind, data: &Value) -> Result<(Value, Vec<String>), Vec<St
     }
     let mut clean = clean.expect("a valid object yields a value");
     let mut seen = HashSet::new();
-    for (list, prefix) in kind.rated() {
+    for (list, prefix, _) in kind.items() {
         if let Some(Value::Array(items)) = clean.get_mut(*list) {
             for item in items {
                 let id = item.get("id").and_then(Value::as_str).map(str::to_owned);

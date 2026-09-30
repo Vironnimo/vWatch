@@ -16,7 +16,7 @@ fn morning_run_cycle() {
     assert_eq!(due["portfolio"]["due"], true);
 
     let saved = svc.put_card("demo", card(), false).unwrap();
-    assert!(saved["rated_items"][0]["id"].as_str().unwrap().starts_with("sg-"));
+    assert!(saved["items"][0]["id"].as_str().unwrap().starts_with("sg-"));
     assert_eq!(svc.due(14, true).unwrap()["projects"], json!([]));
 
     std::fs::write(repo.join("f0.txt"), "more\n").unwrap();
@@ -38,14 +38,12 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
     let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None).unwrap();
     let first = svc.put_card("demo", card_with(json!({"features": ["Suche"]})), false).unwrap();
-    let sid = first["rated_items"][0]["id"].as_str().unwrap().to_owned();
-    svc.set_feedback(&sid, Some("down"), Some("demo"), "Dark Mode").unwrap();
+    let sid = first["items"][0]["id"].as_str().unwrap().to_owned();
 
     svc.put_card("demo", json!({"headline": "Neu"}), true).unwrap();
     let current = &svc.card("demo").unwrap()["card"];
     assert_eq!((current["headline"].clone(), current["features"].clone()), (json!("Neu"), json!(["Suche"])));
     assert_eq!(current["suggestions"][0]["id"], json!(sid));
-    assert_eq!(svc.context("demo").unwrap()["feedback"], json!([{"id": sid, "title": "Dark Mode", "value": "down", "at": svc.now()}]));
 }
 
 #[test]
@@ -145,9 +143,9 @@ fn owner_choices_show_up_in_the_window_state() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None).unwrap();
-    let sid = svc.put_card("demo", card(), false).unwrap()["rated_items"][0]["id"].as_str().unwrap().to_owned();
+    let sid = svc.put_card("demo", card(), false).unwrap()["items"][0]["id"].as_str().unwrap().to_owned();
 
-    svc.set_feedback(&sid, Some("later"), Some("demo"), "Dark Mode").unwrap();
+    svc.set_feedback(&sid, Some("later"), Some("nach dem Release")).unwrap();
     svc.set_pref("hidden_modules", &json!(["pulse"])).unwrap();
     assert_eq!(svc.set_status("demo", "sleeping", None).unwrap_err().code, "invalid_status");
     assert_eq!(svc.set_pref("colour", &json!("red")).unwrap_err().code, "invalid_pref");
@@ -155,7 +153,7 @@ fn owner_choices_show_up_in_the_window_state() {
     let state = svc.state(false).unwrap();
     let p = &state["projects"][0];
     assert_eq!((p["card"]["headline"].as_str(), p["facts"]["is_git"].as_bool()), (Some("Alles ruhig"), Some(true)));
-    assert_eq!(state["feedback"][&sid]["value"], "later");
+    assert_eq!((state["feedback"][&sid]["value"].as_str(), state["feedback"][&sid]["note"].as_str()), (Some("later"), Some("nach dem Release")));
     assert_eq!(state["prefs"], json!({"style": "handover", "hidden_modules": ["pulse"]}));
 }
 
@@ -184,4 +182,48 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
     assert_eq!(reasons(&svc), ["ci_changed"]);
     svc.put_card("demo", card(), false).unwrap();
     assert!(reasons(&svc).is_empty());
+}
+
+#[test]
+fn owner_reactions_reach_agents_with_what_they_were_about() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None).unwrap();
+    svc.add_project(common::make_repo(tmp.path(), "other", &["2026-09-28T10:00:00"]).to_str().unwrap(), None, None).unwrap();
+    let saved = svc.put_card("demo", card_with(json!({"waiting_on_you": [{"title": "Soll die App offline laufen?"}]})), false).unwrap();
+    let id_of = |kind: &str| saved["items"].as_array().unwrap().iter().find(|i| i["kind"] == kind).unwrap()["id"].as_str().unwrap().to_owned();
+    let (sid, qid) = (id_of("suggestion"), id_of("question"));
+    svc.put_card("other", card(), false).unwrap();
+
+    // a rating keeps what it was about and why, after the agent dropped the item, and reaches every project
+    svc.set_feedback(&sid, Some("down"), Some("Keine UI-Spielereien")).unwrap();
+    svc.put_card("demo", card_with(json!({"suggestions": [], "waiting_on_you": [{"id": qid, "title": "Soll die App offline laufen?"}]})), false).unwrap();
+    let ctx = svc.context("other").unwrap();
+    let rating = &ctx["feedback"][0];
+    assert_eq!(rating["item"], json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "effort": "S"}));
+    assert_eq!((rating["project"].as_str(), rating["note"].as_str()), (Some("demo"), Some("Keine UI-Spielereien")));
+    assert_eq!(ctx["feedback_summary"], json!([{"kind": "suggestion", "type": "feature", "up": 0, "later": 0, "down": 1}]));
+
+    // questions take answers, which make the card due and reach only their own project
+    assert_eq!(svc.set_feedback(&qid, Some("up"), None).unwrap_err().code, "invalid_feedback");
+    assert_eq!(svc.set_feedback(&qid, Some("answered"), Some(" ")).unwrap_err().code, "answer_missing");
+    assert_eq!(svc.set_feedback("sg-gone", Some("up"), None).unwrap_err().code, "unknown_item");
+    clock.advance(Duration::minutes(1));
+    svc.set_feedback(&qid, Some("answered"), Some("Ja, unterwegs ohne Netz")).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["projects"], json!([{"id": "demo", "name": "demo", "reason": "answered"}]));
+    assert_eq!(svc.context("demo").unwrap()["feedback"][0]["note"], "Ja, unterwegs ohne Netz");
+    assert_eq!(svc.context("other").unwrap()["feedback"].as_array().unwrap().len(), 1);
+
+    // a focus item can be marked done for the next brief
+    let brief = json!({"greeting": "Moin", "focus": [{"project": "demo", "title": "Offline klären", "why": "Beantwortet.", "effort": "1h"}]});
+    let fid = svc.put_portfolio(brief, false).unwrap()["items"][0]["id"].as_str().unwrap().to_owned();
+    svc.set_feedback(&fid, Some("done"), None).unwrap();
+    let pctx = svc.portfolio_context().unwrap();
+    assert!(pctx["feedback"].as_array().unwrap().iter().any(|f| f["id"] == fid && f["item"]["kind"] == "focus" && f["project"] == "demo"));
+
+    // cards written before questions had ids get them when Lookout opens
+    let stored = svc.store().latest_card("other").unwrap().unwrap();
+    svc.store().add_card("other", &svc.now(), &stored.fingerprint, None, None, &card_with(json!({"waiting_on_you": [{"title": "Alt?"}]}))).unwrap();
+    let reopened = lookout::Lookout::open(&tmp.path().join("lookout.db")).unwrap();
+    assert!(reopened.card("other").unwrap()["card"]["waiting_on_you"][0]["id"].as_str().unwrap().starts_with("q-"));
 }

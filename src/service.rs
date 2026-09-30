@@ -13,10 +13,11 @@ use serde_json::{json, Map, Value};
 
 use crate::cards::{self, Kind};
 use crate::facts;
-use crate::store::{Project, Store};
+use crate::store::{Feedback, Project, Store};
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
-pub const FEEDBACK: &[&str] = &["up", "later", "down"];
+/// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
+pub const RATINGS: &[&str] = &["up", "later", "down"];
 pub const PREFS: &[&str] = &["style", "hidden_modules"];
 pub const SNOOZE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
@@ -132,6 +133,60 @@ fn find_repos(dir: &Path, depth: usize) -> Vec<PathBuf> {
     repos
 }
 
+/// The reactions the owner can give to an item of this kind.
+fn reactions_for(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "question" => &["answered", "done"],
+        "focus" => &["done"],
+        _ => RATINGS,
+    }
+}
+
+fn kind_of(f: &Feedback) -> &str {
+    f.item.as_ref().and_then(|i| i["kind"].as_str()).unwrap_or("")
+}
+
+/// A short label for an item: its title, or for a verdict the project and the verdict.
+fn title_of(item: &Value) -> String {
+    match item["title"].as_str() {
+        Some(t) => t.to_owned(),
+        None => format!("{}: {}", item["project"].as_str().unwrap_or(""), item["verdict"].as_str().unwrap_or("")),
+    }
+}
+
+/// The ids Lookout keeps for a saved document's items, for the agent's reply.
+fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
+    kind.items()
+        .iter()
+        .flat_map(|(list, _, item_kind)| {
+            doc[*list].as_array().into_iter().flatten().map(move |i| json!({"id": i["id"], "kind": item_kind, "title": title_of(i)}))
+        })
+        .collect()
+}
+
+fn feedback_json(f: &Feedback) -> Value {
+    json!({
+        "id": f.item_id, "project": f.project_id, "value": f.value, "note": f.note, "at": f.at,
+        "item": f.item.clone().unwrap_or_else(|| json!({"title": f.title})),
+    })
+}
+
+/// The owner's ratings counted per kind and type of item: which directions they tend to take up or reject.
+fn feedback_summary(reactions: &[Feedback]) -> Value {
+    let mut counts: std::collections::BTreeMap<(String, String), [u32; 3]> = Default::default();
+    for f in reactions {
+        let Some(slot) = RATINGS.iter().position(|r| *r == f.value) else { continue };
+        let item = f.item.clone().unwrap_or_default();
+        let ty = item["type"].as_str().or(item["verdict"].as_str()).unwrap_or("").to_owned();
+        counts.entry((kind_of(f).to_owned(), ty)).or_default()[slot] += 1;
+    }
+    let text = |s: String| if s.is_empty() { Value::Null } else { Value::String(s) };
+    counts
+        .into_iter()
+        .map(|((kind, ty), [up, later, down])| json!({"kind": text(kind), "type": text(ty), "up": up, "later": later, "down": down}))
+        .collect()
+}
+
 /// A CI state firm enough to compare: `green` or `red`. Running, unknown or skipped
 /// lookups say nothing about whether a card's CI statement still holds.
 fn settled_ci(facts: &Value) -> Option<&str> {
@@ -168,7 +223,30 @@ fn pick(v: &Value, keys: &[&str]) -> Value {
 impl Lookout {
     /// Lookout on a database file, measuring with git and the real clock.
     pub fn open(db: &Path) -> Result<Lookout> {
-        Ok(Lookout::with_parts(Store::open(db)?, Box::new(Utc::now), Box::new(facts::collect)))
+        let svc = Lookout::with_parts(Store::open(db)?, Box::new(Utc::now), Box::new(facts::collect));
+        svc.give_items_ids()?;
+        Ok(svc)
+    }
+
+    /// Cards and briefs written before questions and focus items had ids get them,
+    /// so the owner can answer those items too.
+    fn give_items_ids(&self) -> Result<()> {
+        let missing = |kind: Kind, doc: &Value| {
+            kind.items().iter().any(|(list, _, _)| doc[*list].as_array().is_some_and(|items| items.iter().any(|i| !i["id"].is_string())))
+        };
+        for p in self.store.projects()? {
+            if let Some(card) = self.store.latest_card(&p.id)?.filter(|c| missing(Kind::Card, &c.data)) {
+                if let Ok((clean, _)) = cards::validate(Kind::Card, &card.data) {
+                    self.store.rewrite_latest_card(&p.id, &clean)?;
+                }
+            }
+        }
+        if let Some(pf) = self.store.latest_portfolio()?.filter(|p| missing(Kind::Portfolio, &p.data)) {
+            if let Ok((clean, _)) = cards::validate(Kind::Portfolio, &pf.data) {
+                self.store.rewrite_latest_portfolio(&clean)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> Lookout {
@@ -408,6 +486,7 @@ impl Lookout {
         let now = (self.clock)();
         let (mut projects, mut problems, mut up_to_date) = (Vec::new(), Vec::new(), Vec::new());
         let mut newest_card: Option<String> = None;
+        let reactions = self.store.feedback()?;
         for p in self.store.projects()? {
             if p.status == "archived" {
                 continue;
@@ -428,6 +507,9 @@ impl Lookout {
                 Some(c) if stored.as_ref().is_some_and(|s| s.fingerprint != c.fingerprint) => Some("changed"),
                 Some(c) if stored.as_ref().and_then(|s| settled_ci(&s.data)).is_some_and(|now| c.ci.as_deref().is_some_and(|then| then != now)) => {
                     Some("ci_changed")
+                }
+                Some(c) if reactions.iter().any(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question" && f.at > c.created_at) => {
+                    Some("answered")
                 }
                 Some(c) if p.status_changed_at.as_ref().is_some_and(|at| *at > c.created_at) => Some("status_changed"),
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
@@ -478,13 +560,10 @@ impl Lookout {
             };
             json!({"days": ((self.clock)() - parse(&c.created_at)).num_days(), "commit_count": count, "commits": commits})
         });
-        let feedback: Vec<Value> = self
-            .store
-            .feedback()?
-            .into_iter()
-            .filter(|f| f.project_id.as_deref() == Some(id))
-            .map(|f| json!({"id": f.item_id, "title": f.title, "value": f.value, "at": f.at}))
-            .collect();
+        // Ratings from every project show the owner's taste; replies only matter to their own project.
+        let reactions = self.store.feedback()?;
+        let feedback: Vec<Value> =
+            reactions.iter().filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str())).map(feedback_json).collect();
         let next = format!(
             "Write the card with `lookout card put {id} --file <card.json>`{}",
             if card.is_some() { " (add --merge to send only the fields that changed)." } else { "." }
@@ -496,6 +575,7 @@ impl Lookout {
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": c.data})),
             "since_previous_card": since,
             "feedback": feedback,
+            "feedback_summary": feedback_summary(&reactions),
             "next": next,
         }))
     }
@@ -521,8 +601,7 @@ impl Lookout {
         })?;
         let stored = self.stored_facts(id)?;
         let version = self.store.add_card(id, &self.now(), &stored.fingerprint, stored.data["head"].as_str(), settled_ci(&stored.data), &clean)?;
-        let rated: Vec<Value> = clean["suggestions"].as_array().into_iter().flatten().map(|s| pick(s, &["id", "title"])).collect();
-        Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "rated_items": rated}))
+        Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
     }
 
     pub fn card(&self, id: &str) -> Result<Value> {
@@ -546,7 +625,9 @@ impl Lookout {
                 let titles = |key: &str| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| x["title"].clone()).collect() };
                 json!({
                     "updated_at": card.created_at, "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
-                    "reentry": c["reentry"], "waiting_on_you": titles("waiting_on_you"), "open_ends": titles("open_ends"),
+                    "reentry": c["reentry"],
+                    "waiting_on_you": c["waiting_on_you"].as_array().into_iter().flatten().map(|q| pick(q, &["id", "title"])).collect::<Vec<_>>(),
+                    "open_ends": titles("open_ends"),
                     "suggestions": c["suggestions"].as_array().into_iter().flatten().map(|s| pick(s, &["id", "type", "title"])).collect::<Vec<_>>(),
                     "cross_project_hints": c["cross_project_hints"],
                 })
@@ -566,17 +647,14 @@ impl Lookout {
             }));
         }
         let previous = self.store.latest_portfolio()?;
-        let feedback: Vec<Value> = self
-            .store
-            .feedback()?
-            .into_iter()
-            .map(|f| json!({"id": f.item_id, "project": f.project_id, "title": f.title, "value": f.value, "at": f.at}))
-            .collect();
+        let reactions = self.store.feedback()?;
         Ok(json!({
             "today": self.today().to_string(),
             "projects": rows,
             "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data})),
-            "feedback": feedback,
+            "owner_last_opened": self.store.pref("last_visit")?,
+            "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
+            "feedback_summary": feedback_summary(&reactions),
             "next": "Write the brief with `lookout portfolio put --file <portfolio.json>`.",
         }))
     }
@@ -607,14 +685,7 @@ impl Lookout {
                 .hint(format!("Use the ids from `lookout portfolio context`: {}.", known.join(", "))));
         }
         let version = self.store.add_portfolio(&self.now(), &clean)?;
-        let mut rated = Vec::new();
-        for (key, _) in Kind::Portfolio.rated() {
-            for item in items(key) {
-                let title = if item["title"].is_string() { item["title"].clone() } else { item["project"].clone() };
-                rated.push(json!({"id": item["id"], "title": title}));
-            }
-        }
-        Ok(json!({"saved": true, "version": version, "warnings": warnings, "rated_items": rated}))
+        Ok(json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}))
     }
 
     pub fn portfolio(&self) -> Result<Value> {
@@ -625,25 +696,76 @@ impl Lookout {
     }
 
     // ---------- feedback and preferences ----------
-    pub fn set_feedback(&self, item_id: &str, value: Option<&str>, project_id: Option<&str>, title: &str) -> Result<Value> {
-        if let Some(v) = value {
-            if !FEEDBACK.contains(&v) {
-                return Err(LookoutError::new("invalid_feedback", format!("Unknown rating '{v}'."))
-                    .hint(format!("Use one of: {}.", FEEDBACK.join(", "))));
+    /// Records the owner's reaction to an item of the current cards or brief: a rating
+    /// (`up`, `later`, `down`) of a suggestion or idea, `answered` (the answer is the note)
+    /// or `done` for a question, `done` for a focus item. Lookout keeps the item as it read,
+    /// so agents still see what was rated after it left the card. `value: None` withdraws
+    /// the reaction; `note: None` keeps the note already stored.
+    pub fn set_feedback(&self, item_id: &str, value: Option<&str>, note: Option<&str>) -> Result<Value> {
+        let Some(value) = value else {
+            self.store.delete_feedback(item_id)?;
+            return Ok(json!({"item_id": item_id, "value": null}));
+        };
+        let existing = self.store.feedback()?.into_iter().find(|f| f.item_id == item_id);
+        let (project_id, item) = match (self.find_item(item_id)?, &existing) {
+            (Some((project, item)), _) => (project, Some(item)),
+            (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
+            (None, None) => {
+                return Err(LookoutError::new("unknown_item", format!("No current card or brief has an item with id '{item_id}'."))
+                    .hint("Use an id from `lookout card show <id>` or `lookout portfolio show`."))
+            }
+        };
+        let kind = item.as_ref().and_then(|i| i["kind"].as_str()).unwrap_or("suggestion");
+        let allowed = reactions_for(kind);
+        if !allowed.contains(&value) {
+            return Err(LookoutError::new("invalid_feedback", format!("'{value}' does not fit a {kind}."))
+                .hint(format!("Use one of: {}.", allowed.join(", "))));
+        }
+        let note = match note {
+            Some(n) => n.trim().to_owned(),
+            None => existing.as_ref().map(|f| f.note.clone()).unwrap_or_default(),
+        };
+        if value == "answered" && note.is_empty() {
+            return Err(LookoutError::new("answer_missing", "An answer needs its text.").hint("Send the answer as the note, or mark the question `done`."));
+        }
+        let title = match (&item, &existing) {
+            (Some(item), _) => title_of(item),
+            (None, Some(f)) => f.title.clone(),
+            (None, None) => String::new(),
+        };
+        let at = self.now();
+        self.store.set_feedback(&Feedback { item_id: item_id.to_owned(), project_id, title, value: value.to_owned(), at, note: note.clone(), item })?;
+        Ok(json!({"item_id": item_id, "value": value, "note": note}))
+    }
+
+    /// The item with this id in the current cards and brief: (its project, the item with its `kind`).
+    fn find_item(&self, item_id: &str) -> Result<Option<(Option<String>, Value)>> {
+        let mut docs: Vec<(Option<String>, Kind, Value)> = Vec::new();
+        for p in self.store.projects()? {
+            if let Some(card) = self.store.latest_card(&p.id)? {
+                docs.push((Some(p.id), Kind::Card, card.data));
             }
         }
-        self.store.set_feedback(item_id, project_id, title, value, &self.now())?;
-        Ok(json!({"item_id": item_id, "value": value}))
+        if let Some(pf) = self.store.latest_portfolio()? {
+            docs.push((None, Kind::Portfolio, pf.data));
+        }
+        for (project, kind, doc) in docs {
+            for (list, _, item_kind) in kind.items() {
+                let Some(item) = doc[*list].as_array().into_iter().flatten().find(|i| i["id"] == item_id) else { continue };
+                let mut snapshot = json!({"kind": item_kind});
+                for (key, value) in item.as_object().into_iter().flatten().filter(|(k, _)| *k != "id") {
+                    snapshot[key] = value.clone();
+                }
+                let project = project.or_else(|| item["project"].as_str().map(str::to_owned));
+                return Ok(Some((project, snapshot)));
+            }
+        }
+        Ok(None)
     }
 
     pub fn feedback(&self, project_id: Option<&str>) -> Result<Value> {
         Ok(Value::Array(
-            self.store
-                .feedback()?
-                .into_iter()
-                .filter(|f| project_id.is_none() || f.project_id.as_deref() == project_id)
-                .map(|f| json!({"id": f.item_id, "project": f.project_id, "title": f.title, "value": f.value, "at": f.at}))
-                .collect(),
+            self.store.feedback()?.iter().filter(|f| project_id.is_none() || f.project_id.as_deref() == project_id).map(feedback_json).collect(),
         ))
     }
 
@@ -690,7 +812,7 @@ impl Lookout {
         }
         let portfolio = self.store.latest_portfolio()?;
         let feedback: Map<String, Value> =
-            self.store.feedback()?.into_iter().map(|f| (f.item_id, json!({"value": f.value, "at": f.at}))).collect();
+            self.store.feedback()?.into_iter().map(|f| (f.item_id, json!({"value": f.value, "at": f.at, "note": f.note}))).collect();
         Ok(json!({
             "today": self.today().to_string(),
             "now": stamp(now),

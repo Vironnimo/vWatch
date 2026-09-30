@@ -7,7 +7,7 @@ Lookout holds two kinds of data:
 - **Facts** it measures itself from git: activity, backup (remote), uncommitted and unpushed work, leftover worktrees and branches, GitHub CI state. Exact and free.
 - **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `lookout due` tells an agent which projects actually changed, so a daily run only re-analyses those.
 
-You rate every suggestion in the window (gut / später / Quatsch); agents read the ratings and never bring back a rejected idea.
+You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
 ## One folder, one program
 

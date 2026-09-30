@@ -160,6 +160,25 @@ details > summary::-webkit-details-marker { display: none; }
 .idea .ev { font-size: 12.5px; color: var(--text-3); font-family: var(--font-mono); overflow-wrap: anywhere; }
 .idea .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .idea .who { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.idea .mynote { font-size: 13px; color: var(--text-2); border-left: 2px solid var(--line-2); padding-left: 8px; }
+.noteform { border-style: dashed; }
+.inrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.inrow input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line-2); background: var(--surface); color: var(--text); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 14px; }
+.inrow input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
+.qs .q .qrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
+.qs .q .qa { display: inline-flex; gap: 10px; opacity: 0; transition: opacity .12s ease; white-space: nowrap; }
+.qs .q:hover .qa, .qs .q:focus-within .qa { opacity: 1; }
+@media (hover: none) { .qs .q .qa { opacity: 1; } }
+.qs .q .qa button { border: 0; background: none; padding: 0; font: inherit; font-size: 12.5px; color: var(--accent); cursor: pointer; }
+.qs .q .qa button:hover { text-decoration: underline; }
+.qs .q .qsrc { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
+.qs .q.replied .qt { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--line-2); }
+.qs .q .qr { font-size: 13px; color: var(--text-2); }
+.focus .check { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 1px 9px; font-size: 12px; color: var(--text-3); cursor: pointer; margin-left: auto; }
+.focus .check:hover { border-color: var(--line-2); color: var(--text-2); }
+.focus .check[aria-pressed="true"] { border-color: var(--good); color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.focus .item.done .t, .focus .item.done .why { color: var(--text-3); }
+.focus .item.done .t { text-decoration: line-through; text-decoration-color: var(--line-2); }
 .sev-risk { color: var(--bad); } .sev-warn { color: var(--warn); } .sev-info { color: var(--info); }
 
 /* Style: board */

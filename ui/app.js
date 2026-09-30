@@ -16,6 +16,9 @@
   let S = null;           // state from the app core
   let showRated = false;  // show suggestions the owner already rated away
   let showAllRecent = false;
+  let noteFor = null;     // item whose "why?" field shows right after a later/down rating
+  let answering = null;   // question whose answer field is open
+  const drafts = {};      // unsent note and answer text per item, kept across re-renders
   let openId = null;      // project whose drawer is open
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
@@ -54,6 +57,9 @@
     return f.value;
   }
   const hiddenByRating = id => !showRated && (rated(id) === 'down' || rated(id) === 'later');
+  // the owner's reply to a question: answered (with the answer as note) or done
+  const reply = id => { const f = id && S.feedback[id]; return f && (f.value === 'answered' || f.value === 'done') ? f : null; };
+  const openQs = c => c.waiting_on_you.filter(w => !reply(w.id));
 
   // ---------- facts-derived safety ----------
   function safety(p) {
@@ -85,9 +91,10 @@
   }
   const dmod = (title, body, sub) => body ? `<section class="mod"><div class="mod-head"><div><h2>${esc(title)}</h2>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div></div>${body}</section>` : '';
 
-  function fbButtons(id, projectId, title) {
+  function fbButtons(id) {
+    if (!id) return '';
     const cur = rated(id);
-    return `<span class="fb" data-item="${esc(id)}" data-project="${esc(projectId || '')}" data-title="${esc(title)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
+    return `<span class="fb" data-item="${esc(id)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
   }
 
   function spark(weekly, col, h = 38) {
@@ -104,21 +111,33 @@
   }
   const weekly = p => (p.facts && p.facts.commits && p.facts.commits.weekly) || new Array(26).fill(0);
 
+  // right after a later/down rating the card turns into an optional "why?" field
+  function noteForm(id, label) {
+    const down = S.feedback[id] && S.feedback[id].value === 'down';
+    return `<div class="idea noteform"><div class="kind">${down ? 'Abgelehnt' : 'Später'} · ${esc(label)}</div>
+      <div class="why">Magst du kurz sagen, warum? Die Agents richten künftige Vorschläge danach.</div>
+      <div class="inrow"><input type="text" aria-label="Warum" data-draft="${esc(id)}" data-kind="note" maxlength="300" value="${esc(drafts[id] || '')}" placeholder="${down ? 'z. B. passt nicht zum Projekt' : 'z. B. erst nach dem Release'}">
+      <button type="button" class="btn primary" data-note-save="${esc(id)}">Merken</button><button type="button" class="btn" data-note-skip>Überspringen</button></div></div>`;
+  }
+  const myNote = id => { const f = S.feedback[id]; return f && f.note && !reply(id) ? `<div class="mynote">Deine Notiz: ${esc(f.note)}</div>` : ''; };
+
   function ideaCard(s, projects, projectId, kind) {
+    if (noteFor === s.id) return noteForm(s.id, s.title);
     if (hiddenByRating(s.id)) return '';
     return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div>${s.effort ? `<span class="effort">${esc(s.effort)}</span>` : ''}</div>
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
-      <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id, projectId, s.title)}</div></div>`;
+      ${myNote(s.id)}
+      <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div></div>`;
   }
 
   function blockFocus() {
     const t = (S.portfolio && S.portfolio.focus) || [];
     if (!t.length) return '';
     return mod('focus', 'Heute zuerst', 'Über alle Projekte hinweg ausgewählt', `<div class="focus">${t.slice(0, 3).map((it, i) => `
-      <div class="item"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
-      <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span></div>
+      <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
+      <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span>${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
       <div class="why">${esc(it.why)}</div></div></div>`).join('')}</div>`);
   }
 
@@ -141,7 +160,7 @@
     const list = [...visible()].sort((a, b) => risk(b) - risk(a) || (lastWork(b) || '').localeCompare(lastWork(a) || ''));
     if (!list.length) return '';
     const tile = p => {
-      const c = p.card, waiting = c ? c.waiting_on_you.length : 0;
+      const c = p.card, waiting = c ? openQs(c).length : 0;
       const fresh = isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : '';
       return `<button class="tile" type="button" data-open="${esc(p.id)}">
         <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span class="pills">${fresh}${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
@@ -153,17 +172,30 @@
     return mod('projects', 'Deine Projekte', 'Die riskantesten zuerst. Klick öffnet den Steckbrief', `<div class="tiles">${list.map(tile).join('')}</div>`);
   }
 
+  // one question: answer it or mark it done; answered ones show the reply until the next card
+  function question(w, withSource) {
+    const f = reply(w.id);
+    if (f) return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Erledigt'} · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">zurücknehmen</button></div></li>`;
+    const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">antworten</button><button type="button" data-qdone="${esc(w.id)}">erledigt</button></span>` : '';
+    const form = answering === w.id ? `<div class="inrow"><input type="text" aria-label="Deine Antwort" data-draft="${esc(w.id)}" data-kind="answer" maxlength="600" value="${esc(drafts[w.id] || '')}" placeholder="Deine Antwort, der nächste Lauf nimmt sie in die Karte auf">
+      <button type="button" class="btn primary" data-answer-save="${esc(w.id)}">Senden</button><button type="button" class="btn" data-answer-cancel>Abbrechen</button></div>` : '';
+    const src = w.source ? (withSource ? `<div class="qsrc mono">${esc(w.source)}</div>` : '') : '';
+    return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}</span>${acts}</div>${src}${form}</li>`;
+  }
+
   function blockWaiting(limitPer = 2) {
-    const groups = visible().filter(p => p.card && p.card.waiting_on_you.length);
+    const groups = visible().filter(p => p.card && openQs(p.card).length);
     if (!groups.length) return '';
-    const total = groups.reduce((a, p) => a + p.card.waiting_on_you.length, 0);
-    const li = w => `<li${w.source ? ` title="Quelle: ${esc(w.source)}"` : ''}>${esc(w.title)}</li>`;
+    const total = groups.reduce((a, p) => a + openQs(p.card).length, 0);
     const body = groups.map(p => {
-      const items = p.card.waiting_on_you, head = items.slice(0, limitPer), rest = items.slice(limitPer);
+      const items = openQs(p.card);
+      // an open answer field stays visible even when its question sits below the fold
+      const cut = Math.max(limitPer, items.findIndex(w => w.id === answering) + 1);
+      const head = items.slice(0, cut), rest = items.slice(cut);
       return `<div class="group"><div class="group-h">${plink(p.id)}<span class="count">${items.length}</span></div>
-        <ul class="qs">${head.map(li).join('')}</ul>${rest.length ? `<details><summary class="more">+ ${rest.length} weitere</summary><ul class="qs">${rest.map(li).join('')}</ul></details>` : ''}</div>`;
+        <ul class="qs">${head.map(w => question(w)).join('')}</ul>${rest.length ? `<details><summary class="more">+ ${rest.length} weitere</summary><ul class="qs">${rest.map(w => question(w)).join('')}</ul></details>` : ''}</div>`;
     }).join('');
-    return mod('waiting', 'Wartet auf dich', `${total} Entscheidungen, die nur du treffen kannst`, `<div class="groups">${body}</div>`);
+    return mod('waiting', 'Wartet auf dich', `${total} ${total === 1 ? 'Entscheidung' : 'Entscheidungen'}, die nur du treffen kannst. Deine Antworten lesen die Agents beim nächsten Lauf`, `<div class="groups">${body}</div>`);
   }
 
   function blockRecent(limit = 10) {
@@ -214,11 +246,12 @@
   function blockAcross() {
     const pf = S.portfolio || {};
     const verdict = r => {
-      if (hiddenByRating(r.id)) return '';
       const v = VERDICT[r.verdict] || [r.verdict, ''];
       const name = byId(r.project) ? byId(r.project).name : r.project;
+      if (noteFor === r.id) return noteForm(r.id, `${v[0]}: ${name}`);
+      if (hiddenByRating(r.id)) return '';
       return `<div class="idea"><div class="kind">Parken oder zurückholen?</div><div class="h"><div class="t">${esc(name)}</div><span class="tag ${v[1]}">${esc(v[0])}</span></div>
-        <div class="why">${esc(r.why)}</div><div class="foot"><div class="who">${plink(r.project)}</div>${fbButtons(r.id, r.project, `${v[0]}: ${name}`)}</div></div>`;
+        <div class="why">${esc(r.why)}</div>${myNote(r.id)}<div class="foot"><div class="who">${plink(r.project)}</div>${fbButtons(r.id)}</div></div>`;
     };
     const cards = [
       ...(pf.patterns || []).map(s => ideaCard(s, s.projects, null, 'Muster')),
@@ -279,7 +312,7 @@
       ${spark(weekly(p), color(p.id))}
       <div class="stats"><span>zuletzt ${ago(lastWork(p))}</span><span class="mono">${num(commits.last_30d)} / 30 T</span></div>
       ${badges ? `<div class="badges">${badges}</div>` : ''}
-      ${c ? `<div class="next"><span class="faint" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">Wiedereinstieg</span><b>${esc(c.reentry.next_step)}</b><span><span class="effort">${esc(c.reentry.effort)}</span> · ${c.waiting_on_you.length} Entscheidungen · ${c.open_ends.length} offene Enden</span></div>` : ''}
+      ${c ? `<div class="next"><span class="faint" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">Wiedereinstieg</span><b>${esc(c.reentry.next_step)}</b><span><span class="effort">${esc(c.reentry.effort)}</span> · ${openQs(c).length} Entscheidungen · ${c.open_ends.length} offene Enden</span></div>` : ''}
     </button>`;
   }
 
@@ -289,7 +322,7 @@
     const noRemote = git.filter(p => !p.facts.has_remote).length;
     const unsaved = git.filter(p => (p.facts.dirty || {}).files || p.facts.ahead).length;
     const red = git.filter(p => (p.facts.ci || {}).state === 'red').length;
-    const waiting = list.reduce((a, p) => a + (p.card ? p.card.waiting_on_you.length : 0), 0);
+    const waiting = list.reduce((a, p) => a + (p.card ? openQs(p.card).length : 0), 0);
     const kpis = `<div class="kpis">
       <div class="kpi ${noRemote ? 'bad' : 'ok'}"><div class="v">${noRemote}</div><div class="l">Repos ohne Backup</div></div>
       <div class="kpi ${unsaved ? 'warn' : 'ok'}"><div class="v">${unsaved}</div><div class="l">mit ungesicherter Arbeit</div></div>
@@ -327,7 +360,7 @@
       const v = c.vision || {};
       const suggestions = c.suggestions.map(sg => ideaCard(sg, [], p.id)).filter(Boolean).join('');
       body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(c.reentry.next_step)}</div><div><span class="effort">${esc(c.reentry.effort)}</span></div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
-        + dmod('Wartet auf dich', c.waiting_on_you.length ? `<div class="list">${c.waiting_on_you.map(w => `<div class="row"><div class="t">${esc(w.title)}</div>${w.source ? `<div class="d mono" style="font-size:12px">${esc(w.source)}</div>` : ''}</div>`).join('')}</div>` : '')
+        + dmod('Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true)).join('')}</ul>` : '')
         + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' ? 'bad' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}</div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
         + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${c.recent_changes.map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
         + dmod('Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
@@ -362,7 +395,7 @@
     const archived = S.projects.filter(p => p.status === 'archived');
     const parts = [];
     if (hidden.length) parts.push(`Ausgeblendet: ${hidden.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-unhide="${esc(id)}">einblenden</button>`).join(' · ')}`);
-    if (ratedCount) parts.push(`${ratedCount} bewertete Vorschläge ${showRated ? 'werden angezeigt' : 'ausgeblendet'} <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'anzeigen'}</button>`);
+    if (ratedCount) parts.push(`${ratedCount} ${ratedCount === 1 ? 'bewerteter Vorschlag' : 'bewertete Vorschläge'} ${showRated ? (ratedCount === 1 ? 'wird angezeigt' : 'werden angezeigt') : 'ausgeblendet'} <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'anzeigen'}</button>`);
     if (archived.length) parts.push(`Archiviert: ${archived.map(p => plink(p.id)).join(', ')}`);
     parts.push(`Karten schreiben Agents mit <code class="mono">lookout</code> · Fakten misst die App selbst`);
     $('#foot').innerHTML = parts.map(x => `<span>${x}</span>`).join('');
@@ -489,20 +522,45 @@
     b.disabled = false; b.textContent = 'Aktualisieren';
     refreshing = false;
   }
-  async function setFeedback(el, v) {
-    const id = el.dataset.item, prev = S.feedback[id] ? S.feedback[id].value : null;
-    const value = prev === v ? null : v;
-    const send = val => call('set_feedback', { item_id: id, value: val, project_id: el.dataset.project || null, title: el.dataset.title });
+  // Saves the owner's reaction to an item (a rating, an answer, "done"); `note` undefined keeps the stored one.
+  async function react(id, value, note, msg) {
+    const prev = S.feedback[id] ? { ...S.feedback[id] } : null;
     try {
-      await send(value);
-      if (value) S.feedback[id] = { value, at: new Date().toISOString() }; else delete S.feedback[id];
+      await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note });
+      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: note === undefined ? (prev ? prev.note : '') : note }; else delete S.feedback[id];
       render();
-      if (value === 'down' || value === 'later') toast(value === 'down' ? 'Ausgeblendet. Der Agent schlägt das nicht mehr vor.' : `Kommt in ${S.snooze_days} Tagen wieder.`, async () => {
-        await send(prev);
-        if (prev) S.feedback[id] = { value: prev, at: new Date().toISOString() }; else delete S.feedback[id];
+      if (msg) toast(msg, async () => {
+        noteFor = null;
+        try {
+          await call('set_feedback', { item_id: id, value: prev ? prev.value : null, note: prev ? prev.note : null });
+          if (prev) S.feedback[id] = prev; else delete S.feedback[id];
+        } catch (e) { toast('Rückgängig hat nicht geklappt: ' + errText(e)); }
         render();
       });
-    } catch (e) { toast('Speichern hat nicht geklappt.'); }
+      return true;
+    } catch (e) { toast('Nicht gespeichert: ' + errText(e)); return false; }
+  }
+  // the drawer renders after the page, so the last field is the one in front
+  const focusDraft = id => { const all = document.querySelectorAll(`[data-draft="${CSS.escape(id)}"]`); if (all.length) all[all.length - 1].focus(); };
+  async function setFeedback(el, v) {
+    const id = el.dataset.item;
+    const value = S.feedback[id] && S.feedback[id].value === v ? null : v;
+    noteFor = value === 'down' || value === 'later' ? id : null;
+    const msg = value === 'down' ? 'Ausgeblendet. Die Agents schlagen das nicht mehr vor.' : value === 'later' ? `Kommt in ${S.snooze_days} Tagen wieder.` : null;
+    if (await react(id, value, undefined, msg)) focusDraft(id); else noteFor = null;
+  }
+  async function saveNote(id) {
+    const text = (drafts[id] || '').trim();
+    noteFor = null;
+    delete drafts[id];
+    if (!text || !S.feedback[id]) { render(); return; }
+    if (await react(id, S.feedback[id].value, text)) toast('Gemerkt. Die Agents lesen das beim nächsten Lauf.');
+  }
+  async function saveAnswer(id) {
+    const text = (drafts[id] || '').trim();
+    if (!text) { focusDraft(id); return; }
+    answering = null;
+    if (await react(id, 'answered', text, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.')) delete drafts[id];
   }
   async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
   async function setStatus(status, note) {
@@ -562,6 +620,20 @@
     if (unhide) { setPref('hidden_modules', [...hiddenMods()].filter(x => x !== unhide.dataset.unhide)); return; }
     if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
     if (t.closest('[data-recent-all]')) { showAllRecent = !showAllRecent; render(); return; }
+    const ns = t.closest('[data-note-save]');
+    if (ns) { saveNote(ns.dataset.noteSave); return; }
+    if (t.closest('[data-note-skip]')) { if (noteFor) delete drafts[noteFor]; noteFor = null; render(); return; }
+    const an = t.closest('[data-answer]');
+    if (an) { answering = an.dataset.answer; render(); focusDraft(answering); return; }
+    const as = t.closest('[data-answer-save]');
+    if (as) { saveAnswer(as.dataset.answerSave); return; }
+    if (t.closest('[data-answer-cancel]')) { answering = null; render(); return; }
+    const qd = t.closest('[data-qdone]');
+    if (qd) { react(qd.dataset.qdone, 'done', null, 'Als erledigt markiert.'); return; }
+    const ru = t.closest('[data-reply-undo]');
+    if (ru) { react(ru.dataset.replyUndo, null); return; }
+    const fd = t.closest('[data-focus-done]');
+    if (fd) { const id = fd.dataset.focusDone; react(id, reply(id) ? null : 'done', null); return; }
     const st = t.closest('[data-status]');
     if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return; }
     if (t.closest('[data-open-settings]')) { openPanel(); return; }
@@ -599,7 +671,18 @@
       catch (err) { toast('Notiz nicht gespeichert.'); }
     }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (panelOpen) closePanel(); else closeDrawer(); } });
+  document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
+  document.addEventListener('keydown', e => {
+    const draft = e.target.closest && e.target.closest('[data-draft]');
+    if (draft && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault();
+      const id = draft.dataset.draft, note = draft.dataset.kind === 'note';
+      if (e.key === 'Enter') { if (note) saveNote(id); else saveAnswer(id); }
+      else { if (note) { delete drafts[id]; noteFor = null; } else answering = null; render(); }
+      return;
+    }
+    if (e.key === 'Escape') { if (panelOpen) closePanel(); else closeDrawer(); }
+  });
   $('#refresh').addEventListener('click', refreshFacts);
 
   // Reload when anything wrote to the database, such as an agent saving a card.

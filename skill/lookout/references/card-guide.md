@@ -35,7 +35,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 - `milestones` (up to 8, oldest first; fewer for a young project): the big steps of the project's whole life, releases included.
 - `features` (5-10, ≤ 8 words each): what the app can actually do today, not what is planned.
 - `open_ends`: concrete unfinished things you found, each with `kind` (`worktree`, `branch`, `uncommitted`, `flagged`, `todo`, `plan`, `other`), `title` (≤ 10 words), `detail` (one sentence), `source` (file path or git ref; for a finding from Lookout's facts, `facts: <field>`, e.g. `facts: has_remote`) and `age_days` (days since the oldest evidence, e.g. `dirty.oldest_change` or the first red run; null when unknown). Prefer what matters: forgotten finished work, risks, promises in docs that were never kept. Leave out trivia.
-- `waiting_on_you`: decisions or answers only the owner can give (a provider to choose, a key to obtain, a direction to pick), each a question (≤ 12 words) with its `source`. Not tasks an agent could do.
+- `waiting_on_you`: decisions or answers only the owner can give (a provider to choose, a key to obtain, a direction to pick), each a question (≤ 12 words) with its `source`. Not tasks an agent could do. Ask so that a short answer settles it; the owner can answer or dismiss each question in Lookout. Keep a still-open question's `id` when you send it again, and remove questions the owner answered or marked `done`.
 - `vision`: `statement` is the project's own stated goal in one sentence; `progress_note` says in one sentence how far along it is against that goal; `progress_pct` only when the docs make it derivable (for example completed phases), otherwise null.
 - `reentry`: if the owner opened this project today, the **one** most sensible concrete step (`next_step`, ≤ 20 words), its `effort` (`15min`, `1h`, `half-day`, `day+`) and `why` (one sentence).
 - `health_notes`: concrete risks or rot you found, one sentence each: failing checks and why, docs that contradict the code, dependencies that will break, a bug you can point to. May be empty.
@@ -54,7 +54,7 @@ A suggestion is worth showing when the owner reads it and thinks "right, I had n
 
 ## The portfolio brief
 
-`lookout portfolio context` shows every project side by side (compact facts and card), the previous brief and all ratings. The brief is where you see what nobody sees while inside one project. `lookout schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
+`lookout portfolio context` shows every project side by side (compact facts and card), the previous brief, all of the owner's reactions and `owner_last_opened` (when the owner last opened Lookout). If that is older than the previous brief, the owner has not seen it: carry over its focus items that still matter instead of treating them as known. The brief is where you see what nobody sees while inside one project. `lookout schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
 
 - `greeting` (one sentence): a friendly, slightly playful summary of this morning's state, true to the data.
 - `focus` (3; fewer only when fewer things need attention): what deserves the owner's attention today, each with `project`, `title` (an action, ≤ 8 words), `why` (≤ 25 words) and `effort`. Mix one thing that is urgent (risk of losing work, something due today), one quick win, and one thing that would feel good.
@@ -64,4 +64,4 @@ A suggestion is worth showing when the owner reads it and thinks "right, I had n
 - `park_or_revive`: an honest verdict (`park`, `revive`, `finish`, `archive`) with `why` for quiet or stuck projects. Respect the owner's status: do not tell them to revive a project they parked.
 - `attention_note` (one sentence): where the owner's work goes versus where it is needed.
 
-Items you keep from the previous brief keep their `id`. Items rated `down` never come back; `later` items wait 14 days.
+Items you keep from the previous brief keep their `id`. Items rated `down` never come back; `later` items wait 14 days; focus items marked `done` are finished.

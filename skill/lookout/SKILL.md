@@ -30,14 +30,14 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 ## Daily run
 
 1. Run `lookout due`. It refreshes the facts and returns:
-   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, uncommitted work or edited docs since the last card), `ci_changed` (CI turned red or green since the last card), `status_changed` (the owner changed its intent) or `stale` (the card is old).
+   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, uncommitted work or edited docs since the last card), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent) or `stale` (the card is old).
    - `problems`: projects whose folder is gone. Mention them in your report; do not write cards for them.
    - `portfolio.due`: whether the cross-project brief needs rewriting.
    If nothing is due, report that in one sentence and stop.
 2. **Before your first card of the run, read `references/card-guide.md` completely.** It says what to read in a repository and how to write every field. The quality of the whole app depends on it.
 3. For each due project:
-   1. `lookout context <id>`: the project, its current facts, the previous card, the commits since that card, and the owner's ratings of earlier suggestions.
-   2. Study the repository read-only, as the card guide describes. For `changed` or `stale`, start from the previous card and the new commits instead of re-reading everything. For `ci_changed`, find out what the CI change means (`facts.ci`, the failing run) and update only the fields it affects with `--merge`.
+   1. `lookout context <id>`: the project, its current facts, the previous card, the commits since that card, and the owner's reactions: ratings from all projects and replies to this card's questions.
+   2. Study the repository read-only, as the card guide describes. For `changed` or `stale`, start from the previous card and the new commits instead of re-reading everything. For `ci_changed`, find out what the CI change means (`facts.ci`, the failing run) and update only the fields it affects with `--merge`. For `answered`, work the owner's replies into the card with `--merge` (see the rules).
    3. Write the card as JSON to a temporary file and run `lookout card put <id> --file <path>`. When only some fields changed, send just those with `--merge`. A list you send replaces the whole list, so include the items you keep, with their `id`.
    4. Read the result. On `invalid_card`, fix the named fields and send again. Take `warnings` about ignored fields seriously: that content was dropped.
    If you can delegate to sub-agents, you may give each due project to one. Each needs this Skill, the card guide and the project id, and returns only whether its card was saved.
@@ -49,7 +49,11 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 - **Repositories are read-only.** Read files and use read-only git (`log`, `show`, `diff`, `status`, `ls-files`, `branch`, `worktree list`) and read-only `gh` (`run list`, `run view`, `release list`, `release view`). Never edit, commit, stage, fetch, pull, checkout, stash, install, build, or start an app or test suite in a watched repository, even when you notice something that is easy to fix. Put it in the card instead.
 - **Outside the repository, read only what belongs to the project**, and only read: its installed version, its own data or configuration folders (for example under the user's home), its registered scheduled tasks. Never change anything there, and never copy credentials, tokens or personal data into a card.
 - **Only what you saw.** Every statement must rest on something you read: a file, a commit, a fact. If you are unsure, leave it out. Generic advice ("add tests", "improve the docs", "add dark mode") without a concrete finding is worse than nothing, because it teaches the owner to skip Lookout.
-- **Respect the owner's ratings.** `context` and `portfolio context` list them. `down`: never suggest that idea again, not even in new words. `later`: do not bring it back within 14 days of its `at` date. `up`: the owner likes the direction; keep the item (same `id`) until it is done, or suggest its natural next step.
+- **Learn from the owner's reactions.** `context` and `portfolio context` list them under `feedback`: the item as it read (`item`, with its `kind`), the owner's `value`, an optional `note` in their words, and the date `at`. `feedback_summary` counts the ratings per kind and type of item.
+  - `down`: never suggest that idea again, not even in new words. `later`: do not bring it back within 14 days of its `at` date. `up`: the owner likes the direction; keep the item (same `id`) until it is done, or suggest its natural next step.
+  - Ratings from other projects count too: they show which kinds of ideas the owner values. When they have rejected a kind of suggestion several times, propose that kind only on an unusually strong finding. A `note` gives the reason; follow it wherever it applies.
+  - A question marked `answered` (the answer is in `note`) or `done`: never ask it again. Carry the answer into the card where it belongs (`reentry`, `suggestions`, `vision`, `open_ends`) and drop the question from `waiting_on_you`.
+  - A focus item marked `done`: the owner did it. Do not put it into focus again unless the facts show it is unfinished.
 - **Respect documented decisions.** When a project's own docs record a deliberate choice ("no remote on purpose", "no tests for the prototype"), state it as that choice where it matters, not as a risk or warning, and do not suggest undoing it.
 - **Respect the owner's status.** `parked`: describe the state calmly; do not push to revive it. `done`: focus on anything that could rot (backups, failing CI, security). `archived` projects never appear in a run.
 - **Write for the owner:** all text in German, addressed as "du", short and concrete. The card guide sets the lengths.

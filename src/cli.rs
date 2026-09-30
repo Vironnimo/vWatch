@@ -56,9 +56,9 @@ enum Cmd {
         #[command(subcommand)]
         action: PortfolioCmd,
     },
-    /// The owner's ratings of suggestions and ideas
+    /// The owner's ratings of suggestions and ideas and replies to questions
     Feedback {
-        /// Only ratings for this project
+        /// Only reactions about this project
         #[arg(long)]
         project: Option<String>,
     },

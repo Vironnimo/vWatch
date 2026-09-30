@@ -46,8 +46,8 @@ async fn refresh(app: State<'_, AppState>) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_feedback(app: State<'_, AppState>, item_id: String, value: Option<String>, project_id: Option<String>, title: String) -> Reply {
-    work(&app, move |s| s.set_feedback(&item_id, value.as_deref(), project_id.as_deref(), &title)).await
+async fn set_feedback(app: State<'_, AppState>, item_id: String, value: Option<String>, note: Option<String>) -> Reply {
+    work(&app, move |s| s.set_feedback(&item_id, value.as_deref(), note.as_deref())).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
