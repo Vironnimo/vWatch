@@ -14,7 +14,7 @@ You rate every suggestion in the window (gut / später / Quatsch), optionally wi
 ```
 %LOCALAPPDATA%\Programs\Watchtower\
   Watchtower.exe        the window (double-click) and the CLI (with arguments)
-  data\              database and window cache
+  data\                 database and window cache
   skill\watchtower\     the Skill for agents, written by Watchtower on start
 ```
 
