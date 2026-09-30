@@ -1,6 +1,6 @@
 # Lookout CLI reference
 
-Every command prints one JSON object on stdout. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. When `lookout` is not found, call `%LOCALAPPDATA%\Programs\Lookout\Lookout.exe` with the same arguments.
+Every command prints one JSON object on stdout; many include `next`, a hint for the usual next command. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. When `lookout` is not found, call `%LOCALAPPDATA%\Programs\Lookout\Lookout.exe` with the same arguments.
 
 ## Daily run
 
@@ -11,7 +11,7 @@ Every command prints one JSON object on stdout. Success: `{"ok": true, ...}`, ex
 | `lookout card put <id> --file <path>` | Saves a new card version: `saved`, `version` (this project's card count; its first card is 1), `warnings`, `items` (`id`, `kind`, `title` of every item that carries an id). `--file -` reads stdin; `--json '<object>'` passes it inline. `--dry-run` checks the card and returns `saved: false`, `warnings` and `items` without saving. The card is tied to the facts as last measured (by `due` or `facts refresh`); whatever changes after that makes it due again. |
 | `lookout card put <id> --file <path> --merge` | Same, but the document holds only changed top-level fields; all others come from the previous card. A list replaces the previous list completely. |
 | `lookout card show <id>` | The current card with `version` and `created_at`. |
-| `lookout portfolio context` | `projects` (compact facts and card per project), `previous_portfolio`, `owner_last_opened` (when the owner last opened Lookout, or null), `feedback` for all items, `feedback_summary`. |
+| `lookout portfolio context` | `today`, `projects` (compact facts and card per project; the card's `outdated` is true when the facts changed after it was written), `previous_portfolio`, `owner_last_opened` (when the owner last opened Lookout, or null), `feedback` for all items, `feedback_summary`. |
 | `lookout portfolio put --file <path> [--merge] [--dry-run]` | Saves the brief; unknown project ids are refused with the list of valid ids. Returns `items` like `card put`. |
 | `lookout portfolio show` | The current brief. |
 | `lookout schema card` / `lookout schema portfolio` | The JSON schema of a document. |
@@ -36,7 +36,7 @@ Values: `up` (the owner likes it), `later` (not now; hidden for 14 days), `down`
 
 | Command | Returns |
 |---|---|
-| `lookout facts show <id>` | `head`, `branch`, `commits` (`total`, `first`, `last`, `last_7d`, `last_30d`, `last_90d`, `weekly`: 26 weekly counts, oldest first), `remotes`, `has_remote`, `upstream`, `ahead`, `behind`, `dirty` (`files`, `modified`, `untracked`, `deleted`, `lines_added`, `lines_removed`, `oldest_change` and `newest_change`: the oldest and newest file time among uncommitted files edited after the last commit, or the last commit's time when every such file is older, as with files copied in), `worktrees` (`count`, `prunable`, `items`: `path`, `branch`, `head`, `prunable`), `branches` (`merged_count`, `unmerged`: `name`, `last`, `head`), `ci` for the default branch: the newest run of every workflow counts and the worst decides (`state`: `green`, `red`, `running`, `none`, `unknown`; `workflow`, `title`, `at`, `url` of the deciding run; `failing`: names of red workflows; `workflows`: the newest run of each workflow with `name`, `state`, `conclusion`, `at`, `url`; `branch`; cancelled and timed-out runs count as red), `docs_mtime`, `last_work`. A folder that is not a git repository has `ok: false` and `error`. |
+| `lookout facts show <id>` | `head`, `branch`, `commits` (`total`, `first`, `last`, `last_7d`, `last_30d`, `last_90d`, `weekly`: 26 weekly counts, oldest first), `remotes`, `has_remote`, `upstream`, `ahead`, `behind`, `dirty` (`files`, `modified`, `untracked`, `deleted`, `lines_added`, `lines_removed`, `oldest_change` and `newest_change`: the oldest and newest file time among uncommitted files edited after the last commit, or the last commit's time when every such file is older, as with files copied in), `worktrees` (`count`, `prunable`, `items`: `path`, `branch`, `head`, `prunable`), `branches` (`merged_count`, `unmerged`: `name`, `last`, `head`), `ci` for the default branch: the newest run of every workflow counts and the worst decides (`state`: `green`, `red`, `running`, `none`, `unknown`; `workflow`, `title`, `at`, `url` of the deciding run; `failing`: names of red workflows; `workflows`: the newest run of each workflow with `name`, `state`, `conclusion`, `at`, `url`; `branch`; cancelled and timed-out runs count as red), `docs_mtime`, `last_work` (the local date of the newest commit or uncommitted edit). `upstream`, `ahead` and `behind` are null when the branch has no upstream. A folder that is not a git repository has `ok: false` and `error`. |
 | `lookout facts refresh [<id> ...] [--no-ci]` | Measures again; `refreshed` lists `id`, `ok`, `error`, `changed`. |
 
 ## Projects

@@ -603,8 +603,9 @@ impl Lookout {
         let previous = self.store.latest_card(id)?;
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
         let (clean, warnings) = cards::validate(Kind::Card, &payload).map_err(|problems| {
+            let merged = if merge { " With --merge, fields you did not send come from the previous card: send corrected versions of those too." } else { "" };
             LookoutError::new("invalid_card", format!("The card was not saved: {}", problems.join("; ")))
-                .hint("Fix the listed fields and send the card again. `lookout schema card` prints the full schema.")
+                .hint(format!("Fix the listed fields and send the card again.{merged} `lookout schema card` prints the full schema."))
         })?;
         if dry_run {
             return Ok(json!({"saved": false, "dry_run": true, "project": id, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}));
@@ -628,17 +629,22 @@ impl Lookout {
             if p.status == "archived" {
                 continue;
             }
-            let f = self.store.facts(&p.id)?.map(|s| s.data).unwrap_or_else(|| json!({}));
+            let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
+            let card_outdated = matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
             let card_json = card.map(|card| {
                 let c = &card.data;
-                let titles = |key: &str| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| x["title"].clone()).collect() };
+                let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
                 json!({
-                    "updated_at": card.created_at, "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
+                    "updated_at": card.created_at, "outdated": card_outdated,
+                    "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
-                    "waiting_on_you": c["waiting_on_you"].as_array().into_iter().flatten().map(|q| pick(q, &["id", "title"])).collect::<Vec<_>>(),
-                    "open_ends": titles("open_ends"),
-                    "suggestions": c["suggestions"].as_array().into_iter().flatten().map(|s| pick(s, &["id", "type", "title"])).collect::<Vec<_>>(),
+                    "waiting_on_you": picked("waiting_on_you", &["id", "title"]),
+                    "open_ends": picked("open_ends", &["kind", "title", "age_days"]),
+                    "health_notes": c["health_notes"],
+                    "decisions": c["decisions"],
+                    "suggestions": picked("suggestions", &["id", "type", "title", "why"]),
                     "cross_project_hints": c["cross_project_hints"],
                 })
             });
@@ -649,7 +655,7 @@ impl Lookout {
                     "commits": pick(&f["commits"], &["total", "last_7d", "last_30d", "last"]),
                     "has_remote": f["has_remote"], "ahead": f["ahead"],
                     "dirty": pick(&f["dirty"], &["files", "lines_added", "lines_removed", "oldest_change"]),
-                    "ci": f["ci"]["state"],
+                    "ci": pick(&f["ci"], &["state", "failing", "at"]),
                     "unmerged_branches": f["branches"]["unmerged"].as_array().map_or(0, Vec::len),
                     "extra_worktrees": f["worktrees"]["count"],
                 },

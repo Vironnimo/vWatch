@@ -57,28 +57,33 @@ const TEXT: Ty = Ty::Str { min: 0, max: 600, words: None };
 const fn words(n: usize) -> Ty {
     Ty::Str { min: 1, max: 160, words: Some(n) }
 }
+/// Optional text of at most `n` words; "one sentence" fields allow 30.
+const fn sentence(n: usize) -> Ty {
+    Ty::Str { min: 0, max: 600, words: Some(n) }
+}
+const SENTENCE: Ty = sentence(30);
 /// A one-sentence reason of at most 25 words.
 const WHY: Ty = Ty::Str { min: 1, max: 600, words: Some(25) };
 const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
 const SIZE: &[&str] = &["S", "M", "L"];
 use Default::{Empty, Filled, Null, Required, Text};
 
-const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", TEXT, Text(""))];
-const MILESTONE: &[Field] = &[f("date", Ty::Date, Required), f("title", SHORT, Required)];
+const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", SENTENCE, Text(""))];
+const MILESTONE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(10), Required)];
 const OPEN_END: &[Field] = &[
     f("kind", Ty::Enum(&["worktree", "branch", "uncommitted", "unpushed", "ci", "flagged", "todo", "plan", "other"]), Text("other")),
     f("title", words(10), Required),
-    f("detail", TEXT, Text("")),
+    f("detail", SENTENCE, Text("")),
     f("source", TEXT, Text("")),
     f("age_days", Ty::Nullable(&Ty::Int { min: 0, max: 100_000 }), Null),
 ];
 const QUESTION: &[Field] = &[f("id", Ty::Nullable(&Ty::Id), Null), f("title", words(12), Required), f("source", TEXT, Text(""))];
 const VISION: &[Field] = &[
-    f("statement", Ty::Nullable(&TEXT), Null),
-    f("progress_note", Ty::Nullable(&TEXT), Null),
+    f("statement", Ty::Nullable(&SENTENCE), Null),
+    f("progress_note", Ty::Nullable(&SENTENCE), Null),
     f("progress_pct", Ty::Nullable(&Ty::Int { min: 0, max: 100 }), Null),
 ];
-const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", TEXT, Text(""))];
+const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text(""))];
 const SUGGESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("type", Ty::Enum(&["next", "feature", "cleanup", "park"]), Required),
@@ -89,11 +94,11 @@ const SUGGESTION: &[Field] = &[
 ];
 const CARD: &[Field] = &[
     f("one_liner", words(15), Required),
-    f("stack", TEXT, Text("")),
+    f("stack", sentence(25), Text("")),
     f("phase", Ty::Enum(&["active", "cooling", "dormant", "maintenance", "done"]), Required),
-    f("phase_evidence", TEXT, Text("")),
+    f("phase_evidence", SENTENCE, Text("")),
     f("headline", words(10), Required),
-    f("personality", TEXT, Text("")),
+    f("personality", SENTENCE, Text("")),
     f("recent_changes", Ty::List(&Ty::Obj(CHANGE), None), Empty),
     f("milestones", Ty::List(&Ty::Obj(MILESTONE), None), Empty),
     f("features", Ty::List(&words(8), None), Empty),
@@ -101,9 +106,10 @@ const CARD: &[Field] = &[
     f("waiting_on_you", Ty::List(&Ty::Obj(QUESTION), None), Empty),
     f("vision", Ty::Obj(VISION), Filled),
     f("reentry", Ty::Obj(REENTRY), Required),
-    f("health_notes", Ty::List(&TEXT, None), Empty),
+    f("health_notes", Ty::List(&SENTENCE, None), Empty),
+    f("decisions", Ty::List(&sentence(20), None), Empty),
     f("suggestions", Ty::List(&Ty::Obj(SUGGESTION), None), Empty),
-    f("cross_project_hints", Ty::List(&TEXT, None), Empty),
+    f("cross_project_hints", Ty::List(&SENTENCE, None), Empty),
 ];
 
 const FOCUS: &[Field] = &[
@@ -115,41 +121,41 @@ const FOCUS: &[Field] = &[
 ];
 const PATTERN: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
-    f("title", SHORT, Required),
-    f("why", TEXT, Required),
+    f("title", words(8), Required),
+    f("why", WHY, Required),
     f("projects", Ty::List(&SHORT, None), Empty),
     f("evidence", TEXT, Text("")),
     f("severity", Ty::Enum(&["info", "warn", "risk"]), Text("info")),
 ];
 const SYNERGY: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
-    f("title", SHORT, Required),
-    f("why", TEXT, Required),
+    f("title", words(8), Required),
+    f("why", WHY, Required),
     f("projects", Ty::List(&SHORT, None), Empty),
     f("evidence", TEXT, Text("")),
     f("effort", Ty::Enum(SIZE), Required),
 ];
 const APP_IDEA: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
-    f("title", SHORT, Required),
-    f("pitch", TEXT, Required),
-    f("because", TEXT, Required),
+    f("title", words(8), Required),
+    f("pitch", WHY, Required),
+    f("because", WHY, Required),
     f("effort", Ty::Enum(SIZE), Required),
 ];
 const VERDICT: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("project", SHORT, Required),
     f("verdict", Ty::Enum(&["park", "revive", "finish", "archive"]), Required),
-    f("why", TEXT, Required),
+    f("why", WHY, Required),
 ];
 const PORTFOLIO: &[Field] = &[
-    f("greeting", TEXT, Required),
+    f("greeting", Ty::Str { min: 1, max: 600, words: Some(30) }, Required),
     f("focus", Ty::List(&Ty::Obj(FOCUS), Some(3)), Empty),
     f("patterns", Ty::List(&Ty::Obj(PATTERN), None), Empty),
     f("synergies", Ty::List(&Ty::Obj(SYNERGY), None), Empty),
     f("new_apps", Ty::List(&Ty::Obj(APP_IDEA), None), Empty),
     f("park_or_revive", Ty::List(&Ty::Obj(VERDICT), None), Empty),
-    f("attention_note", TEXT, Text("")),
+    f("attention_note", sentence(25), Text("")),
 ];
 
 impl Kind {

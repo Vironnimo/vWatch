@@ -24,7 +24,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 
 ## The card fields
 
-`one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Lookout checks every word limit below and refuses a card with a text that is too long, naming the field and its word count. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
+`one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Lookout checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `lookout schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
 
 **Each finding has one home.** Unfinished work (uncommitted or unpushed changes, a branch, a half-done plan) goes into `open_ends`; a risk or rot that is not unfinished work into `health_notes`; a decision into `waiting_on_you`; a proposal for new work into `suggestions`. The obvious fix of a finding (commit it, push it, merge it) is not a separate suggestion, and the step named in `reentry` never reappears as one. `headline` and `reentry` may point to the most important finding in their own words; do not repeat it in further fields.
 
@@ -41,6 +41,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 - `vision`: `statement` is the project's own stated goal in one sentence; `progress_note` says in one sentence how far along it is against that goal; `progress_pct` only when the docs make it derivable (for example completed phases), otherwise null.
 - `reentry`: if the owner opened this project today, the **one** most sensible concrete step (`next_step`, ≤ 20 words), its `effort` (`15min`, `1h`, `half-day`, `day+`) and `why` (one sentence).
 - `health_notes`: concrete risks or rot you found, one sentence each: failing checks and why, docs that contradict the code, dependencies that will break, a bug you can point to. May be empty.
+- `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions.
 - `suggestions` (2-4): see below.
 - `cross_project_hints`: things that look reusable in, or overlap with, other kinds of projects; one sentence each. The portfolio brief builds on them.
 
@@ -56,14 +57,14 @@ A suggestion is worth showing when the owner reads it and thinks "right, I had n
 
 ## The portfolio brief
 
-`lookout portfolio context` shows every project side by side (compact facts and card), the previous brief, all of the owner's reactions and `owner_last_opened` (when the owner last opened Lookout). If that is older than the previous brief, the owner has not seen it: carry over its focus items that still matter instead of treating them as known. The brief is where you see what nobody sees while inside one project. `lookout schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
+`lookout portfolio context` shows every project side by side (compact facts and card; `lookout card show <id>` has the full card), the previous brief, all of the owner's reactions and `owner_last_opened` (when the owner last opened Lookout). If that is older than the previous brief, the owner has not seen it: carry over its focus items that still matter instead of treating them as known. The brief is where you see what nobody sees while inside one project. Card contents count as sources: cite them as the card's statement ("laut gusto-Karte …") and check in the facts or the repository what the brief depends on. A card marked `outdated` was written before the latest facts; trust the facts where they disagree. `lookout schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
 
 - `greeting` (one sentence): a friendly, slightly playful summary of this morning's state, true to the data.
-- `focus` (3; fewer only when fewer things need attention): what deserves the owner's attention today, each with `project`, `title` (an action, ≤ 8 words), `why` (≤ 25 words) and `effort`. Mix one thing that is urgent (risk of losing work, something due today), one quick win, and one thing that would feel good.
+- `focus` (3; fewer only when fewer things need attention): what deserves the owner's attention today, each with `project`, `title` (an action, ≤ 8 words), `why` (≤ 25 words) and `effort`. Aim for one thing that is urgent (risk of losing work, something due today), one quick win, and one thing that would feel good; urgency wins over the mix. An unfinished focus item may stay, with the same `id`, as long as it is still among the most important things.
 - `patterns` (2-4): recurring behaviour or risk across projects, each with `title`, `why`, `projects`, `evidence` and `severity` (`info`, `warn`, `risk`). Example: two projects pin the same outdated framework version, and both fail CI because of it.
 - `synergies` (2-4): concrete reuse or combination between named projects, with `effort`. Example: one project plans its own login while another already has a finished, tested one.
 - `new_apps` (0-3): new app ideas that follow from the portfolio and the owner's evident needs, each with `title`, `pitch`, `because` and `effort`. Only with evidence; none is better than a random idea.
 - `park_or_revive`: an honest verdict (`park`, `revive`, `finish`, `archive`) with `why` for quiet or stuck projects. Respect the owner's status: do not tell them to revive a project they parked.
 - `attention_note` (one sentence): where the owner's work goes versus where it is needed.
 
-Items you keep from the previous brief keep their `id`. Items rated `down` never come back; `later` items wait 14 days; focus items marked `done` are finished.
+Items you keep from the previous brief keep their `id`; check each kept item's `why` and `evidence` against today's facts and cards, and correct or drop what is no longer true. Items rated `down` never come back; `later` items wait 14 days; focus items marked `done` are finished.

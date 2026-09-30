@@ -22,6 +22,7 @@ fn morning_run_cycle() {
     std::fs::write(repo.join("f0.txt"), "more\n").unwrap();
     git(&repo, &["commit", "-qam", "second"]);
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "changed");
+    assert_eq!(svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"], true);
     let ctx = svc.context("demo").unwrap();
     assert_eq!(ctx["previous_card"]["card"]["headline"], "Alles ruhig");
     assert_eq!(ctx["since_previous_card"]["commit_count"], 1);
