@@ -462,7 +462,7 @@
     h = h || {};
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
     const i = h.installed;
-    const inst = i ? `<div class="hb-inst">Installiert: <b>${esc(i.version)}</b>${i.open ? ` · öffnen über ${esc(i.open)}` : ''} <button class="linkish mono faint" type="button" data-external="${esc(i.path)}" title="Im Explorer öffnen">${esc(i.path)}</button></div>` : '';
+    const inst = i ? `<div class="hb-inst">Installiert: <b>${esc(i.version)}</b> <button class="linkish mono faint" type="button" data-external="${esc(i.path)}" title="Im Explorer öffnen">${esc(i.path)}</button>${i.open ? `<div>Öffnen: ${esc(i.open)}</div>` : ''}</div>` : '';
     // a URL is opened, a command copied; a URL with a <placeholder> can only be copied and completed
     const act = r => /^https?:\/\/[^\s<]+$/.test(r.how)
       ? `<button class="linkish" type="button" data-external="${esc(r.how)}" aria-label="${esc(r.what)} öffnen">öffnen</button>`
