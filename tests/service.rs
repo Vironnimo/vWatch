@@ -2,7 +2,7 @@ mod common;
 
 use chrono::Duration;
 use common::{card, card_with, demo_repo, git, service};
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[test]
 fn morning_run_cycle() {
@@ -288,6 +288,88 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     );
     clock.advance(Duration::days(1));
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["reason"], "new_day");
+}
+
+#[test]
+fn parked_ideas_and_the_week_review_reach_the_brief() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    assert_eq!(svc.add_idea("  ").unwrap_err().code, "invalid_idea");
+
+    // a parked idea makes the brief due until a brief assesses it
+    let id = svc.add_idea("Ein Stromzähler-Dashboard").unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(
+        svc.due(14, true).unwrap()["portfolio"]["reason"],
+        "owner_idea"
+    );
+    let ctx = svc.portfolio_context().unwrap();
+    assert_eq!(
+        (
+            ctx["owner_ideas"][0]["text"].as_str(),
+            ctx["owner_ideas"][0]["checked"].as_bool()
+        ),
+        (Some("Ein Stromzähler-Dashboard"), Some(false))
+    );
+    // the clock stands on Wednesday 2026-09-30, so the review looks back on the week before
+    assert_eq!(
+        ctx["review_week"],
+        json!({"week": "2026-W39", "from": "2026-09-21", "to": "2026-09-27", "due": true})
+    );
+
+    let check = json!({"idea": id, "verdict": "fold_in", "fits": ["demo"], "why": "Passt in demo.", "effort": "S"});
+    let with = |c: &Value| json!({"greeting": "Moin", "idea_checks": [c]});
+    let altered = |key: &str, value: Value| {
+        let mut c = check.clone();
+        c[key] = value;
+        with(&c)
+    };
+    assert_eq!(
+        svc.put_portfolio(altered("idea", json!(99)), false, false)
+            .unwrap_err()
+            .code,
+        "unknown_idea"
+    );
+    assert_eq!(
+        svc.put_portfolio(altered("fits", json!(["ghost"])), false, false)
+            .unwrap_err()
+            .code,
+        "unknown_project"
+    );
+    let mut brief = with(&check);
+    brief["week_review"] = json!({"week": "2026-W39", "done": ["Release 1.0"], "stalled": [], "time_note": "Fast alles ging in demo."});
+    svc.put_portfolio(brief, false, false).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
+    let ctx = svc.portfolio_context().unwrap();
+    assert_eq!(
+        (
+            ctx["owner_ideas"][0]["checked"].as_bool(),
+            ctx["review_week"]["due"].as_bool()
+        ),
+        (Some(true), Some(false))
+    );
+
+    // a later brief that week keeps the review; the next week needs a new one
+    svc.put_portfolio(with(&check), false, false).unwrap();
+    assert_eq!(
+        svc.portfolio().unwrap()["portfolio"]["week_review"]["week"],
+        "2026-W39"
+    );
+    clock.advance(Duration::days(7));
+    assert_eq!(
+        svc.portfolio_context().unwrap()["review_week"]["week"],
+        "2026-W40"
+    );
+    assert_eq!(svc.portfolio_context().unwrap()["review_week"]["due"], true);
+
+    assert_eq!(svc.remove_idea(id).unwrap()["removed"], id);
+    assert_eq!(svc.remove_idea(id).unwrap_err().code, "idea_not_found");
 }
 
 #[test]

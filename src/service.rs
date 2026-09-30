@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use chrono::{DateTime, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde_json::{json, Map, Value};
 
 use crate::cards::{self, Kind};
 use crate::facts;
-use crate::store::{CardBasis, Feedback, Project, Store};
+use crate::store::{CardBasis, Feedback, Idea, Project, Store};
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
@@ -23,6 +23,8 @@ pub const SNOOZE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
 /// Opening a project at least this many days after the last time shows what happened since.
 const SINCE_DAYS: i64 = 7;
+/// Longest parked idea, in characters.
+const IDEA_MAX: usize = 600;
 /// The card fields the portfolio brief builds on; changes elsewhere (the handbook, features) leave it current.
 const BRIEF_FIELDS: &[&str] = &[
     "one_liner",
@@ -195,6 +197,10 @@ fn title_of(item: &Value) -> String {
 }
 
 /// The ids Watchtower keeps for a saved document's items, for the agent's reply.
+fn idea_json(i: &Idea) -> Value {
+    json!({"id": i.id, "text": i.text, "added_at": i.added_at})
+}
+
 fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
     kind.items()
         .iter()
@@ -859,6 +865,7 @@ impl Watchtower {
             {
                 Some("new_day")
             }
+            Some(pf) if !self.unchecked_ideas(Some(&pf.data))?.is_empty() => Some("owner_idea"),
             Some(_) if cards_changed => Some("cards_changed"),
             Some(_) => None,
         };
@@ -1025,6 +1032,7 @@ impl Watchtower {
                 "facts": {
                     "last_work": f["last_work"],
                     "commits": pick(&f["commits"], &["total", "last_7d", "last_30d", "last"]),
+                    "commits_review_week": f["commits"]["weekly"].as_array().and_then(|w| w.len().checked_sub(2).map(|i| w[i].clone())),
                     "has_remote": f["has_remote"], "ahead": f["ahead"],
                     "dirty": pick(&f["dirty"], &["files", "lines_added", "lines_removed", "oldest_change"]),
                     "ci": pick(&f["ci"], &["state", "failing", "at"]),
@@ -1035,8 +1043,15 @@ impl Watchtower {
             }));
         }
         let reactions = self.store.feedback()?;
+        let unchecked = self.unchecked_ideas(previous.as_ref().map(|p| &p.data))?;
+        let (week, from, to) = self.review_week();
+        let reviewed = previous
+            .as_ref()
+            .is_some_and(|p| p.data["week_review"]["week"] == week.as_str());
         Ok(json!({
             "today": self.today().to_string(),
+            "review_week": {"week": week, "from": from.to_string(), "to": to.to_string(), "due": !reviewed},
+            "owner_ideas": self.store.ideas()?.iter().map(|i| extend(idea_json(i), json!({"checked": !unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
             "projects": rows,
             "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data})),
             "owner_last_opened": self.store.pref("last_visit")?,
@@ -1066,14 +1081,20 @@ impl Watchtower {
         for item in items("focus").iter().chain(items("park_or_revive").iter()) {
             refs.extend(item["project"].as_str().map(str::to_owned));
         }
-        for item in items("patterns").iter().chain(items("synergies").iter()) {
-            refs.extend(
-                item["projects"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|v| v.as_str().map(str::to_owned)),
-            );
+        for (list, key) in [
+            ("patterns", "projects"),
+            ("synergies", "projects"),
+            ("idea_checks", "fits"),
+        ] {
+            for item in items(list) {
+                refs.extend(
+                    item[key]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|v| v.as_str().map(str::to_owned)),
+                );
+            }
         }
         let mut unknown: Vec<String> = refs.into_iter().filter(|r| !known.contains(r)).collect();
         unknown.sort();
@@ -1093,6 +1114,29 @@ impl Watchtower {
                 known.join(", ")
             )));
         }
+        let ideas: Vec<i64> = self.store.ideas()?.iter().map(|i| i.id).collect();
+        let strange: Vec<String> = items("idea_checks")
+            .iter()
+            .filter_map(|c| c["idea"].as_i64())
+            .filter(|id| !ideas.contains(id))
+            .map(|id| id.to_string())
+            .collect();
+        if !strange.is_empty() {
+            return Err(WatchtowerError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
+                .hint("Use the ids from `owner_ideas` in `watchtower portfolio context`; the owner may have removed an idea since."));
+        }
+        let mut clean = clean;
+        // a brief written later in the week keeps the week's review
+        let (week, _, _) = self.review_week();
+        if clean["week_review"].is_null() {
+            if let Some(kept) = previous
+                .as_ref()
+                .map(|p| &p.data["week_review"])
+                .filter(|r| r["week"] == week.as_str())
+            {
+                clean["week_review"] = kept.clone();
+            }
+        }
         if dry_run {
             return Ok(
                 json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}),
@@ -1102,6 +1146,39 @@ impl Watchtower {
         Ok(
             json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
         )
+    }
+
+    /// Parks an idea of the owner's; the next brief assesses it.
+    pub fn add_idea(&self, text: &str) -> Result<Value> {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > IDEA_MAX {
+            return Err(WatchtowerError::new(
+                "invalid_idea",
+                format!("An idea needs 1 to {IDEA_MAX} characters."),
+            ));
+        }
+        let id = self.store.add_idea(text, &self.now())?;
+        Ok(json!({"id": id, "text": text}))
+    }
+
+    pub fn remove_idea(&self, id: i64) -> Result<Value> {
+        if !self.store.remove_idea(id)? {
+            return Err(WatchtowerError::new(
+                "idea_not_found",
+                format!("No parked idea with id {id}."),
+            )
+            .hint("`watchtower ideas list` shows the parked ideas."));
+        }
+        Ok(json!({"removed": id}))
+    }
+
+    pub fn ideas(&self) -> Result<Value> {
+        Ok(json!(self
+            .store
+            .ideas()?
+            .iter()
+            .map(idea_json)
+            .collect::<Vec<_>>()))
     }
 
     pub fn portfolio(&self) -> Result<Value> {
@@ -1244,6 +1321,35 @@ impl Watchtower {
             ));
         }
         Ok(self.store.set_pref(key, value)?)
+    }
+
+    /// The ids of parked ideas the latest brief has not assessed yet.
+    fn unchecked_ideas(&self, brief: Option<&Value>) -> Result<Vec<i64>> {
+        let checked: Vec<i64> = brief
+            .and_then(|b| b["idea_checks"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["idea"].as_i64())
+            .collect();
+        Ok(self
+            .store
+            .ideas()?
+            .into_iter()
+            .map(|i| i.id)
+            .filter(|id| !checked.contains(id))
+            .collect())
+    }
+
+    /// The calendar week before this one, which the week review looks back on.
+    fn review_week(&self) -> (String, NaiveDate, NaiveDate) {
+        let today = self.today();
+        let from =
+            today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()) + 7);
+        (
+            from.format("%G-W%V").to_string(),
+            from,
+            from + chrono::Duration::days(6),
+        )
     }
 
     /// The brief-relevant card fields that differ from the card as it was when the brief was written;
@@ -1390,6 +1496,8 @@ impl Watchtower {
             "projects": projects,
             "portfolio": portfolio.as_ref().map(|p| p.data.clone()),
             "portfolio_updated_at": portfolio.map(|p| p.created_at),
+            "ideas": self.store.ideas()?.iter().map(idea_json).collect::<Vec<_>>(),
+            "review_week": self.review_week().0,
             "feedback": feedback,
             "snooze_days": SNOOZE_DAYS,
             "prefs": {

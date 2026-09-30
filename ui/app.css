@@ -239,6 +239,10 @@ details > summary::-webkit-details-marker { display: none; }
 .feat span { font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
 .prog { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
 .prog span { display: block; height: 100%; background: var(--accent); }
+.parkform { display: flex; gap: 8px; margin-bottom: 12px; }
+.parkform input { flex: 1 1 200px; min-width: 0; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 14px; }
+.weekgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 20px; }
+.weekgrid h3 { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); margin: 0 0 6px; font-weight: 600; }
 .bullets { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--text-2); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13.5px; }
 .kv dt { color: var(--text-3); } .kv dd { margin: 0; overflow-wrap: anywhere; }
@@ -261,6 +265,7 @@ details > summary::-webkit-details-marker { display: none; }
 .icon-btn:hover { border-color: var(--line-2); color: var(--text); }
 .linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
 .linkish:hover { text-decoration: underline; }
+.linkish.faint { color: var(--text-3); font-size: 13px; }
 .drawer .stack .linkish { color: inherit; font-size: inherit; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.06); }

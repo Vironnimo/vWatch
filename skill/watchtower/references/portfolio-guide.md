@@ -1,6 +1,6 @@
 # Writing the Watchtower portfolio brief
 
-The brief is the top of the owner's morning page: one view across all projects. All text is German, addressed as "du". Watchtower refuses a text that is too long and names the field. Word limits: `greeting` and `attention_note` 30; every `title` 8; `why`, `pitch`, `because` 25; `done_when` 20. Effort: `focus` uses `15min`, `1h`, `half-day`, `day+`; `synergies` and `new_apps` use `S`, `M`, `L`.
+The brief is the top of the owner's morning page: one view across all projects. All text is German, addressed as "du". Watchtower refuses a text that is too long and names the field. Word limits: `greeting`, `attention_note` and `time_note` 30; every `title` 8; `why`, `pitch`, `because` 25; `done_when` 20; each `done` and `stalled` entry 10. Effort: `focus` uses `15min`, `1h`, `half-day`, `day+`; `synergies`, `new_apps` and `idea_checks` use `S`, `M`, `L`.
 
 ## Before you write
 
@@ -17,6 +17,8 @@ The brief is the top of the owner's morning page: one view across all projects. 
 - `new_apps` (0-3): new app ideas that follow from the portfolio and the owner's evident needs, each with `title`, `pitch`, `because` and `effort`. Only with evidence; none is better than a random idea.
 - `park_or_revive`: an honest verdict (`park`, `revive`, `finish`, `archive`) with `why` for quiet or stuck projects. Respect the owner's status: do not tell them to revive a project they parked.
 - `attention_note` (one sentence): where the owner's work goes versus where it is needed.
+- `idea_checks`: one assessment per idea in the context's `owner_ideas`, ideas the owner parked in Watchtower to have them checked. Each has `idea` (its id), `verdict` (`build`: worth building as its own app; `fold_in`: belongs into existing projects; `later`: sound, but not now; `drop`: not worth it), `fits` (ids of the projects it belongs into or builds on; empty for a standalone app), `why` (≤ 25 words, citing what in the portfolio supports the verdict: an existing project that already covers half of it, a need visible in the cards, a conflict with a goal) and `effort`. Assess every idea, also the `checked` ones you assessed before; keep your verdict unless something changed. Judge honestly: the owner parked the idea to hear whether it is worth doing.
+- `week_review`: a look back on the calendar week in the context's `review_week`. Write it when `review_week.due` is true; otherwise leave it out and Watchtower keeps the one already written for that week. `week` is `review_week.week` (e.g. `2026-W39`); `done` (up to 6): what was finished or shipped that week, from the cards' `recent_changes` and `milestones` dated in it; `stalled` (up to 6): what was meant to move and did not, such as focus items that stayed open, goals that made no progress, work left uncommitted all week; `time_note` (one sentence): where the week's work went, from each project's `commits_review_week`, compared with what mattered most.
 
 ## Keeping items
 

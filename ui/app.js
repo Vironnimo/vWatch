@@ -122,7 +122,7 @@
   }
   function taskPrompt(t) {
     const ps = t.projects.map(byId).filter(Boolean);
-    const lines = [ps.length === 1 ? `Aufgabe im Projekt ${ps[0].name} (${ps[0].path}):` : `Aufgabe über die Projekte ${ps.map(p => `${p.name} (${p.path})`).join(', ')}:`, t.title, ''];
+    const lines = [!ps.length ? 'Aufgabe für ein neues Projekt:' : ps.length === 1 ? `Aufgabe im Projekt ${ps[0].name} (${ps[0].path}):` : `Aufgabe über die Projekte ${ps.map(p => `${p.name} (${p.path})`).join(', ')}:`, t.title, ''];
     if (t.why) lines.push(`Warum: ${t.why}`);
     if (t.evidence) lines.push(`Beleg: ${t.evidence}`);
     if (t.done_when) lines.push(`Fertig, wenn: ${t.done_when}`);
@@ -362,6 +362,31 @@
     return cards.length ? mod('ideas', 'Ideen', 'Pro Projekt der interessanteste Vorschlag, dazu neue App-Ideen. Weitere stehen im Steckbrief', `<div class="cards3">${cards.join('')}</div>`) : '';
   }
 
+  // ideas the owner parks; the next brief says whether and where each one is worth doing
+  const IDEA_VERDICT = { build: ['eigene App', 'good'], fold_in: ['in Projekt einbauen', 'good'], later: ['später', ''], drop: ['lieber nicht', 'bad'] };
+  function blockParking() {
+    const checks = (S.portfolio || {}).idea_checks || [];
+    const items = [...(S.ideas || [])].reverse().map(i => {
+      const c = checks.find(x => x.idea === i.id);
+      const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
+      const verdict = c
+        ? `<div class="h"><span class="tag ${v[1]}">${esc(v[0])}</span><span class="effort">${esc(c.effort)}</span></div><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}`
+        : '<div class="faint" style="font-size:13px">Der nächste Agent-Lauf schätzt sie ein.</div>';
+      const task = c && (c.verdict === 'build' || c.verdict === 'fold_in') ? taskBtn(`idea:${i.id}`, { projects: c.fits || [], title: i.text, why: c.why }) : '';
+      return `<div class="idea"><div class="h"><div class="t">${esc(i.text)}</div><button class="linkish faint" type="button" data-idea-remove="${i.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${verdict}<div class="foot"><span class="faint mono" style="font-size:12px">geparkt ${fmtShort(i.added_at)}</span>${task}</div></div>`;
+    }).join('');
+    const form = `<div class="parkform"><input id="idea-text" type="text" maxlength="600" placeholder="Idee festhalten, z. B. eine App, die meine Stromzähler ausliest" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Parken</button></div>`;
+    return mod('parking', 'Ideen-Parkplatz', 'Halt eine Idee fest; der nächste Agent-Lauf prüft, ob und wo sie sich lohnt', form + (items ? `<div class="cards2">${items}</div>` : ''));
+  }
+
+  // the first brief of a week looks back on the week before; shown until the next one
+  function blockWeek() {
+    const r = (S.portfolio || {}).week_review;
+    if (!r || r.week !== S.review_week) return '';
+    const list = xs => (xs || []).length ? `<ul class="bullets">${xs.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="faint">nichts</p>';
+    return mod('week', `Wochenrückblick · KW ${Number(r.week.split('-W')[1])}`, r.time_note || null, `<div class="weekgrid"><div><h3>Geschafft</h3>${list(r.done)}</div><div><h3>Liegengeblieben</h3>${list(r.stalled)}</div></div>`);
+  }
+
   function missingCardsNote() {
     const missing = visible().filter(p => !p.card);
     if (!missing.length) return '';
@@ -373,13 +398,13 @@
     const n = visible().length;
     const greeting = (S.portfolio && S.portfolio.greeting) || `Guten Morgen. ${n} ${n === 1 ? 'Projekt' : 'Projekte'} im Blick.`;
     const fresh = isNew(S.portfolio_updated_at) ? '<span class="pill new">neu</span>' : '';
-    const aside = blockNight() + blockRecent() + blockPulse();
+    const aside = blockWeek() + blockNight() + blockRecent() + blockPulse();
     return `<div class="handover">
       <div class="greet"><div class="kicker">Übergabe · ${n} ${n === 1 ? 'Projekt' : 'Projekte'} ${fresh}</div><h2>${esc(greeting)}</h2></div>
       ${missingCardsNote()}
       ${blockFocus()}${blockProjects()}
       <div class="duo">${blockWaiting()}${aside ? `<div class="aside">${aside}</div>` : ''}</div>
-      ${blockAcross()}${blockIdeas()}
+      ${blockAcross()}${blockIdeas()}${blockParking()}
     </div>`;
   }
 
@@ -424,7 +449,7 @@
     const grid = mod('cards', 'Projekte', 'Sortiert nach letzter Arbeit. Klick öffnet den Steckbrief', `<div class="grid">${byLastWork(list).map(card).join('')}</div>`);
     return `${mod('kpis', 'Lage auf einen Blick', null, kpis)}
       <div class="board"><div>${grid}${blockSafety()}${blockRecent()}${blockPulse()}${blockSpace()}</div>
-      <aside class="side">${blockFocus()}${blockNight()}${blockWaiting(1)}${blockAcross()}</aside></div>`;
+      <aside class="side">${blockFocus()}${blockWeek()}${blockNight()}${blockWaiting(1)}${blockParking()}${blockAcross()}</aside></div>`;
   }
 
   // ---------- handbook ----------
@@ -853,6 +878,14 @@
     answering = null;
     if (await react(id, 'answered', text, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.')) delete drafts[id];
   }
+  async function addIdea() {
+    const el = $('#idea-text'), text = el ? el.value.trim() : '';
+    if (!text) { if (el) el.focus(); return; }
+    try { await call('add_idea', { text }); await load(false); toast('Idee geparkt. Der nächste Agent-Lauf schätzt sie ein.'); } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
+  }
+  async function removeIdea(id) {
+    try { await call('remove_idea', { id }); await load(false); toast('Idee entfernt.'); } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
+  }
   async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
   async function setStatus(status, note) {
     try { await call('set_status', { id: openId, status, note }); await load(false); }
@@ -916,6 +949,9 @@
     if (t.closest('[data-search-close]')) { closeSearch(); return; }
     const sr = t.closest('[data-sres]');
     if (sr) { pickResult(sr); return; }
+    if (t.closest('[data-idea-add]')) { addIdea(); return; }
+    const ir = t.closest('[data-idea-remove]');
+    if (ir) { removeIdea(Number(ir.dataset.ideaRemove)); return; }
     const tk = t.closest('[data-task]');
     if (tk) {
       const task = TASKS[tk.dataset.task];
@@ -998,6 +1034,7 @@
   document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('keydown', e => {
+    if (e.target.id === 'idea-text' && e.key === 'Enter') { e.preventDefault(); addIdea(); return; }
     if (round) {
       if (e.key === 'Escape') { e.preventDefault(); closeRound(); return; }
       const inInput = e.target.id === 'round-answer';

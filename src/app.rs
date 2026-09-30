@@ -82,6 +82,16 @@ async fn set_status(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn add_idea(app: State<'_, AppState>, text: String) -> Reply {
+    work(&app, move |s| s.add_idea(&text)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn remove_idea(app: State<'_, AppState>, id: i64) -> Reply {
+    work(&app, move |s| s.remove_idea(id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn set_goal(
     app: State<'_, AppState>,
     id: String,
@@ -202,6 +212,8 @@ pub fn run() {
             open_project,
             set_pref,
             set_status,
+            add_idea,
+            remove_idea,
             set_goal,
             rename_project,
             remove_project,

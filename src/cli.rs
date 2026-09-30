@@ -67,8 +67,23 @@ enum Cmd {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Ideas the owner parked for agents to assess in the portfolio brief
+    Ideas {
+        #[command(subcommand)]
+        action: IdeasCmd,
+    },
     /// JSON schema of a document
     Schema { kind: SchemaKind },
+}
+
+#[derive(Subcommand)]
+enum IdeasCmd {
+    /// All parked ideas
+    List,
+    /// Park an idea
+    Add { text: String },
+    /// Remove a parked idea
+    Remove { id: i64 },
 }
 
 #[derive(Subcommand)]
@@ -302,6 +317,11 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             PortfolioCmd::Show => svc.portfolio()?,
         },
         Cmd::Feedback { project } => json!({"feedback": svc.feedback(project.as_deref())?}),
+        Cmd::Ideas { action } => match action {
+            IdeasCmd::List => json!({"ideas": svc.ideas()?}),
+            IdeasCmd::Add { text } => json!({"idea": svc.add_idea(&text)?}),
+            IdeasCmd::Remove { id } => svc.remove_idea(id)?,
+        },
     })
 }
 

@@ -25,6 +25,7 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 - **The daily run** (a scheduled task, or the owner asks you to update Watchtower): follow "Daily run" below.
 - **Add projects:** the owner usually adds projects in the Watchtower window. When the owner asks you to, `watchtower projects discover <folder>` lists git repositories there that are not watched yet and `watchtower projects add <path>` registers one. Add only the projects the owner named or confirmed.
 - **The owner changes a project's intent** ("park needle-net", "gusto is done"): `watchtower projects status <id> <active|parked|done|archived> --note "<reason>"`. A goal ("v1.0 by mid-December"): `watchtower projects goal <id> "<goal>" --due YYYY-MM-DD`.
+- **The owner wants an idea checked** ("park this idea: …"): `watchtower ideas add "<idea>"`. The next portfolio brief assesses it.
 - **The owner asks for a card of a project that is not due:** run `watchtower context <id>`, check the previous card against the repository as the card guide describes, and confirm or correct it with `watchtower card put <id> --merge`.
 - **Questions about projects:** `watchtower card show <id>`, `watchtower facts show <id>`, `watchtower portfolio show`, `watchtower feedback`. Answer from these; say when a card is old or missing.
 

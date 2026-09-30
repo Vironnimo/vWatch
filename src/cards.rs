@@ -273,6 +273,32 @@ const VERDICT: &[Field] = &[
     ),
     f("why", WHY, Required),
 ];
+/// An agent's assessment of an idea the owner parked.
+const IDEA_CHECK: &[Field] = &[
+    f(
+        "idea",
+        Ty::Int {
+            min: 1,
+            max: i64::MAX,
+        },
+        Required,
+    ),
+    f(
+        "verdict",
+        Ty::Enum(&["build", "fold_in", "later", "drop"]),
+        Required,
+    ),
+    f("fits", Ty::List(&SHORT, None), Empty),
+    f("why", WHY, Required),
+    f("effort", Ty::Enum(SIZE), Required),
+];
+/// What the past calendar week brought, written by the first brief of a week.
+const WEEK_REVIEW: &[Field] = &[
+    f("week", words(1), Required),
+    f("done", Ty::List(&words(10), Some(6)), Empty),
+    f("stalled", Ty::List(&words(10), Some(6)), Empty),
+    f("time_note", SENTENCE, Text("")),
+];
 const PORTFOLIO: &[Field] = &[
     f(
         "greeting",
@@ -289,6 +315,8 @@ const PORTFOLIO: &[Field] = &[
     f("new_apps", Ty::List(&Ty::Obj(APP_IDEA), None), Empty),
     f("park_or_revive", Ty::List(&Ty::Obj(VERDICT), None), Empty),
     f("attention_note", SENTENCE, Text("")),
+    f("idea_checks", Ty::List(&Ty::Obj(IDEA_CHECK), None), Empty),
+    f("week_review", Ty::Nullable(&Ty::Obj(WEEK_REVIEW)), Null),
 ];
 
 impl Kind {

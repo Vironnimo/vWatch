@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS feedback(
   item_id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, value TEXT NOT NULL, at TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '', item TEXT);
 CREATE TABLE IF NOT EXISTS prefs(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ideas(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, added_at TEXT NOT NULL);
 ";
 
 pub type Result<T> = rusqlite::Result<T>;
@@ -73,6 +75,13 @@ pub struct CardBasis<'a> {
     pub head: Option<&'a str>,
     pub ci: Option<&'a str>,
     pub parts: &'a Value,
+}
+
+/// An idea the owner parked for agents to assess.
+pub struct Idea {
+    pub id: i64,
+    pub text: String,
+    pub added_at: String,
 }
 
 pub struct StoredPortfolio {
@@ -400,6 +409,40 @@ impl Store {
                         at: r.get(4)?,
                         note: r.get(5)?,
                         item: r.get::<_, Option<String>>(6)?.map(json),
+                    })
+                })?
+                .collect()
+        })
+    }
+
+    // ideas
+    pub fn add_idea(&self, text: &str, at: &str) -> Result<i64> {
+        self.with(|db| {
+            db.execute(
+                "INSERT INTO ideas(text, added_at) VALUES(?1, ?2)",
+                params![text, at],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+    }
+
+    /// Whether an idea with this id existed.
+    pub fn remove_idea(&self, id: i64) -> Result<bool> {
+        self.with(|db| {
+            db.execute("DELETE FROM ideas WHERE id = ?1", [id])
+                .map(|n| n > 0)
+        })
+    }
+
+    /// All parked ideas, oldest first.
+    pub fn ideas(&self) -> Result<Vec<Idea>> {
+        self.with(|db| {
+            db.prepare("SELECT id, text, added_at FROM ideas ORDER BY id")?
+                .query_map([], |r| {
+                    Ok(Idea {
+                        id: r.get(0)?,
+                        text: r.get(1)?,
+                        added_at: r.get(2)?,
                     })
                 })?
                 .collect()
