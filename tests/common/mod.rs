@@ -18,7 +18,11 @@ pub fn git_at(repo: &Path, args: &[&str], date: &str) {
         .env("GIT_COMMITTER_DATE", date)
         .output()
         .expect("git runs");
-    assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 pub fn git(repo: &Path, args: &[&str]) {
@@ -30,7 +34,11 @@ pub fn make_repo(root: &Path, name: &str, commits: &[&str]) -> PathBuf {
     let repo = root.join(name);
     std::fs::create_dir_all(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
-    for (key, value) in [("user.email", "t@example.com"), ("user.name", "Test"), ("commit.gpgsign", "false")] {
+    for (key, value) in [
+        ("user.email", "t@example.com"),
+        ("user.name", "Test"),
+        ("commit.gpgsign", "false"),
+    ] {
         git(&repo, &["config", key, value]);
     }
     for (i, date) in commits.iter().enumerate() {
@@ -56,10 +64,16 @@ impl Clock {
 
 /// A service on a temporary database with a fixed clock (2026-09-30 08:00 UTC) and no CI lookups.
 pub fn service(dir: &Path) -> (Lookout, Clock) {
-    let clock = Clock(Arc::new(Mutex::new(Utc.with_ymd_and_hms(2026, 9, 30, 8, 0, 0).unwrap())));
+    let clock = Clock(Arc::new(Mutex::new(
+        Utc.with_ymd_and_hms(2026, 9, 30, 8, 0, 0).unwrap(),
+    )));
     let tick = clock.clone();
     let store = Store::open(&dir.join("lookout.db")).unwrap();
-    let svc = Lookout::with_parts(store, Box::new(move || *tick.0.lock().unwrap()), Box::new(|path, today, _ci| facts::collect(path, today, false)));
+    let svc = Lookout::with_parts(
+        store,
+        Box::new(move || *tick.0.lock().unwrap()),
+        Box::new(|path, today, _ci| facts::collect(path, today, false)),
+    );
     (svc, clock)
 }
 

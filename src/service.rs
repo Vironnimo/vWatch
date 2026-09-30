@@ -24,8 +24,18 @@ pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
 /// Opening a project at least this many days after the last time shows what happened since.
 const SINCE_DAYS: i64 = 7;
 /// The card fields the portfolio brief builds on; changes elsewhere (the handbook, features) leave it current.
-const BRIEF_FIELDS: &[&str] =
-    &["one_liner", "phase", "headline", "reentry", "waiting_on_you", "open_ends", "health_notes", "decisions", "suggestions", "cross_project_hints"];
+const BRIEF_FIELDS: &[&str] = &[
+    "one_liner",
+    "phase",
+    "headline",
+    "reentry",
+    "waiting_on_you",
+    "open_ends",
+    "health_notes",
+    "decisions",
+    "suggestions",
+    "cross_project_hints",
+];
 const COMMITS_SINCE_LIMIT: usize = 150;
 const REFRESH_WORKERS: usize = 4;
 const DISCOVER_DEPTH: usize = 2;
@@ -41,7 +51,11 @@ pub struct LookoutError {
 
 impl LookoutError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        LookoutError { code: code.into(), message: message.into(), hint: None }
+        LookoutError {
+            code: code.into(),
+            message: message.into(),
+            hint: None,
+        }
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
@@ -68,7 +82,8 @@ impl std::error::Error for LookoutError {}
 
 impl From<rusqlite::Error> for LookoutError {
     fn from(e: rusqlite::Error) -> Self {
-        LookoutError::new("storage_error", format!("Lookout's database failed: {e}")).hint("Try again in a moment.")
+        LookoutError::new("storage_error", format!("Lookout's database failed: {e}"))
+            .hint("Try again in a moment.")
     }
 }
 
@@ -88,11 +103,17 @@ fn stamp(t: DateTime<Utc>) -> String {
 }
 
 fn parse(s: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(s).map(|t| t.with_timezone(&Utc)).unwrap_or_default()
+    DateTime::parse_from_rfc3339(s)
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or_default()
 }
 
 fn same_path(a: &str, b: &str) -> bool {
-    if cfg!(windows) { a.to_lowercase() == b.to_lowercase() } else { a == b }
+    if cfg!(windows) {
+        a.to_lowercase() == b.to_lowercase()
+    } else {
+        a == b
+    }
 }
 
 fn slug(name: &str) -> String {
@@ -111,18 +132,22 @@ fn valid_project_id(id: &str) -> bool {
     let b = id.as_bytes();
     (1..=40).contains(&b.len())
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 /// Git repositories below `dir`, at most `depth` levels down; never looks inside a repository.
 fn find_repos(dir: &Path, depth: usize) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut children: Vec<PathBuf> = entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_lowercase();
-            !name.starts_with('.') && !["node_modules", "target", "$recycle.bin"].contains(&name.as_str())
+            !name.starts_with('.')
+                && !["node_modules", "target", "$recycle.bin"].contains(&name.as_str())
         })
         .map(|e| e.path())
         .collect();
@@ -148,14 +173,21 @@ fn reactions_for(kind: &str) -> &'static [&'static str] {
 }
 
 fn kind_of(f: &Feedback) -> &str {
-    f.item.as_ref().and_then(|i| i["kind"].as_str()).unwrap_or("")
+    f.item
+        .as_ref()
+        .and_then(|i| i["kind"].as_str())
+        .unwrap_or("")
 }
 
 /// A short label for an item: its title, or for a verdict the project and the verdict.
 fn title_of(item: &Value) -> String {
     match item["title"].as_str() {
         Some(t) => t.to_owned(),
-        None => format!("{}: {}", item["project"].as_str().unwrap_or(""), item["verdict"].as_str().unwrap_or("")),
+        None => format!(
+            "{}: {}",
+            item["project"].as_str().unwrap_or(""),
+            item["verdict"].as_str().unwrap_or("")
+        ),
     }
 }
 
@@ -164,7 +196,11 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
     kind.items()
         .iter()
         .flat_map(|(list, _, item_kind)| {
-            doc[*list].as_array().into_iter().flatten().map(move |i| json!({"id": i["id"], "kind": item_kind, "title": title_of(i)}))
+            doc[*list]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |i| json!({"id": i["id"], "kind": item_kind, "title": title_of(i)}))
         })
         .collect()
 }
@@ -172,24 +208,36 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
 /// The top-level fields whose content differs from the previous version (all of them for a first version).
 fn changed_fields(previous: Option<&Value>, clean: &Value) -> Vec<String> {
     let map = clean.as_object().into_iter().flatten();
-    map.filter(|(k, v)| previous.is_none_or(|p| p.get(k.as_str()) != Some(v))).map(|(k, _)| k.clone()).collect()
+    map.filter(|(k, v)| previous.is_none_or(|p| p.get(k.as_str()) != Some(v)))
+        .map(|(k, _)| k.clone())
+        .collect()
 }
 
 fn top_fields(doc: &Value) -> Vec<String> {
-    doc.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default()
+    doc.as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// With --merge, the previous version's fields the agent did not send: they are kept unchanged.
 fn kept_fields(previous: Option<&Value>, sent: Option<&[String]>) -> Vec<String> {
     match (previous, sent) {
-        (Some(previous), Some(sent)) => top_fields(previous).into_iter().filter(|f| !sent.contains(f)).collect(),
+        (Some(previous), Some(sent)) => top_fields(previous)
+            .into_iter()
+            .filter(|f| !sent.contains(f))
+            .collect(),
         _ => Vec::new(),
     }
 }
 
 /// With --merge, the top-level fields the agent actually sent.
 fn sent_fields(payload: &Value, merge: bool) -> Option<Vec<String>> {
-    merge.then(|| payload.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default())
+    merge.then(|| {
+        payload
+            .as_object()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    })
 }
 
 /// Validation problems, each marked when its field came from the previous version rather than the agent.
@@ -199,7 +247,9 @@ fn mark_inherited(problems: &[String], sent: Option<&[String]>) -> String {
         .map(|p| {
             let field = p.split(['.', '[', ':']).next().unwrap_or("");
             match sent {
-                Some(sent) if !sent.iter().any(|s| s == field) => format!("{p} (from the previous card)"),
+                Some(sent) if !sent.iter().any(|s| s == field) => {
+                    format!("{p} (from the previous card)")
+                }
                 _ => p.clone(),
             }
         })
@@ -209,7 +259,17 @@ fn mark_inherited(problems: &[String], sent: Option<&[String]>) -> String {
 
 /// A dry run's items: new items show `id: null`, because their id is only assigned when saved.
 fn dry_items(kind: Kind, sent: &Value, clean: &Value) -> Vec<Value> {
-    let given: Vec<&Value> = kind.items().iter().flat_map(|(list, _, _)| sent[*list].as_array().into_iter().flatten().map(|i| &i["id"])).collect();
+    let given: Vec<&Value> = kind
+        .items()
+        .iter()
+        .flat_map(|(list, _, _)| {
+            sent[*list]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|i| &i["id"])
+        })
+        .collect();
     let mut seen = Vec::new();
     item_ids(kind, clean)
         .into_iter()
@@ -235,12 +295,24 @@ fn feedback_json(f: &Feedback) -> Value {
 fn feedback_summary(reactions: &[Feedback]) -> Value {
     let mut counts: std::collections::BTreeMap<(String, String), [u32; 3]> = Default::default();
     for f in reactions {
-        let Some(slot) = RATINGS.iter().position(|r| *r == f.value) else { continue };
+        let Some(slot) = RATINGS.iter().position(|r| *r == f.value) else {
+            continue;
+        };
         let item = f.item.clone().unwrap_or_default();
-        let ty = item["type"].as_str().or(item["verdict"].as_str()).unwrap_or("").to_owned();
+        let ty = item["type"]
+            .as_str()
+            .or(item["verdict"].as_str())
+            .unwrap_or("")
+            .to_owned();
         counts.entry((kind_of(f).to_owned(), ty)).or_default()[slot] += 1;
     }
-    let text = |s: String| if s.is_empty() { Value::Null } else { Value::String(s) };
+    let text = |s: String| {
+        if s.is_empty() {
+            Value::Null
+        } else {
+            Value::String(s)
+        }
+    };
     counts
         .into_iter()
         .map(|((kind, ty), [up, later, down])| json!({"kind": text(kind), "type": text(ty), "up": up, "later": later, "down": down}))
@@ -250,13 +322,17 @@ fn feedback_summary(reactions: &[Feedback]) -> Value {
 /// A CI state firm enough to compare: `green` or `red`. Running, unknown or skipped
 /// lookups say nothing about whether a card's CI statement still holds.
 fn settled_ci(facts: &Value) -> Option<&str> {
-    facts["ci"]["state"].as_str().filter(|s| matches!(*s, "green" | "red"))
+    facts["ci"]["state"]
+        .as_str()
+        .filter(|s| matches!(*s, "green" | "red"))
 }
 
 fn resolve(path: &str) -> PathBuf {
     let expanded = match path.strip_prefix('~') {
         Some(rest) => {
-            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default();
+            let home = std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
+                .unwrap_or_default();
             PathBuf::from(home).join(rest.trim_start_matches(['/', '\\']))
         }
         None => PathBuf::from(path),
@@ -277,13 +353,21 @@ fn project_json(p: &Project) -> Value {
 }
 
 fn pick(v: &Value, keys: &[&str]) -> Value {
-    Value::Object(keys.iter().map(|k| ((*k).to_owned(), v.get(*k).cloned().unwrap_or(Value::Null))).collect())
+    Value::Object(
+        keys.iter()
+            .map(|k| ((*k).to_owned(), v.get(*k).cloned().unwrap_or(Value::Null)))
+            .collect(),
+    )
 }
 
 impl Lookout {
     /// Lookout on a database file, measuring with git and the real clock.
     pub fn open(db: &Path) -> Result<Lookout> {
-        let svc = Lookout::with_parts(Store::open(db)?, Box::new(Utc::now), Box::new(facts::collect));
+        let svc = Lookout::with_parts(
+            Store::open(db)?,
+            Box::new(Utc::now),
+            Box::new(facts::collect),
+        );
         svc.give_items_ids()?;
         Ok(svc)
     }
@@ -292,17 +376,33 @@ impl Lookout {
     /// so the owner can answer those items too.
     fn give_items_ids(&self) -> Result<()> {
         let missing = |kind: Kind, doc: &Value| {
-            kind.items().iter().any(|(list, _, _)| doc[*list].as_array().is_some_and(|items| items.iter().any(|i| !i["id"].is_string())))
+            kind.items().iter().any(|(list, _, _)| {
+                doc[*list]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|i| !i["id"].is_string()))
+            })
         };
         for p in self.store.projects()? {
-            if let Some(card) = self.store.latest_card(&p.id)?.filter(|c| missing(Kind::Card, &c.data)) {
-                if let Ok((clean, _)) = cards::validate(Kind::Card, &card.data, &top_fields(&card.data)) {
+            if let Some(card) = self
+                .store
+                .latest_card(&p.id)?
+                .filter(|c| missing(Kind::Card, &c.data))
+            {
+                if let Ok((clean, _)) =
+                    cards::validate(Kind::Card, &card.data, &top_fields(&card.data))
+                {
                     self.store.rewrite_latest_card(&p.id, &clean)?;
                 }
             }
         }
-        if let Some(pf) = self.store.latest_portfolio()?.filter(|p| missing(Kind::Portfolio, &p.data)) {
-            if let Ok((clean, _)) = cards::validate(Kind::Portfolio, &pf.data, &top_fields(&pf.data)) {
+        if let Some(pf) = self
+            .store
+            .latest_portfolio()?
+            .filter(|p| missing(Kind::Portfolio, &p.data))
+        {
+            if let Ok((clean, _)) =
+                cards::validate(Kind::Portfolio, &pf.data, &top_fields(&pf.data))
+            {
                 self.store.rewrite_latest_portfolio(&clean)?;
             }
         }
@@ -310,7 +410,11 @@ impl Lookout {
     }
 
     pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> Lookout {
-        Lookout { store, clock, collect }
+        Lookout {
+            store,
+            clock,
+            collect,
+        }
     }
 
     pub fn store(&self) -> &Store {
@@ -332,8 +436,15 @@ impl Lookout {
             return Ok(p);
         }
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
-        let known = if known.is_empty() { "none yet".to_owned() } else { known.join(", ") };
-        Err(LookoutError::new("project_not_found", format!("No project with id '{id}'.")).hint(format!("Known project ids: {known}.")))
+        let known = if known.is_empty() {
+            "none yet".to_owned()
+        } else {
+            known.join(", ")
+        };
+        Err(
+            LookoutError::new("project_not_found", format!("No project with id '{id}'."))
+                .hint(format!("Known project ids: {known}.")),
+        )
     }
 
     pub fn list_projects(&self) -> Result<Value> {
@@ -357,28 +468,52 @@ impl Lookout {
         let resolved = resolve(path);
         let resolved_str = resolved.to_string_lossy().into_owned();
         if !resolved.is_dir() {
-            return Err(LookoutError::new("path_missing", format!("Folder does not exist: {resolved_str}")));
+            return Err(LookoutError::new(
+                "path_missing",
+                format!("Folder does not exist: {resolved_str}"),
+            ));
         }
-        if let Some(p) = self.store.projects()?.into_iter().find(|p| same_path(&p.path, &resolved_str)) {
-            return Err(LookoutError::new("already_registered", format!("This folder is already registered as '{}'.", p.id)));
+        if let Some(p) = self
+            .store
+            .projects()?
+            .into_iter()
+            .find(|p| same_path(&p.path, &resolved_str))
+        {
+            return Err(LookoutError::new(
+                "already_registered",
+                format!("This folder is already registered as '{}'.", p.id),
+            ));
         }
-        let folder = resolved.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| resolved_str.clone());
+        let folder = resolved
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| resolved_str.clone());
         let id = match id {
             Some(id) => id.to_owned(),
             None => {
                 let s: String = slug(&folder).chars().take(40).collect();
                 let s = s.trim_end_matches('-').to_owned();
-                if s.is_empty() { "project".to_owned() } else { s }
+                if s.is_empty() {
+                    "project".to_owned()
+                } else {
+                    s
+                }
             }
         };
         if !valid_project_id(&id) {
-            return Err(LookoutError::new("invalid_id", format!("Invalid project id '{id}'."))
-                .hint("Use lowercase letters, digits and hyphens, at most 40 characters."));
+            return Err(
+                LookoutError::new("invalid_id", format!("Invalid project id '{id}'."))
+                    .hint("Use lowercase letters, digits and hyphens, at most 40 characters."),
+            );
         }
         if self.store.project(&id)?.is_some() {
-            return Err(LookoutError::new("id_taken", format!("The id '{id}' is already used.")).hint("Pass another id with --id."));
+            return Err(
+                LookoutError::new("id_taken", format!("The id '{id}' is already used."))
+                    .hint("Pass another id with --id."),
+            );
         }
-        self.store.add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
+        self.store
+            .add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
         self.project(&id)
     }
 
@@ -419,7 +554,10 @@ impl Lookout {
         self.project(id)?;
         let name = name.trim();
         if name.is_empty() {
-            return Err(LookoutError::new("invalid_name", "The name must not be empty."));
+            return Err(LookoutError::new(
+                "invalid_name",
+                "The name must not be empty.",
+            ));
         }
         self.store.rename_project(id, name)?;
         Ok(project_json(&self.project(id)?))
@@ -431,21 +569,36 @@ impl Lookout {
         let due = due.filter(|d| !d.is_empty());
         if let Some(d) = due {
             if NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
-                return Err(LookoutError::new("invalid_date", format!("'{d}' is not a date.")).hint("Write the due date as YYYY-MM-DD."));
+                return Err(
+                    LookoutError::new("invalid_date", format!("'{d}' is not a date."))
+                        .hint("Write the due date as YYYY-MM-DD."),
+                );
             }
         }
         let goal = goal.trim();
-        self.store.set_goal(id, goal, if goal.is_empty() { None } else { due }, &self.now())?;
+        self.store.set_goal(
+            id,
+            goal,
+            if goal.is_empty() { None } else { due },
+            &self.now(),
+        )?;
         Ok(project_json(&self.project(id)?))
     }
 
     pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
         let project = self.project(id)?;
         if !STATUSES.contains(&status) {
-            return Err(LookoutError::new("invalid_status", format!("Unknown status '{status}'."))
-                .hint(format!("Use one of: {}.", STATUSES.join(", "))));
+            return Err(
+                LookoutError::new("invalid_status", format!("Unknown status '{status}'."))
+                    .hint(format!("Use one of: {}.", STATUSES.join(", "))),
+            );
         }
-        self.store.set_status(id, status, note.unwrap_or(&project.status_note), &self.now())?;
+        self.store.set_status(
+            id,
+            status,
+            note.unwrap_or(&project.status_note),
+            &self.now(),
+        )?;
         Ok(project_json(&self.project(id)?))
     }
 
@@ -456,7 +609,10 @@ impl Lookout {
     pub fn discover(&self, root: &str) -> Result<Value> {
         let base = resolve(root);
         if !base.is_dir() {
-            return Err(LookoutError::new("path_missing", format!("Folder does not exist: {}", base.to_string_lossy())));
+            return Err(LookoutError::new(
+                "path_missing",
+                format!("Folder does not exist: {}", base.to_string_lossy()),
+            ));
         }
         let folder_is_repo = base.join(".git").exists();
         let mut repos: Vec<PathBuf> = Vec::new();
@@ -466,7 +622,12 @@ impl Lookout {
                 repos.extend(find_repos(parent, 1).into_iter().filter(|p| p != &base));
             }
         } else {
-            std::fs::read_dir(&base).map_err(|e| LookoutError::new("path_unreadable", format!("Cannot read {}: {e}", base.to_string_lossy())))?;
+            std::fs::read_dir(&base).map_err(|e| {
+                LookoutError::new(
+                    "path_unreadable",
+                    format!("Cannot read {}: {e}", base.to_string_lossy()),
+                )
+            })?;
             repos = find_repos(&base, DISCOVER_DEPTH);
         }
         let registered: Vec<String> = self.store.projects()?.into_iter().map(|p| p.path).collect();
@@ -480,7 +641,10 @@ impl Lookout {
                 continue;
             }
             let chosen = repo == base;
-            let name = repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = repo
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let last = facts::last_commit_date(&path);
             let recent = last
                 .as_deref()
@@ -501,8 +665,16 @@ impl Lookout {
     // ---------- facts ----------
     pub fn refresh_facts(&self, ids: Option<&[String]>, with_ci: bool) -> Result<Vec<Value>> {
         let projects: Vec<Project> = match ids {
-            Some(ids) if !ids.is_empty() => ids.iter().map(|id| self.project(id)).collect::<Result<_>>()?,
-            _ => self.store.projects()?.into_iter().filter(|p| p.status != "archived").collect(),
+            Some(ids) if !ids.is_empty() => ids
+                .iter()
+                .map(|id| self.project(id))
+                .collect::<Result<_>>()?,
+            _ => self
+                .store
+                .projects()?
+                .into_iter()
+                .filter(|p| p.status != "archived")
+                .collect(),
         };
         let today = self.today();
         let next = AtomicUsize::new(0);
@@ -511,25 +683,47 @@ impl Lookout {
             for _ in 0..REFRESH_WORKERS.min(projects.len()) {
                 s.spawn(|| loop {
                     let i = next.fetch_add(1, Ordering::SeqCst);
-                    let Some(project) = projects.get(i) else { break };
+                    let Some(project) = projects.get(i) else {
+                        break;
+                    };
                     let result = self.refresh_one(project, today, with_ci);
                     results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(result);
                 });
             }
         });
-        results.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().flatten().collect()
+        results
+            .into_inner()
+            .unwrap_or_else(|e| e.into_inner())
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     fn refresh_one(&self, project: &Project, today: NaiveDate, with_ci: bool) -> Result<Value> {
         let before = self.store.facts(&project.id)?;
         let mut data = (self.collect)(&project.path, today, with_ci);
         if !with_ci {
-            if let Some(ci) = before.as_ref().and_then(|b| b.data.get("ci")).filter(|ci| ci["state"] != "skipped") {
+            if let Some(ci) = before
+                .as_ref()
+                .and_then(|b| b.data.get("ci"))
+                .filter(|ci| ci["state"] != "skipped")
+            {
                 data["ci"] = ci.clone();
             }
         }
+        if data["ok"] == true {
+            data["space"] = match before
+                .as_ref()
+                .map(|b| &b.data["space"])
+                .filter(|s| s["measured_on"] == today.to_string())
+            {
+                Some(space) => space.clone(),
+                None => facts::space(&project.path, today),
+            };
+        }
         let fp = facts::fingerprint(&data);
-        self.store.save_facts(&project.id, &self.now(), &fp, &data)?;
+        self.store
+            .save_facts(&project.id, &self.now(), &fp, &data)?;
         Ok(json!({
             "id": project.id,
             "ok": data["ok"].as_bool().unwrap_or(false),
@@ -543,13 +737,18 @@ impl Lookout {
             return Ok(f);
         }
         self.refresh_facts(Some(&[id.to_owned()]), true)?;
-        self.store.facts(id)?.ok_or_else(|| LookoutError::new("facts_missing", format!("Could not measure '{id}'.")))
+        self.store
+            .facts(id)?
+            .ok_or_else(|| LookoutError::new("facts_missing", format!("Could not measure '{id}'.")))
     }
 
     pub fn facts(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let stored = self.stored_facts(id)?;
-        Ok(extend(json!({"project": id, "collected_at": stored.collected_at}), stored.data))
+        Ok(extend(
+            json!({"project": id, "collected_at": stored.collected_at}),
+            stored.data,
+        ))
     }
 
     // ---------- the agent's daily run ----------
@@ -569,38 +768,70 @@ impl Lookout {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
             if let (Some(pf), Some(c)) = (&brief, &card) {
-                cards_changed = cards_changed || self.brief_changes(&p.id, &c.data, &pf.created_at)?.is_none_or(|f| !f.is_empty());
+                cards_changed = cards_changed
+                    || self
+                        .brief_changes(&p.id, &c.data, &pf.created_at)?
+                        .is_none_or(|f| !f.is_empty());
             }
-            if stored.as_ref().is_some_and(|s| s.data["error"] == "path_missing") {
+            if stored
+                .as_ref()
+                .is_some_and(|s| s.data["error"] == "path_missing")
+            {
                 problems.push(json!({"id": p.id, "problem": "path_missing", "path": p.path}));
                 continue;
             }
             let reason = match &card {
                 None => Some("no_card"),
-                Some(c) if stored.as_ref().is_some_and(|s| s.fingerprint != c.fingerprint) => Some("changed"),
+                Some(c)
+                    if stored
+                        .as_ref()
+                        .is_some_and(|s| s.fingerprint != c.fingerprint) =>
+                {
+                    Some("changed")
+                }
                 // a card written while CI was unsettled is due once CI turns red
                 Some(c)
-                    if stored.as_ref().and_then(|s| settled_ci(&s.data)).is_some_and(|now| match c.ci.as_deref() {
-                        Some(then) => then != now,
-                        None => now == "red",
-                    }) =>
+                    if stored
+                        .as_ref()
+                        .and_then(|s| settled_ci(&s.data))
+                        .is_some_and(|now| match c.ci.as_deref() {
+                            Some(then) => then != now,
+                            None => now == "red",
+                        }) =>
                 {
                     Some("ci_changed")
                 }
-                Some(c) if reactions.iter().any(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question" && f.at > c.created_at) => {
+                Some(c)
+                    if reactions.iter().any(|f| {
+                        f.project_id.as_deref() == Some(&p.id)
+                            && kind_of(f) == "question"
+                            && f.at > c.created_at
+                    }) =>
+                {
                     Some("answered")
                 }
-                Some(c) if p.status_changed_at.as_ref().is_some_and(|at| *at > c.created_at) => Some("status_changed"),
+                Some(c)
+                    if p.status_changed_at
+                        .as_ref()
+                        .is_some_and(|at| *at > c.created_at) =>
+                {
+                    Some("status_changed")
+                }
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
                 Some(_) => None,
             };
             // cards written before Lookout added a field lack it; the next card fills it
-            let new_fields = card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)).unwrap_or_default();
+            let new_fields = card
+                .as_ref()
+                .map(|c| Kind::Card.missing_fields(&c.data))
+                .unwrap_or_default();
             let reason = reason.or((!new_fields.is_empty()).then_some("new_fields"));
             let mut entry = match reason {
                 Some("changed") => {
                     let changes = match (card.as_ref().and_then(|c| c.basis.as_ref()), &stored) {
-                        (Some(before), Some(now)) => json!(facts::changes(before, &facts::basis(&now.data))),
+                        (Some(before), Some(now)) => {
+                            json!(facts::changes(before, &facts::basis(&now.data)))
+                        }
                         _ => Value::Null,
                     };
                     json!({"id": p.id, "name": p.name, "reason": "changed", "changes": changes})
@@ -618,7 +849,11 @@ impl Lookout {
         }
         let portfolio_reason = match brief {
             None => Some("missing"),
-            Some(pf) if parse(&pf.created_at).with_timezone(&Local).date_naive() != self.today() => Some("new_day"),
+            Some(pf)
+                if parse(&pf.created_at).with_timezone(&Local).date_naive() != self.today() =>
+            {
+                Some("new_day")
+            }
             Some(_) if cards_changed => Some("cards_changed"),
             Some(_) => None,
         };
@@ -662,11 +897,18 @@ impl Lookout {
         });
         // Ratings from every project show the owner's taste; replies only matter to their own project.
         let reactions = self.store.feedback()?;
-        let feedback: Vec<Value> =
-            reactions.iter().filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str())).map(feedback_json).collect();
+        let feedback: Vec<Value> = reactions
+            .iter()
+            .filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str()))
+            .map(feedback_json)
+            .collect();
         let next = format!(
             "Write the card with `lookout card put {id} --file <card.json>`{}",
-            if card.is_some() { " (add --merge to send only the fields that changed)." } else { "." }
+            if card.is_some() {
+                " (add --merge to send only the fields that changed)."
+            } else {
+                "."
+            }
         );
         Ok(json!({
             "today": self.today().to_string(),
@@ -685,10 +927,17 @@ impl Lookout {
             return Ok(payload);
         }
         let Some(previous) = previous else {
-            return Err(LookoutError::new("nothing_to_merge", format!("There is no previous {what} to merge into."))
-                .hint(format!("Send a complete {what} without --merge.")));
+            return Err(LookoutError::new(
+                "nothing_to_merge",
+                format!("There is no previous {what} to merge into."),
+            )
+            .hint(format!("Send a complete {what} without --merge.")));
         };
-        Ok(if payload.is_object() { extend(previous.clone(), payload) } else { payload })
+        Ok(if payload.is_object() {
+            extend(previous.clone(), payload)
+        } else {
+            payload
+        })
     }
 
     /// Validates and saves a card; with `dry_run` only validates and reports what would be saved.
@@ -706,21 +955,33 @@ impl Lookout {
         let changed = changed_fields(previous.as_ref().map(|c| &c.data), &clean);
         if dry_run {
             let items = dry_items(Kind::Card, &payload, &clean);
-            return Ok(json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "warnings": warnings, "items": items}));
+            return Ok(
+                json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "warnings": warnings, "items": items}),
+            );
         }
         let stored = self.stored_facts(id)?;
         let parts = facts::basis(&stored.data);
-        let basis = CardBasis { fingerprint: &stored.fingerprint, head: stored.data["head"].as_str(), ci: settled_ci(&stored.data), parts: &parts };
+        let basis = CardBasis {
+            fingerprint: &stored.fingerprint,
+            head: stored.data["head"].as_str(),
+            ci: settled_ci(&stored.data),
+            parts: &parts,
+        };
         let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
-        Ok(json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
+        Ok(
+            json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
+        )
     }
 
     pub fn card(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let card = self.store.latest_card(id)?.ok_or_else(|| {
-            LookoutError::new("no_card", format!("Project '{id}' has no card yet.")).hint(format!("Run `lookout context {id}` and write one."))
+            LookoutError::new("no_card", format!("Project '{id}' has no card yet."))
+                .hint(format!("Run `lookout context {id}` and write one."))
         })?;
-        Ok(json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}))
+        Ok(
+            json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}),
+        )
     }
 
     pub fn portfolio_context(&self) -> Result<Value> {
@@ -736,7 +997,8 @@ impl Lookout {
                 (Some(pf), Some(c)) => json!(self.brief_changes(&p.id, &c.data, &pf.created_at)?),
                 _ => Value::Null,
             };
-            let card_outdated = matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            let card_outdated =
+                matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
             let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
             let card_json = card.map(|card| {
                 let c = &card.data;
@@ -783,7 +1045,12 @@ impl Lookout {
         let previous = self.store.latest_portfolio()?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|p| &p.data), sent.as_deref());
-        let payload = Self::merged(previous.as_ref().map(|p| &p.data), payload, merge, "portfolio brief")?;
+        let payload = Self::merged(
+            previous.as_ref().map(|p| &p.data),
+            payload,
+            merge,
+            "portfolio brief",
+        )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
             LookoutError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint("Fix the listed fields and send it again. `lookout schema portfolio` prints the full schema.")
@@ -795,7 +1062,13 @@ impl Lookout {
             refs.extend(item["project"].as_str().map(str::to_owned));
         }
         for item in items("patterns").iter().chain(items("synergies").iter()) {
-            refs.extend(item["projects"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)));
+            refs.extend(
+                item["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_owned)),
+            );
         }
         let mut unknown: Vec<String> = refs.into_iter().filter(|r| !known.contains(r)).collect();
         unknown.sort();
@@ -803,19 +1076,33 @@ impl Lookout {
         if !unknown.is_empty() {
             let mut known = known;
             known.sort();
-            return Err(LookoutError::new("unknown_project", format!("The brief names unknown project ids: {}.", unknown.join(", ")))
-                .hint(format!("Use the ids from `lookout portfolio context`: {}.", known.join(", "))));
+            return Err(LookoutError::new(
+                "unknown_project",
+                format!(
+                    "The brief names unknown project ids: {}.",
+                    unknown.join(", ")
+                ),
+            )
+            .hint(format!(
+                "Use the ids from `lookout portfolio context`: {}.",
+                known.join(", ")
+            )));
         }
         if dry_run {
-            return Ok(json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}));
+            return Ok(
+                json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}),
+            );
         }
         let version = self.store.add_portfolio(&self.now(), &clean)?;
-        Ok(json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}))
+        Ok(
+            json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
+        )
     }
 
     pub fn portfolio(&self) -> Result<Value> {
         let p = self.store.latest_portfolio()?.ok_or_else(|| {
-            LookoutError::new("no_portfolio", "No portfolio brief has been written yet.").hint("Run `lookout portfolio context` and write one.")
+            LookoutError::new("no_portfolio", "No portfolio brief has been written yet.")
+                .hint("Run `lookout portfolio context` and write one.")
         })?;
         Ok(json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data}))
     }
@@ -826,32 +1113,56 @@ impl Lookout {
     /// or `done` for a question, `done` for a focus item. Lookout keeps the item as it read,
     /// so agents still see what was rated after it left the card. `value: None` withdraws
     /// the reaction; `note: None` keeps the note already stored.
-    pub fn set_feedback(&self, item_id: &str, value: Option<&str>, note: Option<&str>) -> Result<Value> {
+    pub fn set_feedback(
+        &self,
+        item_id: &str,
+        value: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<Value> {
         let Some(value) = value else {
             self.store.delete_feedback(item_id)?;
             return Ok(json!({"item_id": item_id, "value": null}));
         };
-        let existing = self.store.feedback()?.into_iter().find(|f| f.item_id == item_id);
+        let existing = self
+            .store
+            .feedback()?
+            .into_iter()
+            .find(|f| f.item_id == item_id);
         let (project_id, item) = match (self.find_item(item_id)?, &existing) {
             (Some((project, item)), _) => (project, Some(item)),
             (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
             (None, None) => {
-                return Err(LookoutError::new("unknown_item", format!("No current card or brief has an item with id '{item_id}'."))
-                    .hint("Use an id from `lookout card show <id>` or `lookout portfolio show`."))
+                return Err(LookoutError::new(
+                    "unknown_item",
+                    format!("No current card or brief has an item with id '{item_id}'."),
+                )
+                .hint("Use an id from `lookout card show <id>` or `lookout portfolio show`."))
             }
         };
-        let kind = item.as_ref().and_then(|i| i["kind"].as_str()).unwrap_or("suggestion");
+        let kind = item
+            .as_ref()
+            .and_then(|i| i["kind"].as_str())
+            .unwrap_or("suggestion");
         let allowed = reactions_for(kind);
         if !allowed.contains(&value) {
-            return Err(LookoutError::new("invalid_feedback", format!("'{value}' does not fit a {kind}."))
-                .hint(format!("Use one of: {}.", allowed.join(", "))));
+            return Err(LookoutError::new(
+                "invalid_feedback",
+                format!("'{value}' does not fit a {kind}."),
+            )
+            .hint(format!("Use one of: {}.", allowed.join(", "))));
         }
         let note = match note {
             Some(n) => n.trim().to_owned(),
-            None => existing.as_ref().map(|f| f.note.clone()).unwrap_or_default(),
+            None => existing
+                .as_ref()
+                .map(|f| f.note.clone())
+                .unwrap_or_default(),
         };
         if value == "answered" && note.is_empty() {
-            return Err(LookoutError::new("answer_missing", "An answer needs its text.").hint("Send the answer as the note, or mark the question `done`."));
+            return Err(
+                LookoutError::new("answer_missing", "An answer needs its text.")
+                    .hint("Send the answer as the note, or mark the question `done`."),
+            );
         }
         let title = match (&item, &existing) {
             (Some(item), _) => title_of(item),
@@ -859,7 +1170,15 @@ impl Lookout {
             (None, None) => String::new(),
         };
         let at = self.now();
-        self.store.set_feedback(&Feedback { item_id: item_id.to_owned(), project_id, title, value: value.to_owned(), at, note: note.clone(), item })?;
+        self.store.set_feedback(&Feedback {
+            item_id: item_id.to_owned(),
+            project_id,
+            title,
+            value: value.to_owned(),
+            at,
+            note: note.clone(),
+            item,
+        })?;
         Ok(json!({"item_id": item_id, "value": value, "note": note}))
     }
 
@@ -876,9 +1195,21 @@ impl Lookout {
         }
         for (project, kind, doc) in docs {
             for (list, _, item_kind) in kind.items() {
-                let Some(item) = doc[*list].as_array().into_iter().flatten().find(|i| i["id"] == item_id) else { continue };
+                let Some(item) = doc[*list]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|i| i["id"] == item_id)
+                else {
+                    continue;
+                };
                 let mut snapshot = json!({"kind": item_kind});
-                for (key, value) in item.as_object().into_iter().flatten().filter(|(k, _)| *k != "id") {
+                for (key, value) in item
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter(|(k, _)| *k != "id")
+                {
                     snapshot[key] = value.clone();
                 }
                 let project = project.or_else(|| item["project"].as_str().map(str::to_owned));
@@ -890,21 +1221,40 @@ impl Lookout {
 
     pub fn feedback(&self, project_id: Option<&str>) -> Result<Value> {
         Ok(Value::Array(
-            self.store.feedback()?.iter().filter(|f| project_id.is_none() || f.project_id.as_deref() == project_id).map(feedback_json).collect(),
+            self.store
+                .feedback()?
+                .iter()
+                .filter(|f| project_id.is_none() || f.project_id.as_deref() == project_id)
+                .map(feedback_json)
+                .collect(),
         ))
     }
 
     pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
         if !PREFS.contains(&key) {
-            return Err(LookoutError::new("invalid_pref", format!("Unknown preference '{key}'.")));
+            return Err(LookoutError::new(
+                "invalid_pref",
+                format!("Unknown preference '{key}'."),
+            ));
         }
         Ok(self.store.set_pref(key, value)?)
     }
 
     /// The brief-relevant card fields that differ from the card as it was when the brief was written;
     /// None when the project had no card then.
-    fn brief_changes(&self, id: &str, card: &Value, brief_at: &str) -> Result<Option<Vec<&'static str>>> {
-        Ok(self.store.card_at(id, brief_at)?.map(|then| BRIEF_FIELDS.iter().copied().filter(|f| then.get(*f) != card.get(*f)).collect()))
+    fn brief_changes(
+        &self,
+        id: &str,
+        card: &Value,
+        brief_at: &str,
+    ) -> Result<Option<Vec<&'static str>>> {
+        Ok(self.store.card_at(id, brief_at)?.map(|then| {
+            BRIEF_FIELDS
+                .iter()
+                .copied()
+                .filter(|f| then.get(*f) != card.get(*f))
+                .collect()
+        }))
     }
 
     // ---------- the window ----------
@@ -914,9 +1264,17 @@ impl Lookout {
     pub fn open_project(&self, id: &str) -> Result<Value> {
         let p = self.project(id)?;
         let now = (self.clock)();
-        let long_ago = p.opened_at.as_deref().is_none_or(|l| now - parse(l) > chrono::Duration::hours(1));
-        let reference = if long_ago { p.opened_at.clone() } else { p.previous_opened_at.clone() };
-        self.store.set_opened(id, &stamp(now), reference.as_deref())?;
+        let long_ago = p
+            .opened_at
+            .as_deref()
+            .is_none_or(|l| now - parse(l) > chrono::Duration::hours(1));
+        let reference = if long_ago {
+            p.opened_at.clone()
+        } else {
+            p.previous_opened_at.clone()
+        };
+        self.store
+            .set_opened(id, &stamp(now), reference.as_deref())?;
         let Some(then) = reference.filter(|r| (now - parse(r)).num_days() >= SINCE_DAYS) else {
             return Ok(json!({"since": null}));
         };
@@ -924,9 +1282,19 @@ impl Lookout {
         let card_now = self.store.latest_card(id)?.map(|c| c.data);
         let day = parse(&then).with_timezone(&Local).date_naive().to_string();
         let dated_after = |key: &str| -> Vec<Value> {
-            card_now.as_ref().and_then(|c| c[key].as_array()).into_iter().flatten().filter(|x| x["date"].as_str().is_some_and(|d| d >= day.as_str())).cloned().collect()
+            card_now
+                .as_ref()
+                .and_then(|c| c[key].as_array())
+                .into_iter()
+                .flatten()
+                .filter(|x| x["date"].as_str().is_some_and(|d| d >= day.as_str()))
+                .cloned()
+                .collect()
         };
-        let phase = |c: &Option<Value>| c.as_ref().and_then(|c| c["phase"].as_str().map(str::to_owned));
+        let phase = |c: &Option<Value>| {
+            c.as_ref()
+                .and_then(|c| c["phase"].as_str().map(str::to_owned))
+        };
         let (phase_then, phase_now) = (phase(&card_then), phase(&card_now));
         Ok(json!({"since": {
             "at": then,
@@ -949,7 +1317,10 @@ impl Lookout {
             None => last.clone().unwrap_or(Value::Null),
         };
         if visit {
-            let long_ago = last.as_ref().and_then(Value::as_str).is_none_or(|l| now - parse(l) > chrono::Duration::hours(1));
+            let long_ago = last
+                .as_ref()
+                .and_then(Value::as_str)
+                .is_none_or(|l| now - parse(l) > chrono::Duration::hours(1));
             if long_ago {
                 previous = last.clone().unwrap_or(Value::Null);
                 self.store.set_pref("previous_visit", &previous)?;
@@ -960,7 +1331,8 @@ impl Lookout {
         for p in self.store.projects()? {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
-            let outdated = matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            let outdated =
+                matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
             // the headline of every card version, newest first: the project's story in one line per update
             let history: Vec<Value> = self
                 .store
@@ -971,7 +1343,18 @@ impl Lookout {
                 .rev()
                 .collect();
             projects.push(extend(
-                pick(&project_json(&p), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
+                pick(
+                    &project_json(&p),
+                    &[
+                        "id",
+                        "name",
+                        "path",
+                        "status",
+                        "status_note",
+                        "goal",
+                        "goal_due",
+                    ],
+                ),
                 json!({
                     "facts": stored.as_ref().map(|s| s.data.clone()),
                     "facts_collected_at": stored.map(|s| s.collected_at),
@@ -983,8 +1366,17 @@ impl Lookout {
             ));
         }
         let portfolio = self.store.latest_portfolio()?;
-        let feedback: Map<String, Value> =
-            self.store.feedback()?.into_iter().map(|f| (f.item_id, json!({"value": f.value, "at": f.at, "note": f.note}))).collect();
+        let feedback: Map<String, Value> = self
+            .store
+            .feedback()?
+            .into_iter()
+            .map(|f| {
+                (
+                    f.item_id,
+                    json!({"value": f.value, "at": f.at, "note": f.note}),
+                )
+            })
+            .collect();
         Ok(json!({
             "today": self.today().to_string(),
             "now": stamp(now),

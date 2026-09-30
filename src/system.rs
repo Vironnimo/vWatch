@@ -10,9 +10,18 @@ use serde_json::{json, Value};
 /// The Skill for agents, embedded so the exe always carries the matching version.
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/lookout/SKILL.md")),
-    ("references/cli.md", include_str!("../skill/lookout/references/cli.md")),
-    ("references/card-guide.md", include_str!("../skill/lookout/references/card-guide.md")),
-    ("references/portfolio-guide.md", include_str!("../skill/lookout/references/portfolio-guide.md")),
+    (
+        "references/cli.md",
+        include_str!("../skill/lookout/references/cli.md"),
+    ),
+    (
+        "references/card-guide.md",
+        include_str!("../skill/lookout/references/card-guide.md"),
+    ),
+    (
+        "references/portfolio-guide.md",
+        include_str!("../skill/lookout/references/portfolio-guide.md"),
+    ),
 ];
 
 pub fn exe_path() -> PathBuf {
@@ -20,11 +29,16 @@ pub fn exe_path() -> PathBuf {
 }
 
 pub fn app_dir() -> PathBuf {
-    exe_path().parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
+    exe_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn data_dir() -> PathBuf {
-    let dir = std::env::var_os("LOOKOUT_HOME").map(PathBuf::from).unwrap_or_else(|| app_dir().join("data"));
+    let dir = std::env::var_os("LOOKOUT_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app_dir().join("data"));
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -102,7 +116,8 @@ mod win {
     }
 
     fn user_path() -> std::io::Result<(RegKey, String)> {
-        let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)?;
+        let key = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)?;
         let path = key.get_value::<String, _>("Path").unwrap_or_default();
         Ok((key, path))
     }
@@ -116,24 +131,47 @@ mod win {
         let (key, path) = user_path()?;
         let dir = dir.to_string_lossy().into_owned();
         let want = norm(&dir);
-        let mut parts: Vec<&str> = path.split(';').filter(|p| !p.trim().is_empty() && norm(p) != want).collect();
+        let mut parts: Vec<&str> = path
+            .split(';')
+            .filter(|p| !p.trim().is_empty() && norm(p) != want)
+            .collect();
         if on {
             parts.push(&dir);
         }
         let joined = parts.join(";");
-        let bytes: Vec<u8> = joined.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+        let bytes: Vec<u8> = joined
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
         // REG_EXPAND_SZ keeps entries such as %USERPROFILE%\bin working.
-        key.set_raw_value("Path", &RegValue { vtype: RegType::REG_EXPAND_SZ, bytes })?;
+        key.set_raw_value(
+            "Path",
+            &RegValue {
+                vtype: RegType::REG_EXPAND_SZ,
+                bytes,
+            },
+        )?;
         broadcast_environment_change();
         Ok(())
     }
 
     fn broadcast_environment_change() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+        };
         let name: Vec<u16> = "Environment".encode_utf16().chain([0]).collect();
         let mut result = 0usize;
         unsafe {
-            SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, name.as_ptr() as isize, SMTO_ABORTIFHUNG, 3000, &mut result);
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                name.as_ptr() as isize,
+                SMTO_ABORTIFHUNG,
+                3000,
+                &mut result,
+            );
         }
     }
 
@@ -141,8 +179,13 @@ mod win {
     /// Redirected handles (pipes, files) are kept; otherwise the parent's console is used.
     pub fn attach_console() {
         use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
-        use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
-        use windows_sys::Win32::System::Console::{AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        };
+        use windows_sys::Win32::System::Console::{
+            AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+            STD_OUTPUT_HANDLE,
+        };
         unsafe {
             let missing = |id| {
                 let h = GetStdHandle(id);
@@ -157,7 +200,15 @@ mod win {
             let conout: Vec<u16> = "CONOUT$".encode_utf16().chain([0]).collect();
             for id in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
                 if missing(id) {
-                    let h = CreateFileW(conout.as_ptr(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut());
+                    let h = CreateFileW(
+                        conout.as_ptr(),
+                        GENERIC_READ | GENERIC_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        std::ptr::null(),
+                        OPEN_EXISTING,
+                        0,
+                        std::ptr::null_mut(),
+                    );
                     if h != INVALID_HANDLE_VALUE {
                         SetStdHandle(id, h);
                     }
@@ -189,7 +240,9 @@ pub fn set_autostart(on: bool) -> std::io::Result<()> {
     #[cfg(not(windows))]
     {
         let _ = on;
-        Err(std::io::Error::other("autostart is only available on Windows"))
+        Err(std::io::Error::other(
+            "autostart is only available on Windows",
+        ))
     }
 }
 
@@ -207,6 +260,8 @@ pub fn set_agent_access(on: bool) -> std::io::Result<()> {
     #[cfg(not(windows))]
     {
         let _ = on;
-        Err(std::io::Error::other("PATH changes are only available on Windows"))
+        Err(std::io::Error::other(
+            "PATH changes are only available on Windows",
+        ))
     }
 }

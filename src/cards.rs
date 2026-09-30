@@ -22,10 +22,17 @@ pub enum Kind {
 
 enum Ty {
     /// Text of `min..=max` characters and, when set, at most `words` words.
-    Str { min: usize, max: usize, words: Option<usize> },
+    Str {
+        min: usize,
+        max: usize,
+        words: Option<usize>,
+    },
     Date,
     Enum(&'static [&'static str]),
-    Int { min: i64, max: i64 },
+    Int {
+        min: i64,
+        max: i64,
+    },
     Id,
     List(&'static Ty, Option<usize>),
     Obj(&'static [Field]),
@@ -51,35 +58,90 @@ const fn f(name: &'static str, ty: Ty, default: Default) -> Field {
     Field { name, ty, default }
 }
 
-const SHORT: Ty = Ty::Str { min: 1, max: 160, words: None };
-const TEXT: Ty = Ty::Str { min: 0, max: 600, words: None };
+const SHORT: Ty = Ty::Str {
+    min: 1,
+    max: 160,
+    words: None,
+};
+const TEXT: Ty = Ty::Str {
+    min: 0,
+    max: 600,
+    words: None,
+};
 /// Required short text of at most `n` words: the page has room for exactly that.
 const fn words(n: usize) -> Ty {
-    Ty::Str { min: 1, max: 600, words: Some(n) }
+    Ty::Str {
+        min: 1,
+        max: 600,
+        words: Some(n),
+    }
 }
 /// Optional text of at most `n` words; "one sentence" fields allow 30.
 const fn sentence(n: usize) -> Ty {
-    Ty::Str { min: 0, max: 600, words: Some(n) }
+    Ty::Str {
+        min: 0,
+        max: 600,
+        words: Some(n),
+    }
 }
 const SENTENCE: Ty = sentence(30);
 /// A one-sentence reason of at most 25 words.
-const WHY: Ty = Ty::Str { min: 1, max: 600, words: Some(25) };
+const WHY: Ty = Ty::Str {
+    min: 1,
+    max: 600,
+    words: Some(25),
+};
 const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
 const SIZE: &[&str] = &["S", "M", "L"];
 /// A command, URL, shortcut or path the owner types or clicks.
-const COMMAND: Ty = Ty::Str { min: 1, max: 600, words: None };
+const COMMAND: Ty = Ty::Str {
+    min: 1,
+    max: 600,
+    words: None,
+};
 use Default::{Empty, Filled, Null, Required, Text};
 
-const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", SENTENCE, Text(""))];
-const MILESTONE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(10), Required)];
+const CHANGE: &[Field] = &[
+    f("date", Ty::Date, Required),
+    f("title", words(8), Required),
+    f("detail", SENTENCE, Text("")),
+];
+const MILESTONE: &[Field] = &[
+    f("date", Ty::Date, Required),
+    f("title", words(10), Required),
+];
 const OPEN_END: &[Field] = &[
-    f("kind", Ty::Enum(&["worktree", "branch", "uncommitted", "unpushed", "ci", "flagged", "todo", "plan", "other"]), Text("other")),
+    f(
+        "kind",
+        Ty::Enum(&[
+            "worktree",
+            "branch",
+            "uncommitted",
+            "unpushed",
+            "ci",
+            "flagged",
+            "todo",
+            "plan",
+            "other",
+        ]),
+        Text("other"),
+    ),
     f("title", words(10), Required),
     f("detail", SENTENCE, Text("")),
     f("source", TEXT, Text("")),
-    f("age_days", Ty::Nullable(&Ty::Int { min: 0, max: 100_000 }), Null),
+    f(
+        "age_days",
+        Ty::Nullable(&Ty::Int {
+            min: 0,
+            max: 100_000,
+        }),
+        Null,
+    ),
 ];
-const OPTION: &[Field] = &[f("answer", words(8), Required), f("effect", sentence(20), Text(""))];
+const OPTION: &[Field] = &[
+    f("answer", words(8), Required),
+    f("effect", sentence(20), Text("")),
+];
 const QUESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("title", words(12), Required),
@@ -89,17 +151,35 @@ const QUESTION: &[Field] = &[
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&SENTENCE), Null),
     f("progress_note", Ty::Nullable(&SENTENCE), Null),
-    f("progress_pct", Ty::Nullable(&Ty::Int { min: 0, max: 100 }), Null),
+    f(
+        "progress_pct",
+        Ty::Nullable(&Ty::Int { min: 0, max: 100 }),
+        Null,
+    ),
 ];
 /// How an agent handed the task would know it is finished.
 const DONE_WHEN: Ty = sentence(20);
-const REENTRY: &[Field] =
-    &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text("")), f("done_when", DONE_WHEN, Text(""))];
-const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required), f("folder", TEXT, Text(""))];
+const REENTRY: &[Field] = &[
+    f("next_step", words(20), Required),
+    f("effort", Ty::Enum(EFFORT), Required),
+    f("why", SENTENCE, Text("")),
+    f("done_when", DONE_WHEN, Text("")),
+];
+const RUN: &[Field] = &[
+    f("what", words(6), Required),
+    f("how", COMMAND, Required),
+    f("folder", TEXT, Text("")),
+];
 const PLACE: &[Field] = &[f("path", COMMAND, Required), f("what", words(12), Required)];
 const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Required)];
-const INSTALLED: &[Field] = &[f("version", words(4), Required), f("path", COMMAND, Required)];
-const TERM: &[Field] = &[f("term", words(4), Required), f("meaning", words(20), Required)];
+const INSTALLED: &[Field] = &[
+    f("version", words(4), Required),
+    f("path", COMMAND, Required),
+];
+const TERM: &[Field] = &[
+    f("term", words(4), Required),
+    f("meaning", words(20), Required),
+];
 /// What someone returning after months needs to find their way around.
 const HANDBOOK: &[Field] = &[
     f("run", Ty::List(&Ty::Obj(RUN), Some(6)), Empty),
@@ -112,7 +192,11 @@ const HANDBOOK: &[Field] = &[
 ];
 const SUGGESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
-    f("type", Ty::Enum(&["next", "feature", "cleanup", "park"]), Required),
+    f(
+        "type",
+        Ty::Enum(&["next", "feature", "cleanup", "park"]),
+        Required,
+    ),
     f("title", words(8), Required),
     f("why", WHY, Required),
     f("evidence", TEXT, Text("")),
@@ -122,7 +206,11 @@ const SUGGESTION: &[Field] = &[
 const CARD: &[Field] = &[
     f("one_liner", words(15), Required),
     f("stack", sentence(25), Text("")),
-    f("phase", Ty::Enum(&["active", "cooling", "dormant", "maintenance", "done"]), Required),
+    f(
+        "phase",
+        Ty::Enum(&["active", "cooling", "dormant", "maintenance", "done"]),
+        Required,
+    ),
     f("phase_evidence", SENTENCE, Text("")),
     f("headline", words(10), Required),
     f("personality", SENTENCE, Text("")),
@@ -154,7 +242,11 @@ const PATTERN: &[Field] = &[
     f("why", WHY, Required),
     f("projects", Ty::List(&SHORT, None), Empty),
     f("evidence", TEXT, Text("")),
-    f("severity", Ty::Enum(&["info", "warn", "risk"]), Text("info")),
+    f(
+        "severity",
+        Ty::Enum(&["info", "warn", "risk"]),
+        Text("info"),
+    ),
 ];
 const SYNERGY: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
@@ -174,11 +266,23 @@ const APP_IDEA: &[Field] = &[
 const VERDICT: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("project", SHORT, Required),
-    f("verdict", Ty::Enum(&["park", "revive", "finish", "archive"]), Required),
+    f(
+        "verdict",
+        Ty::Enum(&["park", "revive", "finish", "archive"]),
+        Required,
+    ),
     f("why", WHY, Required),
 ];
 const PORTFOLIO: &[Field] = &[
-    f("greeting", Ty::Str { min: 1, max: 600, words: Some(30) }, Required),
+    f(
+        "greeting",
+        Ty::Str {
+            min: 1,
+            max: 600,
+            words: Some(30),
+        },
+        Required,
+    ),
     f("focus", Ty::List(&Ty::Obj(FOCUS), Some(3)), Empty),
     f("patterns", Ty::List(&Ty::Obj(PATTERN), None), Empty),
     f("synergies", Ty::List(&Ty::Obj(SYNERGY), None), Empty),
@@ -201,11 +305,17 @@ impl Kind {
     pub fn missing_fields(self, doc: &Value) -> Vec<String> {
         fn walk(fields: &[Field], doc: &Value, path: &str, out: &mut Vec<String>) {
             for field in fields {
-                let here = if path.is_empty() { field.name.to_owned() } else { format!("{path}.{}", field.name) };
+                let here = if path.is_empty() {
+                    field.name.to_owned()
+                } else {
+                    format!("{path}.{}", field.name)
+                };
                 match doc.get(field.name) {
                     None => out.push(here),
                     Some(v) => match &field.ty {
-                        Ty::Obj(inner) | Ty::Nullable(Ty::Obj(inner)) if v.is_object() => walk(inner, v, &here, out),
+                        Ty::Obj(inner) | Ty::Nullable(Ty::Obj(inner)) if v.is_object() => {
+                            walk(inner, v, &here, out)
+                        }
                         Ty::List(Ty::Obj(inner), _) => {
                             if let Some(first) = v.as_array().and_then(|a| a.first()) {
                                 walk(inner, first, &format!("{here}[]"), out);
@@ -223,7 +333,10 @@ impl Kind {
 
     pub fn items(self) -> &'static [(&'static str, &'static str, &'static str)] {
         match self {
-            Kind::Card => &[("suggestions", "sg", "suggestion"), ("waiting_on_you", "q", "question")],
+            Kind::Card => &[
+                ("suggestions", "sg", "suggestion"),
+                ("waiting_on_you", "q", "question"),
+            ],
             Kind::Portfolio => &[
                 ("focus", "fc", "focus"),
                 ("patterns", "pt", "pattern"),
@@ -246,11 +359,21 @@ impl Kind {
 /// or the list of problems as "path: message". Word limits are not enforced on the
 /// top-level fields in `kept`, text carried over unchanged from the previous version that
 /// may predate a limit; such text only earns a warning.
-pub fn validate(kind: Kind, data: &Value, kept: &[String]) -> Result<(Value, Vec<String>), Vec<String>> {
+pub fn validate(
+    kind: Kind,
+    data: &Value,
+    kept: &[String],
+) -> Result<(Value, Vec<String>), Vec<String>> {
     if !data.is_object() {
         return Err(vec!["(document): the document must be a JSON object".into()]);
     }
-    let mut ctx = Ctx { problems: Vec::new(), unknown: Vec::new(), over: Vec::new(), kept, enforce_words: true };
+    let mut ctx = Ctx {
+        problems: Vec::new(),
+        unknown: Vec::new(),
+        over: Vec::new(),
+        kept,
+        enforce_words: true,
+    };
     let clean = check_obj(kind.fields(), data, "", &mut ctx);
     if !ctx.problems.is_empty() {
         return Err(ctx.problems);
@@ -294,12 +417,20 @@ fn fail(ctx: &mut Ctx, path: &str, msg: String) -> Option<Value> {
 }
 
 fn join(path: &str, name: &str) -> String {
-    if path.is_empty() { name.to_owned() } else { format!("{path}.{name}") }
+    if path.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{path}.{name}")
+    }
 }
 
 fn check_obj(fields: &[Field], value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
     let Some(map) = value.as_object() else {
-        return fail(ctx, if path.is_empty() { "(document)" } else { path }, "Input should be an object".into());
+        return fail(
+            ctx,
+            if path.is_empty() { "(document)" } else { path },
+            "Input should be an object".into(),
+        );
     };
     for key in map.keys() {
         if !fields.iter().any(|f| f.name == key) {
@@ -313,7 +444,9 @@ fn check_obj(fields: &[Field], value: &Value, path: &str, ctx: &mut Ctx) -> Opti
         if path.is_empty() {
             ctx.enforce_words = !ctx.kept.iter().any(|k| k == field.name);
         }
-        let given = map.get(field.name).filter(|v| !v.is_null() || matches!(field.ty, Ty::Nullable(_)));
+        let given = map
+            .get(field.name)
+            .filter(|v| !v.is_null() || matches!(field.ty, Ty::Nullable(_)));
         let result = match given {
             Some(v) => check(&field.ty, v, &here, ctx),
             None => match field.default {
@@ -395,19 +528,26 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
 }
 
 fn word_count(s: &str) -> usize {
-    s.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
+    s.split_whitespace()
+        .filter(|w| w.chars().any(char::is_alphanumeric))
+        .count()
 }
 
 fn valid_item_id(s: &str) -> bool {
     let b = s.as_bytes();
     (3..=64).contains(&b.len())
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b':' | b'_' | b'-'))
+        && b.iter().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b':' | b'_' | b'-')
+        })
 }
 
 fn new_id(prefix: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let digest = Sha1::digest(format!("{nanos}:{n}:{}", std::process::id()).as_bytes());
     let hex: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
@@ -450,7 +590,9 @@ fn ty_schema(ty: &Ty) -> Value {
             }
             s
         }
-        Ty::Date => json!({"type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}),
+        Ty::Date => {
+            json!({"type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"})
+        }
         Ty::Id => json!({"type": "string", "pattern": "^[a-z0-9][a-z0-9:_-]{2,63}$"}),
         Ty::Enum(options) => json!({"type": "string", "enum": options}),
         Ty::Int { min, max } => json!({"type": "integer", "minimum": min, "maximum": max}),

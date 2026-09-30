@@ -139,8 +139,13 @@ impl Store {
             ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
             ("projects", "goal_due", "TEXT"),
         ] {
-            let present: bool =
-                db.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
+            let present: bool = db.query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                ),
+                [],
+                |r| r.get(0),
+            )?;
             if !present {
                 db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
@@ -155,19 +160,38 @@ impl Store {
 
     // projects
     pub fn projects(&self) -> Result<Vec<Project>> {
-        self.with(|db| db.prepare("SELECT * FROM projects ORDER BY added_at, id")?.query_map([], project)?.collect())
+        self.with(|db| {
+            db.prepare("SELECT * FROM projects ORDER BY added_at, id")?
+                .query_map([], project)?
+                .collect()
+        })
     }
 
     pub fn project(&self, id: &str) -> Result<Option<Project>> {
-        self.with(|db| db.query_row("SELECT * FROM projects WHERE id = ?1", [id], project).optional())
+        self.with(|db| {
+            db.query_row("SELECT * FROM projects WHERE id = ?1", [id], project)
+                .optional()
+        })
     }
 
     pub fn add_project(&self, id: &str, name: &str, path: &str, at: &str) -> Result<()> {
-        self.with(|db| db.execute("INSERT INTO projects(id, name, path, added_at) VALUES(?1, ?2, ?3, ?4)", params![id, name, path, at]).map(drop))
+        self.with(|db| {
+            db.execute(
+                "INSERT INTO projects(id, name, path, added_at) VALUES(?1, ?2, ?3, ?4)",
+                params![id, name, path, at],
+            )
+            .map(drop)
+        })
     }
 
     pub fn rename_project(&self, id: &str, name: &str) -> Result<()> {
-        self.with(|db| db.execute("UPDATE projects SET name = ?1 WHERE id = ?2", params![name, id]).map(drop))
+        self.with(|db| {
+            db.execute(
+                "UPDATE projects SET name = ?1 WHERE id = ?2",
+                params![name, id],
+            )
+            .map(drop)
+        })
     }
 
     pub fn set_status(&self, id: &str, status: &str, note: &str, at: &str) -> Result<()> {
@@ -183,13 +207,23 @@ impl Store {
     }
 
     pub fn set_opened(&self, id: &str, at: &str, previous: Option<&str>) -> Result<()> {
-        self.with(|db| db.execute("UPDATE projects SET opened_at = ?2, previous_opened_at = ?3 WHERE id = ?1", params![id, at, previous]).map(drop))
+        self.with(|db| {
+            db.execute(
+                "UPDATE projects SET opened_at = ?2, previous_opened_at = ?3 WHERE id = ?1",
+                params![id, at, previous],
+            )
+            .map(drop)
+        })
     }
 
     pub fn remove_project(&self, id: &str) -> Result<()> {
         self.with(|db| {
             db.execute_batch("BEGIN")?;
-            for sql in ["DELETE FROM projects WHERE id = ?1", "DELETE FROM facts WHERE project_id = ?1", "DELETE FROM cards WHERE project_id = ?1"] {
+            for sql in [
+                "DELETE FROM projects WHERE id = ?1",
+                "DELETE FROM facts WHERE project_id = ?1",
+                "DELETE FROM cards WHERE project_id = ?1",
+            ] {
                 db.execute(sql, [id])?;
             }
             db.execute_batch("COMMIT")
@@ -211,9 +245,17 @@ impl Store {
 
     pub fn facts(&self, id: &str) -> Result<Option<StoredFacts>> {
         self.with(|db| {
-            db.query_row("SELECT collected_at, fingerprint, data FROM facts WHERE project_id = ?1", [id], |r| {
-                Ok(StoredFacts { collected_at: r.get(0)?, fingerprint: r.get(1)?, data: json(r.get(2)?) })
-            })
+            db.query_row(
+                "SELECT collected_at, fingerprint, data FROM facts WHERE project_id = ?1",
+                [id],
+                |r| {
+                    Ok(StoredFacts {
+                        collected_at: r.get(0)?,
+                        fingerprint: r.get(1)?,
+                        data: json(r.get(2)?),
+                    })
+                },
+            )
             .optional()
         })
     }
@@ -249,7 +291,8 @@ impl Store {
     /// Every card version of a project, oldest first, as (created_at, data).
     pub fn card_history(&self, id: &str) -> Result<Vec<(String, Value)>> {
         self.with(|db| {
-            let mut stmt = db.prepare("SELECT created_at, data FROM cards WHERE project_id = ?1 ORDER BY id")?;
+            let mut stmt =
+                db.prepare("SELECT created_at, data FROM cards WHERE project_id = ?1 ORDER BY id")?;
             let rows = stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, json(r.get(1)?))))?;
             rows.collect()
         })
@@ -265,7 +308,13 @@ impl Store {
     }
 
     pub fn cards_after(&self, id: &str, at: &str) -> Result<i64> {
-        self.with(|db| db.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1 AND created_at > ?2", params![id, at], |r| r.get(0)))
+        self.with(|db| {
+            db.query_row(
+                "SELECT COUNT(*) FROM cards WHERE project_id = ?1 AND created_at > ?2",
+                params![id, at],
+                |r| r.get(0),
+            )
+        })
     }
 
     /// Replaces the stored content of a project's latest card, keeping its version and date.
@@ -281,22 +330,39 @@ impl Store {
 
     /// Replaces the stored content of the latest brief, keeping its version and date.
     pub fn rewrite_latest_portfolio(&self, data: &Value) -> Result<()> {
-        self.with(|db| db.execute("UPDATE portfolio SET data = ?1 WHERE id = (SELECT MAX(id) FROM portfolio)", [data.to_string()]).map(drop))
+        self.with(|db| {
+            db.execute(
+                "UPDATE portfolio SET data = ?1 WHERE id = (SELECT MAX(id) FROM portfolio)",
+                [data.to_string()],
+            )
+            .map(drop)
+        })
     }
 
     // portfolio
     pub fn add_portfolio(&self, at: &str, data: &Value) -> Result<i64> {
         self.with(|db| {
-            db.execute("INSERT INTO portfolio(created_at, data) VALUES(?1, ?2)", params![at, data.to_string()])?;
+            db.execute(
+                "INSERT INTO portfolio(created_at, data) VALUES(?1, ?2)",
+                params![at, data.to_string()],
+            )?;
             Ok(db.last_insert_rowid())
         })
     }
 
     pub fn latest_portfolio(&self) -> Result<Option<StoredPortfolio>> {
         self.with(|db| {
-            db.query_row("SELECT id, created_at, data FROM portfolio ORDER BY id DESC LIMIT 1", [], |r| {
-                Ok(StoredPortfolio { version: r.get(0)?, created_at: r.get(1)?, data: json(r.get(2)?) })
-            })
+            db.query_row(
+                "SELECT id, created_at, data FROM portfolio ORDER BY id DESC LIMIT 1",
+                [],
+                |r| {
+                    Ok(StoredPortfolio {
+                        version: r.get(0)?,
+                        created_at: r.get(1)?,
+                        data: json(r.get(2)?),
+                    })
+                },
+            )
             .optional()
         })
     }
@@ -315,7 +381,10 @@ impl Store {
     }
 
     pub fn delete_feedback(&self, item_id: &str) -> Result<()> {
-        self.with(|db| db.execute("DELETE FROM feedback WHERE item_id = ?1", [item_id]).map(drop))
+        self.with(|db| {
+            db.execute("DELETE FROM feedback WHERE item_id = ?1", [item_id])
+                .map(drop)
+        })
     }
 
     /// All reactions, newest first.
@@ -339,8 +408,13 @@ impl Store {
 
     // prefs
     pub fn pref(&self, key: &str) -> Result<Option<Value>> {
-        self.with(|db| db.query_row("SELECT value FROM prefs WHERE key = ?1", [key], |r| r.get::<_, String>(0)).optional())
-            .map(|v| v.map(json))
+        self.with(|db| {
+            db.query_row("SELECT value FROM prefs WHERE key = ?1", [key], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()
+        })
+        .map(|v| v.map(json))
     }
 
     pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
@@ -358,7 +432,9 @@ pub struct ChangeWatch {
 
 impl ChangeWatch {
     pub fn open(path: &Path) -> Result<ChangeWatch> {
-        Ok(ChangeWatch { db: Mutex::new(open(path)?) })
+        Ok(ChangeWatch {
+            db: Mutex::new(open(path)?),
+        })
     }
 
     /// A number that changes whenever another connection commits a write.

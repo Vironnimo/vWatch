@@ -28,7 +28,10 @@ where
     F: FnOnce(&Lookout) -> Result<Value, LookoutError> + Send + 'static,
 {
     let svc = state.service.clone();
-    tauri::async_runtime::spawn_blocking(move || f(&svc)).await.map_err(internal)?.map_err(|e| e.to_json())
+    tauri::async_runtime::spawn_blocking(move || f(&svc))
+        .await
+        .map_err(internal)?
+        .map_err(|e| e.to_json())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -46,8 +49,16 @@ async fn refresh(app: State<'_, AppState>) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_feedback(app: State<'_, AppState>, item_id: String, value: Option<String>, note: Option<String>) -> Reply {
-    work(&app, move |s| s.set_feedback(&item_id, value.as_deref(), note.as_deref())).await
+async fn set_feedback(
+    app: State<'_, AppState>,
+    item_id: String,
+    value: Option<String>,
+    note: Option<String>,
+) -> Reply {
+    work(&app, move |s| {
+        s.set_feedback(&item_id, value.as_deref(), note.as_deref())
+    })
+    .await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -61,12 +72,22 @@ async fn set_pref(app: State<'_, AppState>, key: String, value: Value) -> Reply 
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_status(app: State<'_, AppState>, id: String, status: String, note: Option<String>) -> Reply {
+async fn set_status(
+    app: State<'_, AppState>,
+    id: String,
+    status: String,
+    note: Option<String>,
+) -> Reply {
     work(&app, move |s| s.set_status(&id, &status, note.as_deref())).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_goal(app: State<'_, AppState>, id: String, goal: String, due: Option<String>) -> Reply {
+async fn set_goal(
+    app: State<'_, AppState>,
+    id: String,
+    goal: String,
+    due: Option<String>,
+) -> Reply {
     work(&app, move |s| s.set_goal(&id, &goal, due.as_deref())).await
 }
 
@@ -92,9 +113,14 @@ async fn add_projects(app: State<'_, AppState>, paths: Vec<String>) -> Reply {
 
 #[tauri::command(rename_all = "snake_case")]
 async fn pick_folder(app: AppHandle) -> Reply {
-    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().set_title("Ordner oder Projekt wählen").blocking_pick_folder())
-        .await
-        .map_err(internal)?;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Ordner oder Projekt wählen")
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(internal)?;
     Ok(json!(picked.map(|p| p.to_string())))
 }
 
@@ -122,7 +148,14 @@ fn open_external(target: String) -> Reply {
     if !is_url && !std::path::Path::new(&target).is_dir() {
         return Err(json!({"code": "not_openable", "message": format!("Cannot open {target}.")}));
     }
-    std::process::Command::new(if cfg!(windows) { "explorer" } else { "xdg-open" }).arg(&target).spawn().map_err(internal)?;
+    std::process::Command::new(if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    })
+    .arg(&target)
+    .spawn()
+    .map_err(internal)?;
     Ok(json!({}))
 }
 
@@ -154,12 +187,33 @@ pub fn run() {
     let _ = system::export_skill();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app)
+        }))
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState { service: Arc::new(service), watch })
+        .manage(AppState {
+            service: Arc::new(service),
+            watch,
+        })
         .invoke_handler(tauri::generate_handler![
-            state, refresh, set_feedback, open_project, set_pref, set_status, set_goal, rename_project, remove_project, discover, add_projects,
-            pick_folder, settings, set_autostart, set_agent_access, open_external, data_version, ready
+            state,
+            refresh,
+            set_feedback,
+            open_project,
+            set_pref,
+            set_status,
+            set_goal,
+            rename_project,
+            remove_project,
+            discover,
+            add_projects,
+            pick_folder,
+            settings,
+            set_autostart,
+            set_agent_access,
+            open_external,
+            data_version,
+            ready
         ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

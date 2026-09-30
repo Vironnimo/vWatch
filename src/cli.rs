@@ -15,7 +15,12 @@ use crate::service::{Lookout, LookoutError, Result, DEFAULT_MAX_AGE_DAYS};
 use crate::system;
 
 #[derive(Parser)]
-#[command(name = "lookout", bin_name = "lookout", version, about = "Morning overview of all your agent-built projects. Every command prints JSON.")]
+#[command(
+    name = "lookout",
+    bin_name = "lookout",
+    version,
+    about = "Morning overview of all your agent-built projects. Every command prints JSON."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -175,7 +180,16 @@ enum SchemaKind {
 /// Decode a document: UTF-8 with or without BOM, or UTF-16 with BOM (Windows PowerShell's default).
 fn decode(bytes: &[u8]) -> String {
     let utf16 = |be: bool| {
-        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| if be { u16::from_be_bytes([c[0], c[1]]) } else { u16::from_le_bytes([c[0], c[1]]) }).collect();
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| {
+                if be {
+                    u16::from_be_bytes([c[0], c[1]])
+                } else {
+                    u16::from_le_bytes([c[0], c[1]])
+                }
+            })
+            .collect();
         String::from_utf16_lossy(&units)
     };
     match bytes {
@@ -191,11 +205,15 @@ fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
         (Some(json), _) => (json.clone(), "--json".to_owned()),
         (None, Some("-")) => {
             let mut buf = Vec::new();
-            stdin.read_to_end(&mut buf).map_err(|e| LookoutError::new("file_unreadable", format!("Cannot read stdin: {e}.")))?;
+            stdin.read_to_end(&mut buf).map_err(|e| {
+                LookoutError::new("file_unreadable", format!("Cannot read stdin: {e}."))
+            })?;
             (decode(&buf), "stdin".to_owned())
         }
         (None, Some(file)) => {
-            let bytes = std::fs::read(file).map_err(|e| LookoutError::new("file_unreadable", format!("Cannot read {file}: {e}.")))?;
+            let bytes = std::fs::read(file).map_err(|e| {
+                LookoutError::new("file_unreadable", format!("Cannot read {file}: {e}."))
+            })?;
             (decode(&bytes), file.to_owned())
         }
         (None, None) => {
@@ -239,29 +257,46 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         }
         Cmd::Projects { action } => match action {
             ProjectsCmd::List => json!({"projects": svc.list_projects()?}),
-            ProjectsCmd::Add { path, id, name } => json!({"project": svc.add_project(&path, id.as_deref(), name.as_deref())?}),
+            ProjectsCmd::Add { path, id, name } => {
+                json!({"project": svc.add_project(&path, id.as_deref(), name.as_deref())?})
+            }
             ProjectsCmd::Remove { id } => svc.remove_project(&id)?,
             ProjectsCmd::Rename { id, name } => json!({"project": svc.rename_project(&id, &name)?}),
             ProjectsCmd::Status { id, status, note } => {
-                let status = status.to_possible_value().expect("every status has a name").get_name().to_owned();
+                let status = status
+                    .to_possible_value()
+                    .expect("every status has a name")
+                    .get_name()
+                    .to_owned();
                 json!({"project": svc.set_status(&id, &status, note.as_deref())?})
             }
-            ProjectsCmd::Goal { id, goal, due } => json!({"project": svc.set_goal(&id, &goal, due.as_deref())?}),
+            ProjectsCmd::Goal { id, goal, due } => {
+                json!({"project": svc.set_goal(&id, &goal, due.as_deref())?})
+            }
             ProjectsCmd::Discover { root } => svc.discover(&root)?,
         },
         Cmd::Facts { action } => match action {
-            FactsCmd::Refresh { ids, no_ci } => json!({"refreshed": svc.refresh_facts(Some(&ids), !no_ci)?}),
+            FactsCmd::Refresh { ids, no_ci } => {
+                json!({"refreshed": svc.refresh_facts(Some(&ids), !no_ci)?})
+            }
             FactsCmd::Show { id } => json!({"facts": svc.facts(&id)?}),
         },
-        Cmd::Due { max_age_days, no_refresh } => svc.due(max_age_days, !no_refresh)?,
+        Cmd::Due {
+            max_age_days,
+            no_refresh,
+        } => svc.due(max_age_days, !no_refresh)?,
         Cmd::Context { id } => svc.context(&id)?,
         Cmd::Card { action } => match action {
-            CardCmd::Put { id, doc } => svc.put_card(&id, read_document(&doc, stdin)?, doc.merge, doc.dry_run)?,
+            CardCmd::Put { id, doc } => {
+                svc.put_card(&id, read_document(&doc, stdin)?, doc.merge, doc.dry_run)?
+            }
             CardCmd::Show { id } => svc.card(&id)?,
         },
         Cmd::Portfolio { action } => match action {
             PortfolioCmd::Context => svc.portfolio_context()?,
-            PortfolioCmd::Put { doc } => svc.put_portfolio(read_document(&doc, stdin)?, doc.merge, doc.dry_run)?,
+            PortfolioCmd::Put { doc } => {
+                svc.put_portfolio(read_document(&doc, stdin)?, doc.merge, doc.dry_run)?
+            }
             PortfolioCmd::Show => svc.portfolio()?,
         },
         Cmd::Feedback { project } => json!({"feedback": svc.feedback(project.as_deref())?}),
