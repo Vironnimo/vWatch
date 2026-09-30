@@ -68,13 +68,20 @@ fn morning_run_cycle() {
         "{}",
         r["warnings"]
     );
-    let prose = json!({"handbook": {"run": [{"what": "Tests", "how": "Im Ordner: `cargo test`"}]}});
-    let r = svc.put_card("demo", prose, true, true).unwrap();
-    assert!(
-        r["warnings"].to_string().contains("backticks"),
-        "{}",
-        r["warnings"]
-    );
+    // a handbook command the owner could not copy as it stands is flagged
+    for how in [
+        "Im Ordner: `cargo test`",
+        "python -m app; http://127.0.0.1:8000",
+        "Startmenü „Demo“",
+    ] {
+        let run = json!({"handbook": {"run": [{"what": "Starten", "how": how}]}});
+        let r = svc.put_card("demo", run, true, true).unwrap();
+        assert!(
+            r["warnings"].to_string().contains("not a plain command"),
+            "{how}: {}",
+            r["warnings"]
+        );
+    }
     clock.advance(Duration::days(15));
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "stale");
 }

@@ -151,22 +151,51 @@ fn set_agent_access(on: bool) -> Reply {
     Ok(system::settings())
 }
 
-/// Open a web link in the default browser or a folder in Explorer.
+/// Open a web link in the default browser, or a folder or file in Explorer. Card paths may use
+/// forward slashes and `%VARIABLES%`.
 #[tauri::command(rename_all = "snake_case")]
 fn open_external(target: String) -> Reply {
     let is_url = target.starts_with("https://") || target.starts_with("http://");
-    if !is_url && !std::path::Path::new(&target).is_dir() {
-        return Err(json!({"code": "not_openable", "message": format!("Cannot open {target}.")}));
-    }
-    std::process::Command::new(if cfg!(windows) {
+    let target = if is_url { target } else { expand_path(&target) };
+    let path = std::path::Path::new(&target);
+    let mut cmd = std::process::Command::new(if cfg!(windows) {
         "explorer"
     } else {
         "xdg-open"
-    })
-    .arg(&target)
-    .spawn()
-    .map_err(internal)?;
+    });
+    if is_url || path.is_dir() {
+        cmd.arg(&target);
+    } else if path.is_file() && cfg!(windows) {
+        cmd.arg(format!("/select,{target}"));
+    } else {
+        return Err(json!({"code": "not_openable", "message": format!("Cannot open {target}.")}));
+    }
+    cmd.spawn().map_err(internal)?;
     Ok(json!({}))
+}
+
+/// Replaces `%NAME%` with the environment variable and, on Windows, `/` with `\`.
+fn expand_path(path: &str) -> String {
+    let mut out = String::new();
+    let mut rest = path;
+    while let Some(start) = rest.find('%') {
+        let Some(len) = rest[start + 1..].find('%') else {
+            break;
+        };
+        let name = &rest[start + 1..start + 1 + len];
+        out.push_str(&rest[..start]);
+        match std::env::var(name) {
+            Ok(value) if !name.is_empty() => out.push_str(&value),
+            _ => out.push_str(&rest[start..start + len + 2]),
+        }
+        rest = &rest[start + len + 2..];
+    }
+    out.push_str(rest);
+    if cfg!(windows) {
+        out.replace('/', "\\")
+    } else {
+        out
+    }
 }
 
 /// Changes whenever anything (the window's own work or an agent's CLI call) wrote to the database.

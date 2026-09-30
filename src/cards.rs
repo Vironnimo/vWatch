@@ -175,6 +175,7 @@ const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Requi
 const INSTALLED: &[Field] = &[
     f("version", words(4), Required),
     f("path", COMMAND, Required),
+    f("open", words(8), Text("")),
 ];
 const TERM: &[Field] = &[
     f("term", words(4), Required),

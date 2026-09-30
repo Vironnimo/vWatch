@@ -461,10 +461,15 @@
   function hbParts(h) {
     h = h || {};
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
-    const inst = h.installed ? `<div class="hb-inst">Installiert: <b>${esc(h.installed.version)}</b> <span class="mono faint">${esc(h.installed.path)}</span></div>` : '';
+    const i = h.installed;
+    const inst = i ? `<div class="hb-inst">Installiert: <b>${esc(i.version)}</b>${i.open ? ` · öffnen über ${esc(i.open)}` : ''} <button class="linkish mono faint" type="button" data-external="${esc(i.path)}" title="Im Explorer öffnen">${esc(i.path)}</button></div>` : '';
+    // a URL is opened, a command copied; a URL with a <placeholder> can only be copied and completed
+    const act = r => /^https?:\/\/[^\s<]+$/.test(r.how)
+      ? `<button class="linkish" type="button" data-external="${esc(r.how)}" aria-label="${esc(r.what)} öffnen">öffnen</button>`
+      : `<button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button>`;
     return {
       // label on top, the command below at full width, one line per command; copying takes it as written
-      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div></div>`).join('')}</div>` : ''),
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code>${act(r)}</div></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono'),
       read: kv(h.read_first, 'path', 'why', 'mono'),
@@ -648,7 +653,7 @@
       c.cross_project_hints.forEach(x => add('Querverbindung', x));
       const h = c.handbook || {};
       (h.run || []).forEach(x => add('Handbuch · Starten', `${x.what}: ${x.how}`, true));
-      if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.path}`, true);
+      if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.open || ''} ${h.installed.path}`, true);
       add('Handbuch · Aufbau', h.architecture, true);
       (h.places || []).forEach(x => add('Handbuch · Wo was liegt', `${x.path} – ${x.what}`, true));
       (h.read_first || []).forEach(x => add('Handbuch · Zuerst lesen', `${x.path} – ${x.why}`, true));

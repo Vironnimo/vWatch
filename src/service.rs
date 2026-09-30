@@ -207,6 +207,23 @@ fn dated_since(list: &Value, from: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Whether a handbook command reads like something other than what the owner types:
+/// commands quoted in a sentence, a URL behind a command, or a shortcut to click.
+fn not_typed(how: &str) -> bool {
+    let lower = how.to_lowercase();
+    how.contains(['`', '„', '“'])
+        || how.contains("; http")
+        || [
+            "startmen",
+            "start-men",
+            "start menu",
+            "doppelklick",
+            "double-click",
+        ]
+        .iter()
+        .any(|w| lower.contains(w))
+}
+
 fn idea_json(i: &Idea) -> Value {
     json!({"id": i.id, "text": i.text, "added_at": i.added_at})
 }
@@ -992,21 +1009,17 @@ impl Watchtower {
             .filter(|f| lacking.contains(f))
             .collect();
         let mut warnings = warnings;
-        // commands in backticks inside a sentence: the owner copies `how` as it stands
+        // the owner copies `how` as it stands, so it must not be a sentence, a URL behind a command or a shortcut to click
         let prose: Vec<&str> = clean["handbook"]["run"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|r| {
-                r["how"]
-                    .as_str()
-                    .is_some_and(|h| h.contains('`') || h.contains("; http"))
-            })
+            .filter(|r| r["how"].as_str().is_some_and(not_typed))
             .filter_map(|r| r["what"].as_str())
             .collect();
         if !prose.is_empty() {
             warnings.push(format!(
-                "handbook.run: `how` of \"{}\" contains backticks or a URL after a command, as if commands were quoted inside a sentence. `how` must be exactly what the owner types or opens, since Watchtower copies it as it stands; a URL to open gets its own entry. Send the whole handbook with only the commands in `how`.",
+                "handbook.run: `how` of \"{}\" is not a plain command or URL: it has backticks, a URL after a command, or a shortcut to click. Watchtower copies `how` as it stands, so it holds exactly what the owner types, or one URL to open; a URL gets its own entry, and how to open the installed app belongs in `handbook.installed.open`. Send the whole handbook with that fixed.",
                 prose.join("\", \"")
             ));
         }
