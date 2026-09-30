@@ -182,7 +182,7 @@ const TERM: &[Field] = &[
 ];
 /// What someone returning after months needs to find their way around.
 const HANDBOOK: &[Field] = &[
-    f("run", Ty::List(&Ty::Obj(RUN), Some(6)), Empty),
+    f("run", Ty::List(&Ty::Obj(RUN), Some(8)), Empty),
     f("installed", Ty::Nullable(&Ty::Obj(INSTALLED)), Null),
     f("architecture", sentence(60), Text("")),
     f("places", Ty::List(&Ty::Obj(PLACE), Some(10)), Empty),
