@@ -997,12 +997,16 @@ impl Watchtower {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|r| r["how"].as_str().is_some_and(|h| h.contains('`')))
+            .filter(|r| {
+                r["how"]
+                    .as_str()
+                    .is_some_and(|h| h.contains('`') || h.contains("; http"))
+            })
             .filter_map(|r| r["what"].as_str())
             .collect();
         if !prose.is_empty() {
             warnings.push(format!(
-                "handbook.run: `how` of \"{}\" contains backticks, as if commands were quoted inside a sentence. `how` must be exactly what the owner types or opens, since Watchtower copies it as it stands; send the whole handbook with only the commands in `how`.",
+                "handbook.run: `how` of \"{}\" contains backticks or a URL after a command, as if commands were quoted inside a sentence. `how` must be exactly what the owner types or opens, since Watchtower copies it as it stands; a URL to open gets its own entry. Send the whole handbook with only the commands in `how`.",
                 prose.join("\", \"")
             ));
         }

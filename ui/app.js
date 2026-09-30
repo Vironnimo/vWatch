@@ -456,13 +456,15 @@
   // how to start a project, how it is built, where things are: for coming back after a long time
   const HB_LISTS = ['run', 'places', 'read_first', 'needs', 'terms'];
   const hbEmpty = h => !h || (!h.architecture && !h.installed && !HB_LISTS.some(k => (h[k] || []).length));
+  // one line per command; lines break only between words, so `-Open` or `build-release.ps1` stay whole
+  const cmdHtml = how => how.split('; ').map(line => line.split(' ').map(t => t.length <= 32 ? `<span class="nb">${esc(t)}</span>` : esc(t)).join(' ')).join('\n');
   function hbParts(h) {
     h = h || {};
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
     const inst = h.installed ? `<div class="hb-inst">Installiert: <b>${esc(h.installed.version)}</b> <span class="mono faint">${esc(h.installed.path)}</span></div>` : '';
     return {
       // label on top, the command below at full width, one line per command; copying takes it as written
-      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${esc(r.how.split('; ').join('\n'))}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div></div>`).join('')}</div>` : ''),
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono'),
       read: kv(h.read_first, 'path', 'why', 'mono'),
