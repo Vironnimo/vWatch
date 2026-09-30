@@ -232,6 +232,15 @@ impl Store {
         })
     }
 
+    /// Every card version of a project, oldest first, as (created_at, data).
+    pub fn card_history(&self, id: &str) -> Result<Vec<(String, Value)>> {
+        self.with(|db| {
+            let mut stmt = db.prepare("SELECT created_at, data FROM cards WHERE project_id = ?1 ORDER BY id")?;
+            let rows = stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, json(r.get(1)?))))?;
+            rows.collect()
+        })
+    }
+
     /// The card the owner could see at `at`: the newest one written by then.
     pub fn card_at(&self, id: &str, at: &str) -> Result<Option<Value>> {
         self.with(|db| {

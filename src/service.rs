@@ -23,6 +23,9 @@ pub const SNOOZE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
 /// Opening a project at least this many days after the last time shows what happened since.
 const SINCE_DAYS: i64 = 7;
+/// The card fields the portfolio brief builds on; changes elsewhere (the handbook, features) leave it current.
+const BRIEF_FIELDS: &[&str] =
+    &["one_liner", "phase", "headline", "reentry", "waiting_on_you", "open_ends", "health_notes", "decisions", "suggestions", "cross_project_hints"];
 const COMMITS_SINCE_LIMIT: usize = 150;
 const REFRESH_WORKERS: usize = 4;
 const DISCOVER_DEPTH: usize = 2;
@@ -542,7 +545,8 @@ impl Lookout {
         }
         let now = (self.clock)();
         let (mut projects, mut problems, mut up_to_date) = (Vec::new(), Vec::new(), Vec::new());
-        let mut newest_card: Option<String> = None;
+        let brief = self.store.latest_portfolio()?;
+        let mut cards_changed = false;
         let reactions = self.store.feedback()?;
         for p in self.store.projects()? {
             if p.status == "archived" {
@@ -550,10 +554,8 @@ impl Lookout {
             }
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
-            if let Some(c) = &card {
-                if newest_card.as_ref().is_none_or(|n| c.created_at > *n) {
-                    newest_card = Some(c.created_at.clone());
-                }
+            if let (Some(pf), Some(c)) = (&brief, &card) {
+                cards_changed = cards_changed || self.brief_changes(&p.id, &c.data, &pf.created_at)?.is_none_or(|f| !f.is_empty());
             }
             if stored.as_ref().is_some_and(|s| s.data["error"] == "path_missing") {
                 problems.push(json!({"id": p.id, "problem": "path_missing", "path": p.path}));
@@ -600,13 +602,15 @@ impl Lookout {
             }
             projects.push(entry);
         }
-        let portfolio_reason = match self.store.latest_portfolio()? {
+        let portfolio_reason = match brief {
             None => Some("missing"),
             Some(pf) if parse(&pf.created_at).with_timezone(&Local).date_naive() != self.today() => Some("new_day"),
-            Some(pf) if newest_card.as_ref().is_some_and(|n| *n > pf.created_at) => Some("cards_changed"),
+            Some(_) if cards_changed => Some("cards_changed"),
             Some(_) => None,
         };
         let any_due = !projects.is_empty();
+        // cards that only gain new fields do not change what the brief builds on
+        let brief_affected = projects.iter().any(|e| e["reason"] != "new_fields");
         let next = if any_due {
             "For each project listed: `lookout context <id>`, study the repository, then `lookout card put <id> --file <card.json>`. \
              Afterwards: `lookout portfolio context` and `lookout portfolio put --file <portfolio.json>`."
@@ -621,8 +625,8 @@ impl Lookout {
             "up_to_date": up_to_date,
             "problems": problems,
             "portfolio": {
-                "due": portfolio_reason.is_some() || any_due,
-                "reason": portfolio_reason.or(any_due.then_some("cards_will_change")),
+                "due": portfolio_reason.is_some() || brief_affected,
+                "reason": portfolio_reason.or(brief_affected.then_some("cards_will_change")),
             },
             "next": next,
         }))
@@ -707,19 +711,24 @@ impl Lookout {
 
     pub fn portfolio_context(&self) -> Result<Value> {
         let mut rows = Vec::new();
+        let previous = self.store.latest_portfolio()?;
         for p in self.store.projects()? {
             if p.status == "archived" {
                 continue;
             }
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
+            let changed = match (&previous, &card) {
+                (Some(pf), Some(c)) => json!(self.brief_changes(&p.id, &c.data, &pf.created_at)?),
+                _ => Value::Null,
+            };
             let card_outdated = matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
             let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
             let card_json = card.map(|card| {
                 let c = &card.data;
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
                 json!({
-                    "created_at": card.created_at, "outdated": card_outdated,
+                    "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
                     "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
                     "waiting_on_you": picked("waiting_on_you", &["id", "title"]),
@@ -744,7 +753,6 @@ impl Lookout {
                 "card": card_json,
             }));
         }
-        let previous = self.store.latest_portfolio()?;
         let reactions = self.store.feedback()?;
         Ok(json!({
             "today": self.today().to_string(),
@@ -879,6 +887,12 @@ impl Lookout {
         Ok(self.store.set_pref(key, value)?)
     }
 
+    /// The brief-relevant card fields that differ from the card as it was when the brief was written;
+    /// None when the project had no card then.
+    fn brief_changes(&self, id: &str, card: &Value, brief_at: &str) -> Result<Option<Vec<&'static str>>> {
+        Ok(self.store.card_at(id, brief_at)?.map(|then| BRIEF_FIELDS.iter().copied().filter(|f| then.get(*f) != card.get(*f)).collect()))
+    }
+
     // ---------- the window ----------
     /// Records that the owner opened a project. When the open before was at least
     /// `SINCE_DAYS` ago, returns what happened since: commits, card updates, a phase
@@ -933,6 +947,15 @@ impl Lookout {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
             let outdated = matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            // the headline of every card version, newest first: the project's story in one line per update
+            let history: Vec<Value> = self
+                .store
+                .card_history(&p.id)?
+                .into_iter()
+                .enumerate()
+                .map(|(i, (at, data))| json!({"version": i + 1, "at": at, "headline": data["headline"], "phase": data["phase"]}))
+                .rev()
+                .collect();
             projects.push(extend(
                 pick(&project_json(&p), &["id", "name", "path", "status", "status_note"]),
                 json!({
@@ -941,6 +964,7 @@ impl Lookout {
                     "card": card.as_ref().map(|c| c.data.clone()),
                     "card_updated_at": card.map(|c| c.created_at),
                     "card_outdated": outdated,
+                    "history": history,
                 }),
             ));
         }

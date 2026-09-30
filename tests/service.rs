@@ -131,6 +131,13 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     brief["focus"][0]["project"] = json!("demo");
     svc.put_portfolio(brief, false, false).unwrap();
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
+    // a card change the brief does not build on leaves it current; one it builds on makes it due
+    clock.advance(Duration::minutes(5));
+    svc.put_card("demo", json!({"handbook": {"architecture": "Ein Dienst."}}), true, false).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
+    svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["portfolio"]["reason"], "cards_changed");
+    assert_eq!(svc.portfolio_context().unwrap()["projects"][0]["card"]["changed_since_brief"], json!(["headline"]));
     clock.advance(Duration::days(1));
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["reason"], "new_day");
 }
@@ -258,7 +265,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
     svc.put_card("demo", card_with(json!({"suggestions": [], "waiting_on_you": [{"id": qid, "title": "Soll die App offline laufen?"}]})), false, false).unwrap();
     let ctx = svc.context("other").unwrap();
     let rating = &ctx["feedback"][0];
-    assert_eq!(rating["item"], json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "effort": "S"}));
+    assert_eq!(rating["item"], json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "effort": "S", "done_when": ""}));
     assert_eq!((rating["project"].as_str(), rating["note"].as_str()), (Some("demo"), Some("Keine UI-Spielereien")));
     assert_eq!(ctx["feedback_summary"], json!([{"kind": "suggestion", "type": "feature", "up": 0, "later": 0, "down": 1}]));
 

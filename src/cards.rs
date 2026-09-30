@@ -85,7 +85,10 @@ const VISION: &[Field] = &[
     f("progress_note", Ty::Nullable(&SENTENCE), Null),
     f("progress_pct", Ty::Nullable(&Ty::Int { min: 0, max: 100 }), Null),
 ];
-const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text(""))];
+/// How an agent handed the task would know it is finished.
+const DONE_WHEN: Ty = sentence(20);
+const REENTRY: &[Field] =
+    &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text("")), f("done_when", DONE_WHEN, Text(""))];
 const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required)];
 const PLACE: &[Field] = &[f("path", COMMAND, Required), f("what", words(12), Required)];
 const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Required)];
@@ -108,6 +111,7 @@ const SUGGESTION: &[Field] = &[
     f("why", WHY, Required),
     f("evidence", TEXT, Text("")),
     f("effort", Ty::Enum(SIZE), Required),
+    f("done_when", DONE_WHEN, Text("")),
 ];
 const CARD: &[Field] = &[
     f("one_liner", words(15), Required),
@@ -136,6 +140,7 @@ const FOCUS: &[Field] = &[
     f("title", words(8), Required),
     f("why", WHY, Required),
     f("effort", Ty::Enum(EFFORT), Required),
+    f("done_when", DONE_WHEN, Text("")),
 ];
 const PATTERN: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
@@ -173,7 +178,7 @@ const PORTFOLIO: &[Field] = &[
     f("synergies", Ty::List(&Ty::Obj(SYNERGY), None), Empty),
     f("new_apps", Ty::List(&Ty::Obj(APP_IDEA), None), Empty),
     f("park_or_revive", Ty::List(&Ty::Obj(VERDICT), None), Empty),
-    f("attention_note", sentence(25), Text("")),
+    f("attention_note", SENTENCE, Text("")),
 ];
 
 impl Kind {
