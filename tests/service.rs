@@ -191,6 +191,13 @@ fn status_and_registration_rules() {
     svc.set_status("demo", "parked", Some("wartet auf Key")).unwrap();
     let due = svc.due(14, true).unwrap();
     assert!(due["projects"].as_array().unwrap().contains(&json!({"id": "demo", "name": "demo", "reason": "status_changed"})));
+    // a goal reaches the agents and makes the card due like a status change
+    svc.put_card("demo", card(), true, false).unwrap();
+    clock.advance(Duration::minutes(1));
+    assert_eq!(svc.set_goal("demo", "v1.0 veröffentlichen", Some("15.12.")).unwrap_err().code, "invalid_date");
+    svc.set_goal("demo", "v1.0 veröffentlichen", Some("2026-12-15")).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "status_changed");
+    assert_eq!(svc.context("demo").unwrap()["project"]["goal_due"], "2026-12-15");
     svc.set_status("demo", "archived", None).unwrap();
     let due = svc.due(14, true).unwrap();
     assert!(due["projects"].as_array().unwrap().iter().all(|p| p["id"] != "demo"));

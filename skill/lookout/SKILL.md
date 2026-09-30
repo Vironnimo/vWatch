@@ -24,14 +24,14 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 
 - **The daily run** (a scheduled task, or the owner asks you to update Lookout): follow "Daily run" below.
 - **Add projects:** the owner usually adds projects in the Lookout window. When the owner asks you to, `lookout projects discover <folder>` lists git repositories there that are not watched yet and `lookout projects add <path>` registers one. Add only the projects the owner named or confirmed.
-- **The owner changes a project's intent** ("park needle-net", "gusto is done"): `lookout projects status <id> <active|parked|done|archived> --note "<reason>"`.
+- **The owner changes a project's intent** ("park needle-net", "gusto is done"): `lookout projects status <id> <active|parked|done|archived> --note "<reason>"`. A goal ("v1.0 by mid-December"): `lookout projects goal <id> "<goal>" --due YYYY-MM-DD`.
 - **The owner asks for a card of a project that is not due:** run `lookout context <id>`, check the previous card against the repository as the card guide describes, and confirm or correct it with `lookout card put <id> --merge`.
 - **Questions about projects:** `lookout card show <id>`, `lookout facts show <id>`, `lookout portfolio show`, `lookout feedback`. Answer from these; say when a card is old or missing.
 
 ## Daily run
 
 1. Run `lookout due`. It refreshes the facts and returns:
-   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs, null for cards written before Lookout recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent), `new_fields` (the card predates fields Lookout added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks (`handbook.installed`, `suggestions[].done_when`): fill them in the card you write.
+   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs, null for cards written before Lookout recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent, note or goal), `new_fields` (the card predates fields Lookout added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks (`handbook.installed`, `suggestions[].done_when`): fill them in the card you write.
    - `problems`: projects whose folder is gone. Mention them in your report; do not write cards for them.
    - `portfolio.due`: whether the cross-project brief needs rewriting.
    If nothing is due, report that in one sentence and stop.
@@ -57,5 +57,6 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
   - A question marked `answered` (the answer is in `note`) or `done`: never ask it again. Carry the answer into the card where it belongs (`reentry`, `suggestions`, `vision`, `open_ends`) and drop the question from `waiting_on_you`.
   - A focus item marked `done`: the owner did it. Do not put it into focus again unless the facts show it is unfinished.
 - **Respect documented decisions.** When a project's own docs record a deliberate choice ("no remote on purpose", "no tests for the prototype"), put it into the card's `decisions`, mention it as that choice where it matters, not as a risk or warning, and do not suggest undoing it. The portfolio brief follows the cards' `decisions` the same way.
+- **Follow the owner's note and goal.** `context` → `project` holds `status_note`, the owner's note to agents (why it is parked, what to focus on), and `goal` with an optional `goal_due`. Follow the note. Measure `vision.progress_note` and `reentry` against the goal, and when `goal_due` is near and the work is not on track, say so in `headline` or `health_notes`.
 - **Respect the owner's status.** `parked`: describe the state calmly; do not push to revive it. `done`: focus on anything that could rot (backups, failing CI, security). `archived` projects never appear in a run.
 - **Write for the owner:** all text in German, addressed as "du", short and concrete. The card guide sets the lengths.

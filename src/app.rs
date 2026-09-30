@@ -66,6 +66,11 @@ async fn set_status(app: State<'_, AppState>, id: String, status: String, note: 
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn set_goal(app: State<'_, AppState>, id: String, goal: String, due: Option<String>) -> Reply {
+    work(&app, move |s| s.set_goal(&id, &goal, due.as_deref())).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn rename_project(app: State<'_, AppState>, id: String, name: String) -> Reply {
     work(&app, move |s| s.rename_project(&id, &name)).await
 }
@@ -153,7 +158,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { service: Arc::new(service), watch })
         .invoke_handler(tauri::generate_handler![
-            state, refresh, set_feedback, open_project, set_pref, set_status, rename_project, remove_project, discover, add_projects,
+            state, refresh, set_feedback, open_project, set_pref, set_status, set_goal, rename_project, remove_project, discover, add_projects,
             pick_folder, settings, set_autostart, set_agent_access, open_external, data_version, ready
         ])
         .setup(move |app| {

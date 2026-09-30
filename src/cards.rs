@@ -79,7 +79,13 @@ const OPEN_END: &[Field] = &[
     f("source", TEXT, Text("")),
     f("age_days", Ty::Nullable(&Ty::Int { min: 0, max: 100_000 }), Null),
 ];
-const QUESTION: &[Field] = &[f("id", Ty::Nullable(&Ty::Id), Null), f("title", words(12), Required), f("source", TEXT, Text(""))];
+const OPTION: &[Field] = &[f("answer", words(8), Required), f("effect", sentence(20), Text(""))];
+const QUESTION: &[Field] = &[
+    f("id", Ty::Nullable(&Ty::Id), Null),
+    f("title", words(12), Required),
+    f("source", TEXT, Text("")),
+    f("options", Ty::List(&Ty::Obj(OPTION), Some(3)), Empty),
+];
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&SENTENCE), Null),
     f("progress_note", Ty::Nullable(&SENTENCE), Null),

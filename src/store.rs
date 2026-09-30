@@ -12,7 +12,8 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects(
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active', status_note TEXT NOT NULL DEFAULT '',
-  status_changed_at TEXT, added_at TEXT NOT NULL, opened_at TEXT, previous_opened_at TEXT);
+  status_changed_at TEXT, added_at TEXT NOT NULL, opened_at TEXT, previous_opened_at TEXT,
+  goal TEXT NOT NULL DEFAULT '', goal_due TEXT);
 CREATE TABLE IF NOT EXISTS facts(
   project_id TEXT PRIMARY KEY, collected_at TEXT NOT NULL, fingerprint TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cards(
@@ -42,6 +43,9 @@ pub struct Project {
     pub opened_at: Option<String>,
     /// The open before that, kept while the owner reopens within the hour.
     pub previous_opened_at: Option<String>,
+    /// What the owner wants to reach with the project, and by when.
+    pub goal: String,
+    pub goal_due: Option<String>,
 }
 
 pub struct StoredFacts {
@@ -115,6 +119,8 @@ fn project(row: &Row) -> Result<Project> {
         added_at: row.get("added_at")?,
         opened_at: row.get("opened_at")?,
         previous_opened_at: row.get("previous_opened_at")?,
+        goal: row.get("goal")?,
+        goal_due: row.get("goal_due")?,
     })
 }
 
@@ -130,6 +136,8 @@ impl Store {
             ("feedback", "item", "TEXT"),
             ("projects", "opened_at", "TEXT"),
             ("projects", "previous_opened_at", "TEXT"),
+            ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
+            ("projects", "goal_due", "TEXT"),
         ] {
             let present: bool =
                 db.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
@@ -165,6 +173,12 @@ impl Store {
     pub fn set_status(&self, id: &str, status: &str, note: &str, at: &str) -> Result<()> {
         self.with(|db| {
             db.execute("UPDATE projects SET status = ?1, status_note = ?2, status_changed_at = ?3 WHERE id = ?4", params![status, note, at, id]).map(drop)
+        })
+    }
+
+    pub fn set_goal(&self, id: &str, goal: &str, due: Option<&str>, at: &str) -> Result<()> {
+        self.with(|db| {
+            db.execute("UPDATE projects SET goal = ?2, goal_due = ?3, status_changed_at = ?4 WHERE id = ?1", params![id, goal, due, at]).map(drop)
         })
     }
 

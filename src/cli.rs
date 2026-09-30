@@ -84,6 +84,14 @@ enum ProjectsCmd {
     Remove { id: String },
     /// Change the display name
     Rename { id: String, name: String },
+    /// Set the owner's goal for the project (an empty goal clears it)
+    Goal {
+        id: String,
+        goal: String,
+        /// Due date as YYYY-MM-DD
+        #[arg(long)]
+        due: Option<String>,
+    },
     /// Set what the owner intends with the project
     Status {
         id: String,
@@ -238,6 +246,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 let status = status.to_possible_value().expect("every status has a name").get_name().to_owned();
                 json!({"project": svc.set_status(&id, &status, note.as_deref())?})
             }
+            ProjectsCmd::Goal { id, goal, due } => json!({"project": svc.set_goal(&id, &goal, due.as_deref())?}),
             ProjectsCmd::Discover { root } => svc.discover(&root)?,
         },
         Cmd::Facts { action } => match action {

@@ -26,6 +26,7 @@
   let settings = null;    // autostart, agent access, paths
   let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
   let confirmRemove = null;
+  let round = null;       // decision round: { queue: question ids, i, stats }
   let searchOpen = false;
   let searchQ = '';
   let searchSel = 0;
@@ -66,6 +67,17 @@
   // the owner's reply to a question: answered (with the answer as note) or done
   const reply = id => { const f = id && S.feedback[id]; return f && (f.value === 'answered' || f.value === 'done') ? f : null; };
   const openQs = c => c.waiting_on_you.filter(w => !reply(w.id));
+  function findQ(id) {
+    for (const p of S.projects) { const w = p.card && p.card.waiting_on_you.find(x => x.id === id); if (w) return { p, w }; }
+    return null;
+  }
+  // the owner's goal for a project, with the days left
+  function goalLine(p) {
+    if (!p.goal) return '';
+    const left = p.goal_due ? -daysSince(p.goal_due) : null;
+    const when = left == null ? '' : left < 0 ? ` · <span class="bad-t">${-left} ${left === -1 ? 'Tag' : 'Tage'} drüber</span>` : ` · bis ${fmtShort(p.goal_due)} (noch ${left} ${left === 1 ? 'Tag' : 'Tage'})`;
+    return `<div class="goal"><span class="faint">Ziel:</span> ${esc(p.goal)}${when}</div>`;
+  }
 
   // ---------- facts-derived safety ----------
   function safety(p) {
@@ -193,6 +205,7 @@
       return `<button class="tile" type="button" data-open="${esc(p.id)}">
         <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span class="pills">${fresh}${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
         <p class="voice">${c ? `„${esc(c.personality || c.headline)}“` : '<span class="faint">Noch keine Einschätzung. Kommt beim nächsten Agent-Lauf.</span>'}</p>
+        ${goalLine(p)}
         <div class="badges">${signals(p)}${waiting ? `<span class="tag ask">${waiting} ${waiting === 1 ? 'Entscheidung' : 'Entscheidungen'}</span>` : ''}</div>
         <div class="tfoot">${spark(weekly(p), color(p.id), 22)}<span>zuletzt ${ago(lastWork(p))}</span></div>
       </button>`;
@@ -207,8 +220,9 @@
     const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">antworten</button><button type="button" data-qdone="${esc(w.id)}">erledigt</button></span>` : '';
     const form = answering === w.id ? `<div class="inrow"><input type="text" aria-label="Deine Antwort" data-draft="${esc(w.id)}" data-kind="answer" maxlength="600" value="${esc(drafts[w.id] || '')}" placeholder="Deine Antwort, der nächste Lauf nimmt sie in die Karte auf">
       <button type="button" class="btn primary" data-answer-save="${esc(w.id)}">Senden</button><button type="button" class="btn" data-answer-cancel>Abbrechen</button></div>` : '';
+    const opts = (w.options || []).length && w.id && answering !== w.id ? `<div class="qopts">${w.options.map((o, i) => `<button type="button" class="opt" data-opt="${esc(w.id)}" data-i="${i}" title="${esc(o.effect || '')}">${esc(o.answer)}</button>`).join('')}</div>` : '';
     const src = w.source ? (withSource ? `<div class="qsrc mono">${esc(w.source)}</div>` : '') : '';
-    return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}</span>${acts}</div>${src}${form}</li>`;
+    return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}</span>${acts}</div>${opts}${src}${form}</li>`;
   }
 
   function blockWaiting(limitPer = 2) {
@@ -223,7 +237,8 @@
       return `<div class="group"><div class="group-h">${plink(p.id)}<span class="count">${items.length}</span></div>
         <ul class="qs">${head.map(w => question(w)).join('')}</ul>${rest.length ? `<details><summary class="more">+ ${rest.length} weitere</summary><ul class="qs">${rest.map(w => question(w)).join('')}</ul></details>` : ''}</div>`;
     }).join('');
-    return mod('waiting', 'Wartet auf dich', `${total} ${total === 1 ? 'Entscheidung' : 'Entscheidungen'}, die nur du treffen kannst. Deine Antworten lesen die Agents beim nächsten Lauf`, `<div class="groups">${body}</div>`);
+    const start = total > 1 ? `<div class="round-start"><button class="btn primary" type="button" data-round-start>Entscheidungsrunde: alle ${total} nacheinander</button></div>` : '';
+    return mod('waiting', 'Wartet auf dich', `${total} ${total === 1 ? 'Entscheidung' : 'Entscheidungen'}, die nur du treffen kannst. Deine Antworten lesen die Agents beim nächsten Lauf`, `${start}<div class="groups">${body}</div>`);
   }
 
   function blockRecent(limit = 10) {
@@ -337,6 +352,7 @@
     return `<button class="card" type="button" data-open="${esc(p.id)}">
       <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span style="display:flex;gap:6px">${fresh}${phasePill(p)}</span></div>
       <div class="hl">${c ? esc(c.headline) : '<span class="faint">Noch keine Einschätzung. Kommt beim nächsten Agent-Lauf.</span>'}</div>
+      ${goalLine(p)}
       ${spark(weekly(p), color(p.id))}
       <div class="stats"><span>zuletzt ${ago(lastWork(p))}</span><span class="mono">${num(commits.last_30d)} / 30 T</span></div>
       ${badges ? `<div class="badges">${badges}</div>` : ''}
@@ -394,7 +410,7 @@
       return `<article class="sheet">
         <div class="h">${plink(p.id)}<span class="pills">${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
         ${c ? `<div class="one">${esc(c.one_liner)}</div>${c.stack ? `<div class="stackline mono">${esc(c.stack)}</div>` : ''}` : '<div class="faint one">Noch keine Karte.</div>'}
-        ${missing}${hbSec('So startest du es', x.run)}${hbSec('Zuerst lesen', x.read)}
+        ${goalLine(p)}${missing}${hbSec('So startest du es', x.run)}${hbSec('Zuerst lesen', x.read)}
         ${c ? `<div class="state"><span class="faint">Stand:</span> ${esc(c.headline)} <span class="faint">· zuletzt ${ago(lastWork(p))}</span></div>` : ''}
         <div class="path"><button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
       </article>`;
@@ -423,7 +439,8 @@
   function drawerHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
     const commits = f.commits || {};
-    const statusBar = `<div class="statusbar"><span class="faint" style="font-size:13px">Deine Absicht:</span><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz, z. B. warum geparkt" value="${esc(p.status_note)}" aria-label="Notiz zum Status"></div>`;
+    const statusBar = `<div class="statusbar"><span class="faint" style="font-size:13px">Deine Absicht:</span><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt oder worauf sie achten sollen" value="${esc(p.status_note)}" aria-label="Notiz an die Agents"></div>
+      <div class="statusbar goalbar"><span class="faint" style="font-size:13px">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(p.goal)}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(p.goal_due || '')}" aria-label="Bis wann" title="Bis wann (optional)"></div>`;
     const factsKv = f.is_git ? `<dl class="kv">
       <dt>Commits</dt><dd class="mono">${num(commits.total)} gesamt · 7 T: ${num(commits.last_7d)} · 30 T: ${num(commits.last_30d)} · seit ${commits.first ? fmtDate(commits.first) : '—'}</dd>
       <dt>Branch</dt><dd class="mono">${esc(f.branch || '—')}${f.upstream ? ` → ${esc(f.upstream)}` : ''}${f.ahead ? ` · ${f.ahead} voraus` : ''}${f.behind ? ` · ${f.behind} zurück` : ''}</dd>
@@ -485,6 +502,47 @@
     if (!keepScroll) root.querySelector('.close').focus();
   }
   const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; };
+
+  // ---------- decision round: every open question, one at a time ----------
+  function startRound() {
+    const queue = [...visible()].filter(p => p.card).sort((a, b) => risk(b) - risk(a)).flatMap(p => openQs(p.card).map(w => w.id)).filter(Boolean);
+    if (!queue.length) return;
+    closeDrawer();
+    round = { queue, i: 0, stats: { answered: 0, done: 0, skipped: 0 } };
+    renderRound();
+  }
+  const closeRound = () => { round = null; $('#round-root').innerHTML = ''; };
+  function renderRound() {
+    const root = $('#round-root');
+    if (!round) { root.innerHTML = ''; return; }
+    while (round.i < round.queue.length && (!findQ(round.queue[round.i]) || reply(round.queue[round.i]))) round.i++;
+    const n = round.queue.length;
+    let body;
+    if (round.i >= n) {
+      const st = round.stats;
+      body = `<h3>Geschafft.</h3><p class="muted">${st.answered} beantwortet, ${st.done} erledigt, ${st.skipped} übersprungen. Die Agents lesen deine Antworten beim nächsten Lauf.</p>
+        <div class="actions"><button class="btn primary" type="button" data-round-close>Schließen</button></div>`;
+    } else {
+      const { p, w } = findQ(round.queue[round.i]);
+      const opts = (w.options || []).map((o, i) => `<button type="button" class="ropt" data-round-opt="${i}"><span class="k mono">${i + 1}</span><span><b>${esc(o.answer)}</b>${o.effect ? `<span class="muted">${esc(o.effect)}</span>` : ''}</span></button>`).join('');
+      body = `<div class="rproj">${dot(p.id)}<b>${esc(p.name)}</b>${p.card.headline ? `<span class="faint"> · ${esc(p.card.headline)}</span>` : ''}</div>
+        <h3>${esc(w.title)}</h3>${w.source ? `<div class="qsrc mono">${esc(w.source)}</div>` : ''}
+        ${opts ? `<div class="ropts">${opts}</div>` : ''}
+        <div class="inrow"><input type="text" id="round-answer" maxlength="600" placeholder="${opts ? 'Oder eigene Antwort' : 'Deine Antwort'}" aria-label="Deine Antwort"><button class="btn primary" type="button" data-round-send>Antworten</button></div>
+        <div class="actions"><button class="btn" type="button" data-round-done title="Die Frage ist erledigt oder nicht mehr nötig">Erledigt</button><button class="btn" type="button" data-round-skip>Überspringen</button></div>`;
+    }
+    root.innerHTML = `<div class="scrim" data-round-close></div><div class="round" role="dialog" aria-modal="true" aria-label="Entscheidungsrunde">
+      <div class="rhead"><span class="faint">Entscheidungsrunde${round.i < n ? ` · Frage ${round.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-round-close>beenden</button></div>
+      <div class="rprog"><span style="width:${(Math.min(round.i, n) / n * 100).toFixed(1)}%"></span></div>${body}</div>`;
+    const input = $('#round-answer');
+    if (input) input.focus(); else root.querySelector('[data-round-close].btn')?.focus();
+  }
+  async function roundStep(value, note) {
+    const id = round.queue[round.i];
+    if (value === 'skip') { round.stats.skipped++; round.i++; renderRound(); return; }
+    if (await react(id, value, note)) { round.stats[value === 'answered' ? 'answered' : 'done']++; round.i++; }
+    renderRound();
+  }
 
   // ---------- search ----------
   const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -790,6 +848,17 @@
 
   document.addEventListener('click', async e => {
     const t = e.target;
+    if (t.closest('[data-round-start]')) { startRound(); return; }
+    if (t.closest('[data-round-close]')) { closeRound(); return; }
+    if (round) {
+      const ro = t.closest('[data-round-opt]');
+      if (ro) { const { w } = findQ(round.queue[round.i]); roundStep('answered', w.options[Number(ro.dataset.roundOpt)].answer); return; }
+      if (t.closest('[data-round-send]')) { const v = ($('#round-answer').value || '').trim(); if (v) roundStep('answered', v); else $('#round-answer').focus(); return; }
+      if (t.closest('[data-round-done]')) { roundStep('done', null); return; }
+      if (t.closest('[data-round-skip]')) { roundStep('skip'); return; }
+    }
+    const opt = t.closest('[data-opt]');
+    if (opt) { const q = findQ(opt.dataset.opt); if (q) react(q.w.id, 'answered', q.w.options[Number(opt.dataset.i)].answer, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.'); return; }
     if (t.closest('[data-search]')) { openSearch(); return; }
     if (t.closest('[data-search-close]')) { closeSearch(); return; }
     const sr = t.closest('[data-sres]');
@@ -856,6 +925,15 @@
       rerenderDisc();
       return;
     }
+    if ((e.target.id === 'goal-text' || e.target.id === 'goal-due') && openId) {
+      const p = byId(openId), goal = $('#goal-text').value, due = $('#goal-due').value || null;
+      try {
+        await call('set_goal', { id: openId, goal, due });
+        p.goal = goal.trim(); p.goal_due = p.goal ? due : null;
+        toast(p.goal ? 'Ziel gespeichert. Die Agents messen den Stand ab dem nächsten Lauf daran.' : 'Ziel entfernt.');
+      } catch (err) { toast('Ziel nicht gespeichert: ' + errText(err)); }
+      return;
+    }
     if (e.target.id === 'status-note' && openId) {
       const p = byId(openId);
       try { await call('set_status', { id: openId, status: p.status, note: e.target.value }); p.status_note = e.target.value; toast('Notiz gespeichert.'); }
@@ -867,6 +945,16 @@
   document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('keydown', e => {
+    if (round) {
+      if (e.key === 'Escape') { e.preventDefault(); closeRound(); return; }
+      const inInput = e.target.id === 'round-answer';
+      if (inInput && e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) roundStep('answered', v); return; }
+      if (!inInput || !e.target.value) {
+        const k = Number(e.key), q = findQ(round.queue[round.i] || '');
+        if (k >= 1 && q && q.w.options && q.w.options[k - 1]) { e.preventDefault(); roundStep('answered', q.w.options[k - 1].answer); }
+      }
+      return;
+    }
     if (searchOpen) {
       const n = $('#search-root').querySelectorAll('.sres').length;
       if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }

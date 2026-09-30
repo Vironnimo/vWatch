@@ -425,6 +425,20 @@ impl Lookout {
         Ok(project_json(&self.project(id)?))
     }
 
+    /// The owner's goal for a project; an empty goal clears it. Like a status change, it makes the card due.
+    pub fn set_goal(&self, id: &str, goal: &str, due: Option<&str>) -> Result<Value> {
+        self.project(id)?;
+        let due = due.filter(|d| !d.is_empty());
+        if let Some(d) = due {
+            if NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
+                return Err(LookoutError::new("invalid_date", format!("'{d}' is not a date.")).hint("Write the due date as YYYY-MM-DD."));
+            }
+        }
+        let goal = goal.trim();
+        self.store.set_goal(id, goal, if goal.is_empty() { None } else { due }, &self.now())?;
+        Ok(project_json(&self.project(id)?))
+    }
+
     pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
         let project = self.project(id)?;
         if !STATUSES.contains(&status) {
@@ -656,7 +670,7 @@ impl Lookout {
         );
         Ok(json!({
             "today": self.today().to_string(),
-            "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note"]),
+            "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
             "facts": extend(json!({"collected_at": stored.collected_at}), stored.data),
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": c.data})),
             "since_previous_card": since,
@@ -740,7 +754,7 @@ impl Lookout {
                 })
             });
             rows.push(json!({
-                "id": p.id, "name": p.name, "status": p.status, "status_note": p.status_note,
+                "id": p.id, "name": p.name, "status": p.status, "status_note": p.status_note, "goal": p.goal, "goal_due": p.goal_due,
                 "facts": {
                     "last_work": f["last_work"],
                     "commits": pick(&f["commits"], &["total", "last_7d", "last_30d", "last"]),
@@ -957,7 +971,7 @@ impl Lookout {
                 .rev()
                 .collect();
             projects.push(extend(
-                pick(&project_json(&p), &["id", "name", "path", "status", "status_note"]),
+                pick(&project_json(&p), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
                 json!({
                     "facts": stored.as_ref().map(|s| s.data.clone()),
                     "facts_collected_at": stored.map(|s| s.collected_at),
