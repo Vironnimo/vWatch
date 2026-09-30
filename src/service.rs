@@ -22,6 +22,9 @@ pub const SNOOZE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
 const COMMITS_SINCE_LIMIT: usize = 150;
 const REFRESH_WORKERS: usize = 4;
+const DISCOVER_DEPTH: usize = 2;
+/// Repositories with a commit in this many days are recommended when discovering.
+const RECENT_DAYS: i64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LookoutError {
@@ -103,6 +106,30 @@ fn valid_project_id(id: &str) -> bool {
     (1..=40).contains(&b.len())
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
         && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+/// Git repositories below `dir`, at most `depth` levels down; never looks inside a repository.
+fn find_repos(dir: &Path, depth: usize) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut children: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            !name.starts_with('.') && !["node_modules", "target", "$recycle.bin"].contains(&name.as_str())
+        })
+        .map(|e| e.path())
+        .collect();
+    children.sort();
+    let mut repos = Vec::new();
+    for child in children {
+        if child.join(".git").exists() {
+            repos.push(child);
+        } else if depth > 1 {
+            repos.extend(find_repos(&child, depth - 1));
+        }
+    }
+    repos
 }
 
 fn resolve(path: &str) -> PathBuf {
@@ -265,31 +292,52 @@ impl Lookout {
     }
 
     /// Git repositories directly inside `root` that are not registered yet, most recently committed first.
+    /// Git repositories an owner may want to watch. A folder that is itself a repository
+    /// comes first, followed by its neighbours; any other folder is searched two levels deep.
+    /// Recently active repositories (and a chosen repository itself) are `recommended`.
     pub fn discover(&self, root: &str) -> Result<Value> {
         let base = resolve(root);
         if !base.is_dir() {
             return Err(LookoutError::new("path_missing", format!("Folder does not exist: {}", base.to_string_lossy())));
         }
+        let folder_is_repo = base.join(".git").exists();
+        let mut repos: Vec<PathBuf> = Vec::new();
+        if folder_is_repo {
+            repos.push(base.clone());
+            if let Some(parent) = base.parent() {
+                repos.extend(find_repos(parent, 1).into_iter().filter(|p| p != &base));
+            }
+        } else {
+            std::fs::read_dir(&base).map_err(|e| LookoutError::new("path_unreadable", format!("Cannot read {}: {e}", base.to_string_lossy())))?;
+            repos = find_repos(&base, DISCOVER_DEPTH);
+        }
         let registered: Vec<String> = self.store.projects()?.into_iter().map(|p| p.path).collect();
-        let mut children: Vec<PathBuf> = std::fs::read_dir(&base)
-            .map_err(|e| LookoutError::new("path_unreadable", format!("Cannot read {}: {e}", base.to_string_lossy())))?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_dir() && p.join(".git").exists())
-            .collect();
-        children.sort();
-        let mut found: Vec<(Option<String>, Value)> = Vec::new();
-        for child in children {
-            let path = child.to_string_lossy().into_owned();
+        let today = self.today();
+        let mut already_watched = 0;
+        let mut found: Vec<(bool, Option<String>, Value)> = Vec::new();
+        for repo in repos {
+            let path = repo.to_string_lossy().into_owned();
             if registered.iter().any(|r| same_path(r, &path)) {
+                already_watched += 1;
                 continue;
             }
-            let name = child.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let chosen = repo == base;
+            let name = repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let last = facts::last_commit_date(&path);
-            found.push((last.clone(), json!({"path": path, "name": name, "suggested_id": slug(&name), "last_commit": last})));
+            let recent = last
+                .as_deref()
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                .is_some_and(|d| (today - d).num_days() <= RECENT_DAYS);
+            let recommended = if folder_is_repo { chosen } else { recent };
+            found.push((chosen, last.clone(), json!({"path": path, "name": name, "suggested_id": slug(&name), "last_commit": last, "recommended": recommended})));
         }
-        found.sort_by(|a, b| b.0.cmp(&a.0));
-        Ok(Value::Array(found.into_iter().map(|(_, v)| v).collect()))
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+        Ok(json!({
+            "folder": base.to_string_lossy(),
+            "folder_is_repo": folder_is_repo,
+            "candidates": found.into_iter().map(|(_, _, v)| v).collect::<Vec<_>>(),
+            "already_watched": already_watched,
+        }))
     }
 
     // ---------- facts ----------

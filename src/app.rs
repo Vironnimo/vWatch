@@ -82,7 +82,7 @@ async fn add_projects(app: State<'_, AppState>, paths: Vec<String>) -> Reply {
 
 #[tauri::command(rename_all = "snake_case")]
 async fn pick_folder(app: AppHandle) -> Reply {
-    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().set_title("Projektordner wählen").blocking_pick_folder())
+    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().set_title("Ordner oder Projekt wählen").blocking_pick_folder())
         .await
         .map_err(internal)?;
     Ok(json!(picked.map(|p| p.to_string())))

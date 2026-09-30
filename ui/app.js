@@ -19,7 +19,7 @@
   let openId = null;      // project whose drawer is open
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
-  let disc = null;        // project search: { target, root, candidates, checked:Set, busy }
+  let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
   let confirmRemove = null;
   let lastVersion = null;
   let shown = false;
@@ -336,22 +336,32 @@
   }
 
   // ---------- adding projects ----------
-  const RECENT_DAYS = 120;  // pre-select repositories with a commit in this window
+  // while a search runs or its checklist is open, the list replaces the add button
+  const discBusyOrListing = target => disc && disc.target === target && (disc.busy || disc.result.candidates.length);
   function discHtml(target) {
     if (!disc || disc.target !== target) return '';
     if (disc.busy) return `<p class="muted disc-msg">${esc(disc.busy)}</p>`;
-    if (!disc.candidates.length) return `<p class="muted disc-msg">In <span class="mono">${esc(disc.root)}</span> liegen keine Git-Repos, die Lookout noch nicht kennt.</p>`;
-    const n = disc.checked.size, all = n === disc.candidates.length;
-    const rows = disc.candidates.map(c => `<label class="disc-row"><input type="checkbox" data-disc="${esc(c.path)}" ${disc.checked.has(c.path) ? 'checked' : ''}><span class="t">${esc(c.name)}</span><span class="faint">${c.last_commit ? `letzter Commit ${ago(c.last_commit)}` : 'noch kein Commit'}</span></label>`).join('');
-    return `<div class="disc"><div class="disc-head"><span>${disc.candidates.length} Git-Repos in <span class="mono">${esc(disc.root)}</span></span><button class="linkish" type="button" data-disc-all>${all ? 'keins' : 'alle'} auswählen</button></div>
+    const r = disc.result, folder = `<span class="mono">${esc(r.folder)}</span>`;
+    if (!r.candidates.length) {
+      const msg = r.already_watched
+        ? (r.folder_is_repo ? `${folder} ist schon im Blick.` : `Alle Git-Repos in ${folder} sind schon im Blick.`)
+        : `In ${folder} habe ich keine Git-Repos gefunden. Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein Projekt.`;
+      return `<p class="muted disc-msg">${msg}</p>`;
+    }
+    const n = disc.checked.size, all = n === r.candidates.length;
+    const head = r.folder_is_repo
+      ? (r.candidates.length > 1 ? `<b>${esc(r.candidates[0].name)}</b> ist ausgewählt. Daneben liegen noch diese Repos, falls du sie auch willst:` : `<b>${esc(r.candidates[0].name)}</b> ist ausgewählt.`)
+      : `${r.candidates.length} Git-Repos gefunden. Angehakt sind die, an denen zuletzt gearbeitet wurde.`;
+    const rows = r.candidates.map(c => `<label class="disc-row"><input type="checkbox" data-disc="${esc(c.path)}" ${disc.checked.has(c.path) ? 'checked' : ''}><span class="t">${esc(c.name)}</span><span class="faint">${c.last_commit ? `letzter Commit ${ago(c.last_commit)}` : 'noch kein Commit'}</span></label>`).join('');
+    return `<div class="disc"><div class="disc-head"><span>${head}</span>${r.candidates.length > 1 ? `<button class="linkish" type="button" data-disc-all>${all ? 'keins' : 'alle'} auswählen</button>` : ''}</div>
       <div class="disc-list">${rows}</div>
       <div class="actions"><button class="btn primary" type="button" data-disc-add ${n ? '' : 'disabled'}>${n === 1 ? '1 Projekt' : `${n} Projekte`} hinzufügen</button><button class="btn" type="button" data-disc-cancel>Abbrechen</button></div></div>`;
   }
 
   function renderEmpty() {
     return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll Lookout im Blick behalten?</h2>
-      <p class="muted">Wähle den Ordner, in dem deine Projekte liegen. Lookout findet die Git-Repos darin und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
-      <div class="actions"><button class="btn primary" type="button" data-pick="folder" data-target="main">Projektordner wählen</button><button class="btn" type="button" data-pick="single" data-target="main">Einzelnes Projekt hinzufügen</button></div>
+      <p class="muted">Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein einzelnes Projekt. Lookout zeigt dir die gefundenen Git-Repos zum Abhaken und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
+      ${discBusyOrListing('main') ? '' : '<div class="actions"><button class="btn primary" type="button" data-pick data-target="main">Ordner wählen …</button></div>'}
       ${discHtml('main')}</div>`;
   }
 
@@ -372,7 +382,7 @@
       <h2 class="pname">Einstellungen</h2>
       <section class="mod"><div class="mod-head"><div><h2>Projekte</h2><div class="sub">${S.projects.length ? `${S.projects.length} im Blick. Status und Notiz setzt du im Steckbrief eines Projekts.` : 'Noch keine.'}</div></div></div>
         <div class="plist">${projects}</div>
-        <div class="actions"><button class="btn" type="button" data-pick="folder" data-target="panel">Ordner durchsuchen …</button><button class="btn" type="button" data-pick="single" data-target="panel">Einzelnes Projekt …</button></div>
+        ${discBusyOrListing('panel') ? '' : '<div class="actions"><button class="btn" type="button" data-pick data-target="panel">Projekte hinzufügen …</button></div>'}
         ${discHtml('panel')}</section>
       <section class="mod"><div class="mod-head"><div><h2>Start</h2></div></div>
         ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'Lookout geht auf, sobald du dich bei Windows anmeldest.')}</section>
@@ -467,23 +477,21 @@
     catch (e) { toast('Status nicht gespeichert.'); }
   }
 
-  function rerenderDisc() { if (disc && disc.target === 'panel') renderPanel(true); else render(); }
-  async function pick(kind, target) {
+  function rerenderDisc(target = disc && disc.target) { if (target === 'panel') renderPanel(true); else render(); }
+  async function pick(target) {
     let path;
     try { path = await call('pick_folder'); } catch (e) { toast(errText(e)); return; }
     if (!path) return;
-    if (kind === 'single') { await addPaths([path], target); return; }
-    disc = { target, root: path, candidates: [], checked: new Set(), busy: 'Suche Git-Repos …' };
+    disc = { target, busy: 'Suche Git-Repos …' };
     rerenderDisc();
     try {
-      const found = await call('discover', { root: path });
-      const recent = found.filter(c => c.last_commit && daysSince(c.last_commit) <= RECENT_DAYS);
-      disc = { target, root: path, candidates: found, checked: new Set((recent.length ? recent : found).map(c => c.path)), busy: null };
+      const result = await call('discover', { root: path });
+      disc = { target, result, checked: new Set(result.candidates.filter(c => c.recommended).map(c => c.path)), busy: null };
     } catch (e) { disc = null; toast(errText(e)); }
     rerenderDisc();
   }
   async function addPaths(paths, target) {
-    disc = { ...(disc || { target, root: '', candidates: [], checked: new Set() }), busy: paths.length === 1 ? 'Füge hinzu und messe …' : `Füge ${paths.length} Projekte hinzu und messe …` };
+    disc = { ...(disc || { target, checked: new Set() }), busy: paths.length === 1 ? 'Füge hinzu und messe …' : `Füge ${paths.length} Projekte hinzu und messe …` };
     rerenderDisc();
     try {
       const res = await call('add_projects', { paths });
@@ -525,10 +533,10 @@
     if (t.closest('[data-open-settings]')) { openPanel(); return; }
     if (t.closest('[data-close-panel]')) { closePanel(); return; }
     const pk = t.closest('[data-pick]');
-    if (pk) { pick(pk.dataset.pick, pk.dataset.target); return; }
-    if (t.closest('[data-disc-all]')) { disc.checked = disc.checked.size === disc.candidates.length ? new Set() : new Set(disc.candidates.map(c => c.path)); rerenderDisc(); return; }
+    if (pk) { pick(pk.dataset.target); return; }
+    if (t.closest('[data-disc-all]')) { const all = disc.result.candidates; disc.checked = disc.checked.size === all.length ? new Set() : new Set(all.map(c => c.path)); rerenderDisc(); return; }
     if (t.closest('[data-disc-add]')) { addPaths([...disc.checked], disc.target); return; }
-    if (t.closest('[data-disc-cancel]')) { disc = null; render(); return; }
+    if (t.closest('[data-disc-cancel]')) { const target = disc.target; disc = null; rerenderDisc(target); return; }
     const setting = t.closest('[data-setting]');
     if (setting) { setSetting(setting.dataset.setting, setting.getAttribute('aria-checked') !== 'true'); return; }
     const copy = t.closest('[data-copy]');

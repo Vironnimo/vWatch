@@ -103,6 +103,20 @@ fn status_and_registration_rules() {
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     assert_eq!(svc.add_project(repo.to_str().unwrap(), None, None).unwrap_err().code, "already_registered");
 
+    common::make_repo(tmp.path(), "side", &["2026-09-25T10:00:00"]);
+    common::make_repo(&tmp.path().join("group"), "old-tool", &["2025-01-01T10:00:00"]);
+    let picks = |d: &serde_json::Value| -> Vec<(String, bool)> {
+        d["candidates"].as_array().unwrap().iter().map(|c| (c["name"].as_str().unwrap().to_owned(), c["recommended"] == true)).collect()
+    };
+    // a folder of projects: two levels deep, newest first, recently active ones recommended
+    let found = svc.discover(tmp.path().to_str().unwrap()).unwrap();
+    assert_eq!(picks(&found), [("side".into(), true), ("Other App".into(), true), ("old-tool".into(), false)]);
+    assert_eq!((found["folder_is_repo"].as_bool(), found["already_watched"].as_u64()), (Some(false), Some(1)));
+    // a single project: it comes first and recommended, its neighbours are offered unticked
+    let found = svc.discover(other.to_str().unwrap()).unwrap();
+    assert_eq!(picks(&found), [("Other App".into(), true), ("side".into(), false)]);
+    assert_eq!(found["folder_is_repo"], true);
+
     let batch = svc.add_projects(&[other.to_string_lossy().into_owned(), repo.to_string_lossy().into_owned()]).unwrap();
     assert_eq!(batch["added"][0]["id"], "other-app");
     assert_eq!(batch["failed"][0]["error"]["code"], "already_registered");

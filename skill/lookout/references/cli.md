@@ -32,7 +32,7 @@ Feedback values: `up` (the owner likes it), `later` (not now; hidden for 14 days
 | Command | Effect |
 |---|---|
 | `lookout projects list` | All projects with `status`, `status_note`, `has_card`, `card_updated_at`, `facts_collected_at`. |
-| `lookout projects discover <folder>` | Git repositories directly inside the folder that are not registered, newest first: `path`, `name`, `suggested_id`, `last_commit`. Registers nothing. |
+| `lookout projects discover <folder>` | Unregistered git repositories: when the folder is itself a repository, that one first and then its neighbours; otherwise those up to two levels below it, newest first. Returns `folder`, `folder_is_repo`, `already_watched` (count) and `candidates` (`path`, `name`, `suggested_id`, `last_commit`, `recommended`: the chosen repository itself, or active within 120 days). Registers nothing. |
 | `lookout projects add <path> [--id ID] [--name NAME]` | Registers a folder and measures its facts. The id defaults to the folder name in lowercase. |
 | `lookout projects status <id> <active|parked|done|archived> [--note TEXT]` | The owner's intent. Archived projects disappear from runs and the main page. |
 | `lookout projects rename <id> <name>` | Changes the display name. |

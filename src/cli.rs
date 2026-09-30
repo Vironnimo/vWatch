@@ -92,7 +92,7 @@ enum ProjectsCmd {
         #[arg(long)]
         note: Option<String>,
     },
-    /// List git repositories directly inside a folder that are not registered yet
+    /// Git repositories in a folder (or a repository and its neighbours) that are not registered yet
     Discover { root: String },
 }
 
@@ -229,7 +229,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 let status = status.to_possible_value().expect("every status has a name").get_name().to_owned();
                 json!({"project": svc.set_status(&id, &status, note.as_deref())?})
             }
-            ProjectsCmd::Discover { root } => json!({"candidates": svc.discover(&root)?}),
+            ProjectsCmd::Discover { root } => svc.discover(&root)?,
         },
         Cmd::Facts { action } => match action {
             FactsCmd::Refresh { ids, no_ci } => json!({"refreshed": svc.refresh_facts(Some(&ids), !no_ci)?}),
