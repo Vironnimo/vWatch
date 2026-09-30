@@ -31,7 +31,7 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 ## Daily run
 
 1. Run `lookout due`. It refreshes the facts and returns:
-   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs, null for cards written before Lookout recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent), `new_fields` (the card predates fields Lookout added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks: fill them in the card you write.
+   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work or edited docs since the last card; `changes` names what differs, null for cards written before Lookout recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered one of the card's questions), `status_changed` (the owner changed its intent), `new_fields` (the card predates fields Lookout added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks (`handbook.installed`, `suggestions[].done_when`): fill them in the card you write.
    - `problems`: projects whose folder is gone. Mention them in your report; do not write cards for them.
    - `portfolio.due`: whether the cross-project brief needs rewriting.
    If nothing is due, report that in one sentence and stop.

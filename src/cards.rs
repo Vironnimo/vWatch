@@ -89,7 +89,7 @@ const VISION: &[Field] = &[
 const DONE_WHEN: Ty = sentence(20);
 const REENTRY: &[Field] =
     &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text("")), f("done_when", DONE_WHEN, Text(""))];
-const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required)];
+const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required), f("folder", TEXT, Text(""))];
 const PLACE: &[Field] = &[f("path", COMMAND, Required), f("what", words(12), Required)];
 const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Required)];
 const INSTALLED: &[Field] = &[f("version", words(4), Required), f("path", COMMAND, Required)];
@@ -190,9 +190,29 @@ impl Kind {
     }
 
     /// The lists whose items carry ids: (list, prefix of generated ids, item kind).
-    /// The top-level fields of the document.
-    pub fn field_names(self) -> impl Iterator<Item = &'static str> {
-        self.fields().iter().map(|f| f.name)
+    /// Fields the schema has but a stored document lacks because it predates them, as paths such as
+    /// `handbook` or `suggestions[].done_when`. Lists are judged by their first item.
+    pub fn missing_fields(self, doc: &Value) -> Vec<String> {
+        fn walk(fields: &[Field], doc: &Value, path: &str, out: &mut Vec<String>) {
+            for field in fields {
+                let here = if path.is_empty() { field.name.to_owned() } else { format!("{path}.{}", field.name) };
+                match doc.get(field.name) {
+                    None => out.push(here),
+                    Some(v) => match &field.ty {
+                        Ty::Obj(inner) | Ty::Nullable(Ty::Obj(inner)) if v.is_object() => walk(inner, v, &here, out),
+                        Ty::List(Ty::Obj(inner), _) => {
+                            if let Some(first) = v.as_array().and_then(|a| a.first()) {
+                                walk(inner, first, &format!("{here}[]"), out);
+                            }
+                        }
+                        _ => {}
+                    },
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self.fields(), doc, "", &mut out);
+        out
     }
 
     pub fn items(self) -> &'static [(&'static str, &'static str, &'static str)] {

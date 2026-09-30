@@ -32,8 +32,10 @@ fn morning_run_cycle() {
     // a card written before Lookout added a field is due once to fill it
     let mut older = svc.card("demo").unwrap()["card"].clone();
     older.as_object_mut().unwrap().remove("handbook");
+    older["suggestions"][0].as_object_mut().unwrap().remove("done_when");
     svc.store().rewrite_latest_card("demo", &older).unwrap();
-    assert_eq!(svc.due(14, true).unwrap()["projects"][0], json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["handbook"]}));
+    let entry = json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["suggestions[].done_when", "handbook"]});
+    assert_eq!(svc.due(14, true).unwrap()["projects"][0], entry);
     clock.advance(Duration::days(15));
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "stale");
 }

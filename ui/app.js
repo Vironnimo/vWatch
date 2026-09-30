@@ -26,6 +26,10 @@
   let settings = null;    // autostart, agent access, paths
   let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
   let confirmRemove = null;
+  let searchOpen = false;
+  let searchQ = '';
+  let searchSel = 0;
+  const TASKS = {};       // "Auftrag kopieren" buttons: key → the task they copy, refilled on every render
   let lastVersion = null;
   let shown = false;
 
@@ -99,6 +103,27 @@
     return `<span class="fb" data-item="${esc(id)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
   }
 
+  // ---------- handing a task to a coding agent ----------
+  function taskBtn(key, task) {
+    TASKS[key] = task;
+    return `<button class="linkish task" type="button" data-task="${esc(key)}" title="Kopiert einen fertigen Auftrag für einen Coding-Agent">Auftrag kopieren</button>`;
+  }
+  function taskPrompt(t) {
+    const ps = t.projects.map(byId).filter(Boolean);
+    const lines = [ps.length === 1 ? `Aufgabe im Projekt ${ps[0].name} (${ps[0].path}):` : `Aufgabe über die Projekte ${ps.map(p => `${p.name} (${p.path})`).join(', ')}:`, t.title, ''];
+    if (t.why) lines.push(`Warum: ${t.why}`);
+    if (t.evidence) lines.push(`Beleg: ${t.evidence}`);
+    if (t.done_when) lines.push(`Fertig, wenn: ${t.done_when}`);
+    for (const p of ps) {
+      const c = p.card || {}, h = c.handbook || {}, pre = ps.length > 1 ? `${p.name}: ` : '';
+      if ((c.decisions || []).length) lines.push('', `${pre}Bewusst so entschieden, bitte nicht umwerfen:`, ...c.decisions.map(d => `- ${d}`));
+      if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
+      if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
+    }
+    lines.push('', `Der Befund stammt aus Lookout (Stand ${fmtDate(S.today)}). Prüfe ihn zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
+    return lines.join('\n');
+  }
+
   function spark(weekly, col, h = 38) {
     const w = 260, n = weekly.length, max = Math.max(1, ...weekly), pad = 3;
     const x = i => pad + (i * (w - 2 * pad)) / (n - 1);
@@ -131,7 +156,8 @@
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
       ${myNote(s.id)}
-      <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div></div>`;
+      <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
+      ${projectId || (projects || []).length ? `<div class="taskrow">${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : projects, title: s.title, why: s.why, evidence: s.evidence, done_when: s.done_when })}</div>` : ''}</div>`;
   }
 
   function blockFocus() {
@@ -139,7 +165,7 @@
     if (!t.length) return '';
     return mod('focus', 'Heute zuerst', 'Über alle Projekte hinweg ausgewählt', `<div class="focus">${t.slice(0, 3).map((it, i) => `
       <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
-      <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span>${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
+      <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span>${taskBtn(it.id || `focus-${i}`, { projects: [it.project], title: it.title, why: it.why, done_when: it.done_when })}${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
       <div class="why">${esc(it.why)}</div></div></div>`).join('')}</div>`);
   }
 
@@ -345,7 +371,7 @@
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
     const inst = h.installed ? `<div class="hb-inst">Installiert: <b>${esc(h.installed.version)}</b> <span class="mono faint">${esc(h.installed.path)}</span></div>` : '';
     return {
-      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : ''),
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono'),
       read: kv(h.read_first, 'path', 'why', 'mono'),
@@ -419,14 +445,20 @@
     } else {
       const v = c.vision || {};
       const suggestions = c.suggestions.map(sg => ideaCard(sg, [], p.id)).filter(Boolean).join('');
-      body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(c.reentry.next_step)}</div><div><span class="effort">${esc(c.reentry.effort)}</span></div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
+      const r = c.reentry;
+      const hist = (p.history || []).filter((h, i, a) => i === a.length - 1 || h.headline !== a[i + 1].headline);
+      const stampOf = at => new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const histRow = (h, i, a) => `<li><span class="when">${stampOf(h.at)}</span><span class="rail"></span><span class="what">${esc(h.headline)}${a[i + 1] && a[i + 1].phase !== h.phase ? ` <span class="pill ${esc(h.phase)}">${esc(PHASE[h.phase] || h.phase)}</span>` : ''}</span></li>`;
+      const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
+      body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(r.next_step)}</div><div class="rmeta"><span class="effort">${esc(r.effort)}</span>${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
         + dmod('Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true)).join('')}</ul>` : '')
-        + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' || o.kind === 'ci' ? 'bad' : o.kind === 'unpushed' ? 'warn' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}</div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
+        + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' || o.kind === 'ci' ? 'bad' : o.kind === 'unpushed' ? 'warn' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
         + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${c.recent_changes.map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
         + dmod('Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
         + dmod('Vision und Fortschritt', v.statement || v.progress_note ? `<div>${v.statement ? `<div>${esc(v.statement)}</div>` : ''}${v.progress_pct != null ? `<div class="prog"><span style="width:${Number(v.progress_pct)}%"></span></div><div class="faint mono" style="font-size:12px">${Number(v.progress_pct)} %</div>` : ''}${v.progress_note ? `<div class="muted" style="font-size:14px;margin-top:6px">${esc(v.progress_note)}</div>` : ''}</div>` : '')
         + dmod('Was es heute kann', c.features.length ? `<div class="feat">${c.features.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : '')
         + dmod('Meilensteine', c.milestones.length ? `<ol class="timeline">${c.milestones.map(m => `<li><span class="when">${fmtDate(m.date)}</span><span class="rail"></span><span class="what">${esc(m.title)}</span></li>`).join('')}</ol>` : '')
+        + dmod('Chronik', chronicle, 'Die Überschrift jeder Kartenversion, neueste zuerst')
         + dmod('Gesundheit', c.health_notes.length ? `<ul class="bullets">${c.health_notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
         + dmod('Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts; die Agents werten das nicht als Risiko')
         + dmod('Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
@@ -453,6 +485,87 @@
     if (!keepScroll) root.querySelector('.close').focus();
   }
   const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; };
+
+  // ---------- search ----------
+  const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  function searchEntries() {
+    const out = [];
+    for (const p of S.projects) {
+      const add = (where, text, hb) => { if (text) out.push({ id: p.id, where, text: String(text), hb: !!hb }); };
+      add('Name', p.name);
+      add('Ordner', p.path);
+      const c = p.card;
+      if (!c) continue;
+      add('Kurz gesagt', c.one_liner); add('Stack', c.stack); add('Überschrift', c.headline);
+      if (c.vision && c.vision.statement) add('Vision', c.vision.statement);
+      c.features.forEach(x => add('Kann', x));
+      c.recent_changes.forEach(x => add('Zuletzt passiert', x.detail ? `${x.title} – ${x.detail}` : x.title));
+      c.milestones.forEach(x => add('Meilenstein', x.title));
+      c.open_ends.forEach(x => add('Offenes Ende', x.detail ? `${x.title} – ${x.detail}` : x.title));
+      c.waiting_on_you.forEach(x => add('Frage an dich', x.title));
+      c.suggestions.forEach(x => add('Vorschlag', `${x.title} – ${x.why}`));
+      c.health_notes.forEach(x => add('Gesundheit', x));
+      (c.decisions || []).forEach(x => add('Entscheidung', x));
+      c.cross_project_hints.forEach(x => add('Querverbindung', x));
+      const h = c.handbook || {};
+      (h.run || []).forEach(x => add('Handbuch · Starten', `${x.what}: ${x.how}`, true));
+      if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.path}`, true);
+      add('Handbuch · Aufbau', h.architecture, true);
+      (h.places || []).forEach(x => add('Handbuch · Wo was liegt', `${x.path} – ${x.what}`, true));
+      (h.read_first || []).forEach(x => add('Handbuch · Zuerst lesen', `${x.path} – ${x.why}`, true));
+      (h.needs || []).forEach(x => add('Handbuch · Braucht', x, true));
+      (h.terms || []).forEach(x => add('Handbuch · Begriff', `${x.term}: ${x.meaning}`, true));
+    }
+    return out;
+  }
+  function searchResults() {
+    const words = norm(searchQ).split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    return searchEntries()
+      .map(e => ({ e, hay: norm(`${byId(e.id).name} ${e.text}`) }))
+      .filter(x => words.every(w => x.hay.includes(w)))
+      .map(x => ({ ...x.e, score: (x.e.where === 'Name' ? 100 : 0) + words.filter(w => norm(x.e.text).includes(w)).length }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 40);
+  }
+  function highlight(text) {
+    let html = esc(text);
+    for (const w of searchQ.split(/\s+/).filter(Boolean)) {
+      html = html.replace(new RegExp(esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
+    }
+    return html;
+  }
+  function renderSearchResults() {
+    const box = $('#search-root .sresults');
+    if (!box) return;
+    const res = searchResults();
+    searchSel = Math.min(searchSel, Math.max(0, res.length - 1));
+    box.innerHTML = !searchQ.trim() ? '<p class="faint sempty">Sucht in allen Karten und Handbüchern: Funktionen, Befehle, Begriffe, Entscheidungen.</p>'
+      : !res.length ? '<p class="faint sempty">Nichts gefunden.</p>'
+      : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" data-id="${esc(r.id)}" data-hb="${r.hb}" aria-selected="${i === searchSel}"><span class="w">${dot(r.id)}<b>${esc(byId(r.id).name)}</b> · ${esc(r.where)}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
+    const sel = box.querySelector('[aria-selected="true"]');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+  function openSearch() {
+    if (!S || !S.projects.length) return;
+    searchOpen = true;
+    $('#search-root').innerHTML = `<div class="scrim" data-search-close></div><div class="search" role="dialog" aria-modal="true" aria-label="Suche">
+      <input type="search" id="search-q" placeholder="Suchen, z. B. Login, SQLite, Port" value="${esc(searchQ)}" aria-label="Suchbegriff" autocomplete="off">
+      <div class="sresults"></div><div class="shint faint">↑ ↓ wählen · Enter öffnet den Steckbrief · Esc schließt</div></div>`;
+    renderSearchResults();
+    const input = $('#search-q');
+    input.focus();
+    input.select();
+  }
+  const closeSearch = () => { searchOpen = false; $('#search-root').innerHTML = ''; };
+  function pickResult(btn) {
+    if (!btn) return;
+    if (btn.dataset.hb === 'true') hbOpen = true;
+    closeSearch();
+    openDrawer(btn.dataset.id);
+    const hb = btn.dataset.hb === 'true' && document.querySelector('#drawer-root [data-hb]');
+    if (hb) hb.scrollIntoView({ block: 'start' });
+  }
 
   // ---------- page ----------
   function renderFoot() {
@@ -677,6 +790,16 @@
 
   document.addEventListener('click', async e => {
     const t = e.target;
+    if (t.closest('[data-search]')) { openSearch(); return; }
+    if (t.closest('[data-search-close]')) { closeSearch(); return; }
+    const sr = t.closest('[data-sres]');
+    if (sr) { pickResult(sr); return; }
+    const tk = t.closest('[data-task]');
+    if (tk) {
+      const task = TASKS[tk.dataset.task];
+      if (task) navigator.clipboard.writeText(taskPrompt(task)).then(() => toast('Auftrag kopiert. Füg ihn bei deinem Coding-Agent ein.'), () => toast('Kopieren hat nicht geklappt.'));
+      return;
+    }
     const sw = t.closest('.switch button');
     if (sw) { setPref('style', sw.dataset.style); window.scrollTo(0, 0); return; }
     const fbBtn = t.closest('.fb button');
@@ -741,8 +864,17 @@
   });
   // toggle does not bubble, so listen while it travels down
   document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('[data-hb]')) hbOpen = e.target.open; }, true);
+  document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('keydown', e => {
+    if (searchOpen) {
+      const n = $('#search-root').querySelectorAll('.sres').length;
+      if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (n) { searchSel = (searchSel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; renderSearchResults(); } }
+      else if (e.key === 'Enter') { e.preventDefault(); pickResult($('#search-root .sres[aria-selected="true"]')); }
+      return;
+    }
+    if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing())) { e.preventDefault(); openSearch(); return; }
     const draft = e.target.closest && e.target.closest('[data-draft]');
     if (draft && (e.key === 'Enter' || e.key === 'Escape')) {
       e.preventDefault();

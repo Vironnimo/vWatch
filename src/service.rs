@@ -581,7 +581,7 @@ impl Lookout {
                 Some(_) => None,
             };
             // cards written before Lookout added a field lack it; the next card fills it
-            let new_fields: Vec<&str> = card.as_ref().map(|c| Kind::Card.field_names().filter(|n| c.data.get(n).is_none()).collect()).unwrap_or_default();
+            let new_fields = card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)).unwrap_or_default();
             let reason = reason.or((!new_fields.is_empty()).then_some("new_fields"));
             let mut entry = match reason {
                 Some("changed") => {
