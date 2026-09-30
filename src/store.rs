@@ -12,7 +12,7 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects(
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active', status_note TEXT NOT NULL DEFAULT '',
-  status_changed_at TEXT, added_at TEXT NOT NULL);
+  status_changed_at TEXT, added_at TEXT NOT NULL, opened_at TEXT, previous_opened_at TEXT);
 CREATE TABLE IF NOT EXISTS facts(
   project_id TEXT PRIMARY KEY, collected_at TEXT NOT NULL, fingerprint TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cards(
@@ -38,6 +38,10 @@ pub struct Project {
     pub status_note: String,
     pub status_changed_at: Option<String>,
     pub added_at: String,
+    /// When the owner last opened the project in the window.
+    pub opened_at: Option<String>,
+    /// The open before that, kept while the owner reopens within the hour.
+    pub previous_opened_at: Option<String>,
 }
 
 pub struct StoredFacts {
@@ -109,6 +113,8 @@ fn project(row: &Row) -> Result<Project> {
         status_note: row.get("status_note")?,
         status_changed_at: row.get("status_changed_at")?,
         added_at: row.get("added_at")?,
+        opened_at: row.get("opened_at")?,
+        previous_opened_at: row.get("previous_opened_at")?,
     })
 }
 
@@ -117,7 +123,14 @@ impl Store {
         let db = open(path)?;
         db.execute_batch(SCHEMA)?;
         // Columns added after the first release.
-        for (table, column, decl) in [("cards", "ci", "TEXT"), ("cards", "basis", "TEXT"), ("feedback", "note", "TEXT NOT NULL DEFAULT ''"), ("feedback", "item", "TEXT")] {
+        for (table, column, decl) in [
+            ("cards", "ci", "TEXT"),
+            ("cards", "basis", "TEXT"),
+            ("feedback", "note", "TEXT NOT NULL DEFAULT ''"),
+            ("feedback", "item", "TEXT"),
+            ("projects", "opened_at", "TEXT"),
+            ("projects", "previous_opened_at", "TEXT"),
+        ] {
             let present: bool =
                 db.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
             if !present {
@@ -153,6 +166,10 @@ impl Store {
         self.with(|db| {
             db.execute("UPDATE projects SET status = ?1, status_note = ?2, status_changed_at = ?3 WHERE id = ?4", params![status, note, at, id]).map(drop)
         })
+    }
+
+    pub fn set_opened(&self, id: &str, at: &str, previous: Option<&str>) -> Result<()> {
+        self.with(|db| db.execute("UPDATE projects SET opened_at = ?2, previous_opened_at = ?3 WHERE id = ?1", params![id, at, previous]).map(drop))
     }
 
     pub fn remove_project(&self, id: &str) -> Result<()> {
@@ -213,6 +230,19 @@ impl Store {
             })
             .optional()
         })
+    }
+
+    /// The card the owner could see at `at`: the newest one written by then.
+    pub fn card_at(&self, id: &str, at: &str) -> Result<Option<Value>> {
+        self.with(|db| {
+            db.query_row("SELECT data FROM cards WHERE project_id = ?1 AND created_at <= ?2 ORDER BY id DESC LIMIT 1", params![id, at], |r| r.get(0))
+                .optional()
+                .map(|d| d.map(json))
+        })
+    }
+
+    pub fn cards_after(&self, id: &str, at: &str) -> Result<i64> {
+        self.with(|db| db.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1 AND created_at > ?2", params![id, at], |r| r.get(0)))
     }
 
     /// Replaces the stored content of a project's latest card, keeping its version and date.

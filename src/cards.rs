@@ -66,6 +66,8 @@ const SENTENCE: Ty = sentence(30);
 const WHY: Ty = Ty::Str { min: 1, max: 600, words: Some(25) };
 const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
 const SIZE: &[&str] = &["S", "M", "L"];
+/// A command, URL, shortcut or path the owner types or clicks.
+const COMMAND: Ty = Ty::Str { min: 1, max: 300, words: None };
 use Default::{Empty, Filled, Null, Required, Text};
 
 const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", SENTENCE, Text(""))];
@@ -84,6 +86,19 @@ const VISION: &[Field] = &[
     f("progress_pct", Ty::Nullable(&Ty::Int { min: 0, max: 100 }), Null),
 ];
 const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text(""))];
+const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required)];
+const PLACE: &[Field] = &[f("path", SHORT, Required), f("what", words(12), Required)];
+const READ: &[Field] = &[f("path", SHORT, Required), f("why", words(12), Required)];
+const TERM: &[Field] = &[f("term", words(4), Required), f("meaning", words(20), Required)];
+/// What someone returning after months needs to find their way around.
+const HANDBOOK: &[Field] = &[
+    f("run", Ty::List(&Ty::Obj(RUN), Some(6)), Empty),
+    f("architecture", sentence(60), Text("")),
+    f("places", Ty::List(&Ty::Obj(PLACE), Some(10)), Empty),
+    f("read_first", Ty::List(&Ty::Obj(READ), Some(5)), Empty),
+    f("needs", Ty::List(&sentence(15), Some(8)), Empty),
+    f("terms", Ty::List(&Ty::Obj(TERM), Some(8)), Empty),
+];
 const SUGGESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("type", Ty::Enum(&["next", "feature", "cleanup", "park"]), Required),
@@ -110,6 +125,7 @@ const CARD: &[Field] = &[
     f("decisions", Ty::List(&sentence(20), None), Empty),
     f("suggestions", Ty::List(&Ty::Obj(SUGGESTION), None), Empty),
     f("cross_project_hints", Ty::List(&SENTENCE, None), Empty),
+    f("handbook", Ty::Obj(HANDBOOK), Filled),
 ];
 
 const FOCUS: &[Field] = &[
@@ -167,6 +183,11 @@ impl Kind {
     }
 
     /// The lists whose items carry ids: (list, prefix of generated ids, item kind).
+    /// The top-level fields of the document.
+    pub fn field_names(self) -> impl Iterator<Item = &'static str> {
+        self.fields().iter().map(|f| f.name)
+    }
+
     pub fn items(self) -> &'static [(&'static str, &'static str, &'static str)] {
         match self {
             Kind::Card => &[("suggestions", "sg", "suggestion"), ("waiting_on_you", "q", "question")],

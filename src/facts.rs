@@ -402,6 +402,11 @@ pub fn count_since(path: &str, rev: &str) -> Option<u64> {
     git(Path::new(path), &["rev-list", "--count", &format!("{rev}..HEAD")])?.trim().parse().ok()
 }
 
+/// Commits on the current branch made after an RFC 3339 time.
+pub fn count_after(path: &str, at: &str) -> Option<u64> {
+    git(Path::new(path), &["rev-list", "--count", &format!("--since={at}"), "HEAD"])?.trim().parse().ok()
+}
+
 pub fn is_git_repo(path: &str) -> bool {
     Path::new(path).is_dir() && git(Path::new(path), &["rev-parse", "--show-toplevel"]).is_some()
 }

@@ -21,6 +21,8 @@ pub const RATINGS: &[&str] = &["up", "later", "down"];
 pub const PREFS: &[&str] = &["style", "hidden_modules"];
 pub const SNOOZE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_AGE_DAYS: i64 = 14;
+/// Opening a project at least this many days after the last time shows what happened since.
+const SINCE_DAYS: i64 = 7;
 const COMMITS_SINCE_LIMIT: usize = 150;
 const REFRESH_WORKERS: usize = 4;
 const DISCOVER_DEPTH: usize = 2;
@@ -570,17 +572,27 @@ impl Lookout {
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
                 Some(_) => None,
             };
-            match reason {
+            // cards written before Lookout added a field lack it; the next card fills it
+            let new_fields: Vec<&str> = card.as_ref().map(|c| Kind::Card.field_names().filter(|n| c.data.get(n).is_none()).collect()).unwrap_or_default();
+            let reason = reason.or((!new_fields.is_empty()).then_some("new_fields"));
+            let mut entry = match reason {
                 Some("changed") => {
                     let changes = match (card.as_ref().and_then(|c| c.basis.as_ref()), &stored) {
                         (Some(before), Some(now)) => json!(facts::changes(before, &facts::basis(&now.data))),
                         _ => Value::Null,
                     };
-                    projects.push(json!({"id": p.id, "name": p.name, "reason": "changed", "changes": changes}));
+                    json!({"id": p.id, "name": p.name, "reason": "changed", "changes": changes})
                 }
-                Some(reason) => projects.push(json!({"id": p.id, "name": p.name, "reason": reason})),
-                None => up_to_date.push(json!(p.id)),
+                Some(reason) => json!({"id": p.id, "name": p.name, "reason": reason}),
+                None => {
+                    up_to_date.push(json!(p.id));
+                    continue;
+                }
+            };
+            if !new_fields.is_empty() {
+                entry["new_fields"] = json!(new_fields);
             }
+            projects.push(entry);
         }
         let portfolio_reason = match self.store.latest_portfolio()? {
             None => Some("missing"),
@@ -861,6 +873,37 @@ impl Lookout {
     }
 
     // ---------- the window ----------
+    /// Records that the owner opened a project. When the open before was at least
+    /// `SINCE_DAYS` ago, returns what happened since: commits, card updates, a phase
+    /// change and the card's changes and milestones dated after it.
+    pub fn open_project(&self, id: &str) -> Result<Value> {
+        let p = self.project(id)?;
+        let now = (self.clock)();
+        let long_ago = p.opened_at.as_deref().is_none_or(|l| now - parse(l) > chrono::Duration::hours(1));
+        let reference = if long_ago { p.opened_at.clone() } else { p.previous_opened_at.clone() };
+        self.store.set_opened(id, &stamp(now), reference.as_deref())?;
+        let Some(then) = reference.filter(|r| (now - parse(r)).num_days() >= SINCE_DAYS) else {
+            return Ok(json!({"since": null}));
+        };
+        let card_then = self.store.card_at(id, &then)?;
+        let card_now = self.store.latest_card(id)?.map(|c| c.data);
+        let day = parse(&then).with_timezone(&Local).date_naive().to_string();
+        let dated_after = |key: &str| -> Vec<Value> {
+            card_now.as_ref().and_then(|c| c[key].as_array()).into_iter().flatten().filter(|x| x["date"].as_str().is_some_and(|d| d >= day.as_str())).cloned().collect()
+        };
+        let phase = |c: &Option<Value>| c.as_ref().and_then(|c| c["phase"].as_str().map(str::to_owned));
+        let (phase_then, phase_now) = (phase(&card_then), phase(&card_now));
+        Ok(json!({"since": {
+            "at": then,
+            "days": (now - parse(&then)).num_days(),
+            "commits": facts::count_after(&p.path, &then),
+            "card_updates": self.store.cards_after(id, &then)?,
+            "phase": if phase_then.is_some() && phase_then != phase_now { json!({"from": phase_then, "to": phase_now}) } else { Value::Null },
+            "recent_changes": dated_after("recent_changes"),
+            "milestones": dated_after("milestones"),
+        }}))
+    }
+
     /// Everything the window renders. A visit more than an hour after the last one
     /// moves the "new since your last visit" line forward.
     pub fn state(&self, visit: bool) -> Result<Value> {

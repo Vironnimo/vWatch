@@ -19,6 +19,7 @@ The facts see only what git sees: work in git-ignored folders (local data, priva
 3. The project's own documents: README, AGENTS.md or CLAUDE.md, VISION, ROADMAP, TODO, IDEAS, CHANGELOG, `.vorch/PROJECT.md`, `.vorch/FLAGGED.md`, plans under `.vorch/plans/` or `docs/`, review and audit reports. Private notes (for example git-ignored TODO files) often say what the owner actually wants.
 4. Uncommitted work: `git diff --stat` for changed files and `git ls-files --others --exclude-standard` for new ones (`git status --short` folds new folders into one line, so its count differs from Lookout's). `facts.worktrees.items[].dirty_files` counts uncommitted files in each extra worktree; look at those worktrees too. For a project whose real work is uncommitted, read the changed files' names and the docs written alongside them. For a red CI, `facts.ci.workflows` lists the newest run of every workflow with its `state`, `conclusion` and date; cancelled and timed-out runs count as red. `gh run view <run-id>` names the failing job and step (the id ends the run's `url`); add `--log-failed` only when you need the log. Check the date: a red run weeks old, with nothing pushed since, is a stale warning rather than news, so say so.
 5. The source layout, enough to know what the app really does today. Do not read every file.
+6. For the handbook: how the project is started, tested and released (README, `package.json` scripts, `Cargo.toml`, `pyproject.toml`, Makefile, `scripts/`, AGENTS.md) and, outside the repository, its installed version and shortcuts.
 
 Stay read-only (see the Skill's rules). Never include credentials, tokens or keys you come across.
 
@@ -26,7 +27,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 
 `one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Lookout checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `lookout schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
 
-Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12; `reentry.next_step` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. `source` and `evidence` have no word limit.
+Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12; `reentry.next_step` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. In `handbook`: `run.what` 6, `architecture` 60, `places.what` and `read_first.why` 12, `needs` 15 each, `terms.term` 4 and `terms.meaning` 20. `source`, `evidence`, paths and commands have no word limit.
 
 **Each finding has one home.** Unfinished work (uncommitted or unpushed changes, a branch, a half-done plan) goes into `open_ends`; a risk or rot that is not unfinished work into `health_notes`; a decision into `waiting_on_you`; a proposal for new work into `suggestions`. The obvious fix of a finding (commit it, push it, merge it) is not a separate suggestion, and the step named in `reentry` never reappears as one. `headline` and `reentry` may point to the most important finding in their own words; do not repeat it in further fields.
 
@@ -46,6 +47,13 @@ Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8
 - `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions. If the previous card has no `decisions`, check the docs for them; most projects have none, and then the list stays empty.
 - `suggestions` (up to 4; fewer when fewer findings deserve one): see below.
 - `cross_project_hints`: things that look reusable in, or overlap with, other kinds of projects; one sentence each. The portfolio brief builds on them.
+- `handbook`: what the owner needs to find their way around after months away. It is opened rarely, so make it complete and exact; change it only when the project's commands, structure or docs change (with `--merge` it carries over).
+  - `run` (up to 6): how to start, open, test or release the project, each with `what` (for example "Entwicklung starten", "Installierte App", "Tests") and `how`: the exact command with the folder it runs in, a URL, or a Start-menu shortcut. Take every command from the project's own files; never guess one.
+  - `architecture` (2-3 sentences): the main parts and how they work together.
+  - `places` (3-10): key folders and files, each with `path` (relative to the repository, absolute for data outside it) and `what`. Include where its data and configuration live.
+  - `read_first` (1-5): the documents to read first when coming back, each with `path` and `why`.
+  - `needs`: what must be installed or available: runtimes, services, hardware, and API keys by name and where they are configured, never their values.
+  - `terms` (up to 8): project-specific words the owner would otherwise forget, each with `term` and `meaning`. No standard vocabulary.
 
 ## Suggestions
 

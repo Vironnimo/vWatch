@@ -51,6 +51,11 @@ async fn set_feedback(app: State<'_, AppState>, item_id: String, value: Option<S
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn open_project(app: State<'_, AppState>, id: String) -> Reply {
+    work(&app, move |s| s.open_project(&id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn set_pref(app: State<'_, AppState>, key: String, value: Value) -> Reply {
     work(&app, move |s| s.set_pref(&key, &value).map(|_| json!({}))).await
 }
@@ -148,7 +153,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { service: Arc::new(service), watch })
         .invoke_handler(tauri::generate_handler![
-            state, refresh, set_feedback, set_pref, set_status, rename_project, remove_project, discover, add_projects,
+            state, refresh, set_feedback, open_project, set_pref, set_status, rename_project, remove_project, discover, add_projects,
             pick_folder, settings, set_autostart, set_agent_access, open_external, data_version, ready
         ])
         .setup(move |app| {

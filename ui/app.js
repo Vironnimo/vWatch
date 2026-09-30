@@ -20,6 +20,8 @@
   let answering = null;   // question whose answer field is open
   const drafts = {};      // unsent note and answer text per item, kept across re-renders
   let openId = null;      // project whose drawer is open
+  let hbOpen = false;     // the drawer's handbook section is expanded
+  let since = null;       // { id, data, dismissed }: what happened since the owner last opened that project
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
   let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
@@ -334,6 +336,62 @@
       <aside class="side">${blockFocus()}${blockWaiting(1)}${blockAcross()}</aside></div>`;
   }
 
+  // ---------- handbook ----------
+  // how to start a project, how it is built, where things are: for coming back after a long time
+  const HB_LISTS = ['run', 'places', 'read_first', 'needs', 'terms'];
+  const hbEmpty = h => !h || (!h.architecture && !HB_LISTS.some(k => (h[k] || []).length));
+  function hbParts(h) {
+    h = h || {};
+    const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
+    return {
+      run: (h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : '',
+      arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
+      places: kv(h.places, 'path', 'what', 'mono'),
+      read: kv(h.read_first, 'path', 'why', 'mono'),
+      needs: (h.needs || []).length ? `<ul class="bullets">${h.needs.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '',
+      terms: kv(h.terms, 'term', 'meaning', 'term'),
+    };
+  }
+  const hbSec = (title, body) => body ? `<div class="hb-sec"><h3>${esc(title)}</h3>${body}</div>` : '';
+  function handbookBody(h) {
+    const x = hbParts(h);
+    return hbSec('So startest du es', x.run) + hbSec('Wie es gebaut ist', x.arch) + hbSec('Wo was liegt', x.places)
+      + hbSec('Zuerst lesen', x.read) + hbSec('Braucht', x.needs) + hbSec('Begriffe', x.terms);
+  }
+
+  function renderHandbook() {
+    const list = [...visible()].sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    const sheet = p => {
+      const c = p.card, x = hbParts(c && c.handbook);
+      const missing = c && hbEmpty(c.handbook) ? '<div class="faint hb-sec" style="font-size:13px">Noch kein Handbuch. Der nächste Agent-Lauf schreibt es.</div>' : '';
+      return `<article class="sheet">
+        <div class="h">${plink(p.id)}<span class="pills">${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
+        ${c ? `<div class="one">${esc(c.one_liner)}</div>${c.stack ? `<div class="stackline mono">${esc(c.stack)}</div>` : ''}` : '<div class="faint one">Noch keine Karte.</div>'}
+        ${missing}${hbSec('So startest du es', x.run)}${hbSec('Zuerst lesen', x.read)}
+        ${c ? `<div class="state"><span class="faint">Stand:</span> ${esc(c.headline)} <span class="faint">· zuletzt ${ago(lastWork(p))}</span></div>` : ''}
+        <div class="path"><button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
+      </article>`;
+    };
+    return `<div class="handbook-view">${dmod('Handbuch', `<div class="sheets">${list.map(sheet).join('')}</div>`, 'Alle Projekte zum Nachschlagen: wofür, womit, wie starten. Der Name öffnet den Steckbrief mit dem ganzen Handbuch')}</div>`;
+  }
+
+  // what happened since the owner last opened this project, when that was a while ago
+  function sinceHtml(p) {
+    if (!since || since.id !== p.id || !since.data || since.dismissed) return '';
+    const s = since.data;
+    const when = s.days < 28 ? `vor ${s.days} Tagen` : `vor ${Math.round(s.days / 7)} Wochen`;
+    const counts = [
+      s.commits == null ? '' : s.commits ? `${num(s.commits)} ${s.commits === 1 ? 'Commit' : 'Commits'}` : 'keine Commits',
+      s.card_updates ? `Karte ${s.card_updates}× aktualisiert` : 'Karte unverändert',
+    ].filter(Boolean).join(' · ');
+    const lines = [];
+    if (s.phase) lines.push(`<li>Phase: ${esc(PHASE[s.phase.from] || s.phase.from)} → ${esc(PHASE[s.phase.to] || s.phase.to || '—')}</li>`);
+    s.milestones.forEach(m => lines.push(`<li><b>Meilenstein:</b> ${esc(m.title)} <span class="faint mono">${fmtShort(m.date)}</span></li>`));
+    s.recent_changes.forEach(ch => lines.push(`<li>${esc(ch.title)} <span class="faint mono">${fmtShort(ch.date)}</span></li>`));
+    const body = !s.commits && !s.card_updates ? '<div class="muted">Seitdem ist nichts passiert.</div>' : lines.length ? `<ul class="bullets">${lines.join('')}</ul>` : '';
+    return `<section class="since"><div class="since-h"><b>Seit du zuletzt reingeschaut hast</b><span class="faint">${when} · ${counts}</span><button class="linkish" type="button" data-since-close>ausblenden</button></div>${body}</section>`;
+  }
+
   // ---------- drawer ----------
   function drawerHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
@@ -352,6 +410,7 @@
       ${c ? `<div class="one">${esc(c.one_liner)}</div>` : ''}
       <div class="stack">${c && c.stack ? `${esc(c.stack)} · ` : ''}<button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
       ${statusBar}
+      ${sinceHtml(p)}
       ${c && c.personality ? `<div class="say">„${esc(c.personality)}“</div>` : ''}
       <div style="margin-top:14px">${spark(weekly(p), color(p.id), 48)}${c && c.phase_evidence ? `<div class="faint" style="font-size:12.5px">${esc(c.phase_evidence)}</div>` : ''}</div>`;
     if (!c) {
@@ -369,7 +428,8 @@
         + dmod('Meilensteine', c.milestones.length ? `<ol class="timeline">${c.milestones.map(m => `<li><span class="when">${fmtDate(m.date)}</span><span class="rail"></span><span class="what">${esc(m.title)}</span></li>`).join('')}</ol>` : '')
         + dmod('Gesundheit', c.health_notes.length ? `<ul class="bullets">${c.health_notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
         + dmod('Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts; die Agents werten das nicht als Risiko')
-        + dmod('Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '');
+        + dmod('Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
+        + (hbEmpty(c.handbook) ? '' : `<details class="mod hb" data-hb${hbOpen ? ' open' : ''}><summary class="mod-head"><div><h2>Handbuch <span class="chev" aria-hidden="true">▸</span></h2><div class="sub">Starten, Aufbau, wo was liegt: fürs Wiederreinkommen nach längerer Pause</div></div></summary>${handbookBody(c.handbook)}</details>`);
     }
     body += dmod('Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min${p.card_updated_at ? ` · Karte vom ${fmtDate(p.card_updated_at)}` : ''}` : null);
     return `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(p.name)}">${body}</aside>`;
@@ -381,6 +441,10 @@
     const root = $('#drawer-root');
     const prev = root.querySelector('.drawer');
     const top = keepScroll && prev ? prev.scrollTop : 0;
+    if (!keepScroll) {
+      since = null;
+      call('open_project', { id }).then(r => { if (openId === id && r.since) { since = { id, data: r.since }; openDrawer(id, true); } }).catch(() => {});
+    }
     root.innerHTML = drawerHtml(p);
     openId = id;
     const d = root.querySelector('.drawer');
@@ -490,7 +554,8 @@
     $('#fresh').textContent = collected ? `Fakten von vor ${minutesAgo(collected)} Min` : '';
     $('#refresh').hidden = $('.switch').hidden = !S.projects.length;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
-    $('#view').innerHTML = !S.projects.length ? renderEmpty() : S.prefs.style === 'board' ? renderBoard() : renderHandover();
+    const style = { board: renderBoard, handbook: renderHandbook }[S.prefs.style] || renderHandover;
+    $('#view').innerHTML = !S.projects.length ? renderEmpty() : style();
     renderFoot();
     if (openId) openDrawer(openId, true);
     if (panelOpen) renderPanel(true);
@@ -620,6 +685,7 @@
     const unhide = t.closest('[data-unhide]');
     if (unhide) { setPref('hidden_modules', [...hiddenMods()].filter(x => x !== unhide.dataset.unhide)); return; }
     if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
+    if (t.closest('[data-since-close]')) { if (since) since.dismissed = true; if (openId) openDrawer(openId, true); return; }
     if (t.closest('[data-recent-all]')) { showAllRecent = !showAllRecent; render(); return; }
     const ns = t.closest('[data-note-save]');
     if (ns) { saveNote(ns.dataset.noteSave); return; }
@@ -672,6 +738,8 @@
       catch (err) { toast('Notiz nicht gespeichert.'); }
     }
   });
+  // toggle does not bubble, so listen while it travels down
+  document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('[data-hb]')) hbOpen = e.target.open; }, true);
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('keydown', e => {
     const draft = e.target.closest && e.target.closest('[data-draft]');

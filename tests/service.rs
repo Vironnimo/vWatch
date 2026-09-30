@@ -29,8 +29,43 @@ fn morning_run_cycle() {
     assert!(ctx["since_previous_card"]["commits"][0].as_str().unwrap().ends_with("second"));
 
     svc.put_card("demo", card(), false, false).unwrap();
+    // a card written before Lookout added a field is due once to fill it
+    let mut older = svc.card("demo").unwrap()["card"].clone();
+    older.as_object_mut().unwrap().remove("handbook");
+    svc.store().rewrite_latest_card("demo", &older).unwrap();
+    assert_eq!(svc.due(14, true).unwrap()["projects"][0], json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["handbook"]}));
     clock.advance(Duration::days(15));
     assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "stale");
+}
+
+#[test]
+fn reopening_a_project_after_a_while_shows_what_happened_since() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    assert_eq!(svc.open_project("demo").unwrap()["since"], json!(null));
+
+    clock.advance(Duration::days(5));
+    std::fs::write(repo.join("f0.txt"), "more
+").unwrap();
+    common::git_at(&repo, &["commit", "-qam", "search"], "2026-10-05T10:00:00");
+    let milestones = json!([{"date": "2026-01-01", "title": "Start"}]);
+    let changes = json!([{"date": "2026-10-05", "title": "Neue Suche"}]);
+    svc.put_card("demo", card_with(json!({"phase": "cooling", "recent_changes": changes, "milestones": milestones})), false, false).unwrap();
+    clock.advance(Duration::days(5));
+
+    // reopening within the hour keeps the same comparison point
+    for _ in 0..2 {
+        let since = svc.open_project("demo").unwrap()["since"].clone();
+        assert_eq!((since["days"].clone(), since["commits"].clone(), since["card_updates"].clone()), (json!(10), json!(1), json!(1)));
+        assert_eq!(since["phase"], json!({"from": "active", "to": "cooling"}));
+        assert_eq!((since["recent_changes"][0]["title"].clone(), since["milestones"].clone()), (json!("Neue Suche"), json!([])));
+        clock.advance(Duration::minutes(10));
+    }
+    clock.advance(Duration::days(1));
+    assert_eq!(svc.open_project("demo").unwrap()["since"], json!(null));
 }
 
 #[test]
