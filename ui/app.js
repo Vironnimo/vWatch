@@ -315,7 +315,7 @@
     const rows = list.map(p => {
       const sp = p.facts.space, phase = p.card && p.card.phase;
       const resting = phase === 'dormant' || phase === 'done' || p.status === 'parked' || p.status === 'done';
-      const dirs = sp.dirs.slice(0, 4).map(d => `<button class="linkish mono" type="button" data-external="${esc(p.path + '\\' + d.path.replace(/\//g, '\\'))}" title="Im Explorer öffnen">${esc(d.path)}</button> ${bytes(d.bytes)}`).join(' · ');
+      const dirs = sp.dirs.filter(d => d.bytes >= 1e6).slice(0, 4).map(d => `<button class="linkish mono" type="button" data-external="${esc(p.path + '\\' + d.path.replace(/\//g, '\\'))}" title="Im Explorer öffnen">${esc(d.path)}</button> ${bytes(d.bytes)}`).join(' · ');
       return `<div class="row${resting ? ' resting' : ''}"><div class="t">${plink(p.id)}${resting ? ' <span class="tag good">ruht, gefahrlos frei</span>' : ''}</div><div class="mono">${bytes(sp.total_bytes)}</div><div class="d">${dirs}</div></div>`;
     }).join('');
     return mod('space', 'Platz', `${bytes(total)} in Build- und Paketordnern, die sich neu erzeugen lassen. Einmal am Tag gemessen`, `<div class="list">${rows}</div>`);
@@ -524,7 +524,7 @@
       ${releaseText(p) ? `<dt>Release</dt><dd>${esc(releaseText(p))}</dd>` : ''}
       ${collisions(p).length ? `<dt>Überschneidungen</dt><dd>${collisions(p).map(c => `<div>${esc(collisionText(c))}</div>`).join('')}</dd>` : ''}
       ${f.night && (f.night.commits || f.night.uncommitted_touched) ? `<dt>Seit gestern Abend</dt><dd>${[f.night.commits ? `${plural(f.night.commits, 'Commit', 'Commits')}, +${num(f.night.lines_added)}/−${num(f.night.lines_removed)}` : '', f.night.reverts ? plural(f.night.reverts, 'Revert', 'Reverts') : '', f.night.uncommitted_touched ? `${plural(f.night.uncommitted_touched, 'Datei', 'Dateien')} ohne Commit bearbeitet` : ''].filter(Boolean).join(' · ')}</dd>` : ''}
-      ${f.space && f.space.total_bytes ? `<dt>Platz</dt><dd>${bytes(f.space.total_bytes)} neu erzeugbar: ${f.space.dirs.slice(0, 4).map(d => `${esc(d.path)} ${bytes(d.bytes)}`).join(' · ')}</dd>` : ''}
+      ${f.space && f.space.total_bytes ? `<dt>Platz</dt><dd>${bytes(f.space.total_bytes)} neu erzeugbar: ${f.space.dirs.filter(d => d.bytes >= 1e6).slice(0, 4).map(d => `${esc(d.path)} ${bytes(d.bytes)}`).join(' · ')}</dd>` : ''}
       <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
     let body = `<button class="close" data-close type="button">Schließen</button>
