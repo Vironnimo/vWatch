@@ -384,7 +384,7 @@
     const r = (S.portfolio || {}).week_review;
     if (!r || r.week !== S.review_week) return '';
     const list = xs => (xs || []).length ? `<ul class="bullets">${xs.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="faint">nichts</p>';
-    return mod('week', `Wochenrückblick · KW ${Number(r.week.split('-W')[1])}`, r.time_note || null, `<div class="weekgrid"><div><h3>Geschafft</h3>${list(r.done)}</div><div><h3>Liegengeblieben</h3>${list(r.stalled)}</div></div>`);
+    return mod('week', `Rückblick KW ${Number(r.week.split('-W')[1])}`, r.time_note || null, `<div class="weekgrid"><div><h3>Geschafft</h3>${list(r.done)}</div><div><h3>Liegengeblieben</h3>${list(r.stalled)}</div></div>`);
   }
 
   function missingCardsNote() {
