@@ -54,7 +54,17 @@ pub struct StoredCard {
     pub head: Option<String>,
     /// The CI state (`green` or `red`) the card was written against, if it was known.
     pub ci: Option<String>,
+    /// The facts basis the card was written against; missing for older cards.
+    pub basis: Option<Value>,
     pub data: Value,
+}
+
+/// What a new card was written against.
+pub struct CardBasis<'a> {
+    pub fingerprint: &'a str,
+    pub head: Option<&'a str>,
+    pub ci: Option<&'a str>,
+    pub parts: &'a Value,
 }
 
 pub struct StoredPortfolio {
@@ -107,7 +117,7 @@ impl Store {
         let db = open(path)?;
         db.execute_batch(SCHEMA)?;
         // Columns added after the first release.
-        for (table, column, decl) in [("cards", "ci", "TEXT"), ("feedback", "note", "TEXT NOT NULL DEFAULT ''"), ("feedback", "item", "TEXT")] {
+        for (table, column, decl) in [("cards", "ci", "TEXT"), ("cards", "basis", "TEXT"), ("feedback", "note", "TEXT NOT NULL DEFAULT ''"), ("feedback", "item", "TEXT")] {
             let present: bool =
                 db.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
             if !present {
@@ -178,11 +188,11 @@ impl Store {
     }
 
     // cards
-    pub fn add_card(&self, id: &str, at: &str, fingerprint: &str, head: Option<&str>, ci: Option<&str>, data: &Value) -> Result<i64> {
+    pub fn add_card(&self, id: &str, at: &str, basis: &CardBasis, data: &Value) -> Result<i64> {
         self.with(|db| {
             db.execute(
-                "INSERT INTO cards(project_id, created_at, fingerprint, head, ci, data) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, at, fingerprint, head, ci, data.to_string()],
+                "INSERT INTO cards(project_id, created_at, fingerprint, head, ci, basis, data) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, at, basis.fingerprint, basis.head, basis.ci, basis.parts.to_string(), data.to_string()],
             )?;
             db.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1", [id], |r| r.get(0))
         })
@@ -190,8 +200,16 @@ impl Store {
 
     pub fn latest_card(&self, id: &str) -> Result<Option<StoredCard>> {
         self.with(|db| {
-            db.query_row("SELECT (SELECT COUNT(*) FROM cards WHERE project_id = ?1), created_at, fingerprint, head, ci, data FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
-                Ok(StoredCard { version: r.get(0)?, created_at: r.get(1)?, fingerprint: r.get(2)?, head: r.get(3)?, ci: r.get(4)?, data: json(r.get(5)?) })
+            db.query_row("SELECT (SELECT COUNT(*) FROM cards WHERE project_id = ?1), created_at, fingerprint, head, ci, basis, data FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
+                Ok(StoredCard {
+                    version: r.get(0)?,
+                    created_at: r.get(1)?,
+                    fingerprint: r.get(2)?,
+                    head: r.get(3)?,
+                    ci: r.get(4)?,
+                    basis: r.get::<_, Option<String>>(5)?.map(json),
+                    data: json(r.get(6)?),
+                })
             })
             .optional()
         })

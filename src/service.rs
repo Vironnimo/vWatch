@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 
 use crate::cards::{self, Kind};
 use crate::facts;
-use crate::store::{Feedback, Project, Store};
+use crate::store::{CardBasis, Feedback, Project, Store};
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
@@ -160,6 +160,43 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
         .iter()
         .flat_map(|(list, _, item_kind)| {
             doc[*list].as_array().into_iter().flatten().map(move |i| json!({"id": i["id"], "kind": item_kind, "title": title_of(i)}))
+        })
+        .collect()
+}
+
+/// With --merge, the top-level fields the agent actually sent.
+fn sent_fields(payload: &Value, merge: bool) -> Option<Vec<String>> {
+    merge.then(|| payload.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default())
+}
+
+/// Validation problems, each marked when its field came from the previous version rather than the agent.
+fn mark_inherited(problems: &[String], sent: Option<&[String]>) -> String {
+    problems
+        .iter()
+        .map(|p| {
+            let field = p.split(['.', '[', ':']).next().unwrap_or("");
+            match sent {
+                Some(sent) if !sent.iter().any(|s| s == field) => format!("{p} (from the previous card)"),
+                _ => p.clone(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// A dry run's items: new items show `id: null`, because their id is only assigned when saved.
+fn dry_items(kind: Kind, sent: &Value, clean: &Value) -> Vec<Value> {
+    let given: Vec<&Value> = kind.items().iter().flat_map(|(list, _, _)| sent[*list].as_array().into_iter().flatten().map(|i| &i["id"])).collect();
+    let mut seen = Vec::new();
+    item_ids(kind, clean)
+        .into_iter()
+        .map(|mut item| {
+            let kept = given.contains(&&item["id"]) && !seen.contains(&item["id"]);
+            seen.push(item["id"].clone());
+            if !kept {
+                item["id"] = Value::Null;
+            }
+            item
         })
         .collect()
 }
@@ -522,6 +559,13 @@ impl Lookout {
                 Some(_) => None,
             };
             match reason {
+                Some("changed") => {
+                    let mut entry = json!({"id": p.id, "name": p.name, "reason": "changed"});
+                    if let (Some(before), Some(now)) = (card.as_ref().and_then(|c| c.basis.as_ref()), &stored) {
+                        entry["changes"] = json!(facts::changes(before, &facts::basis(&now.data)));
+                    }
+                    projects.push(entry);
+                }
                 Some(reason) => projects.push(json!({"id": p.id, "name": p.name, "reason": reason})),
                 None => up_to_date.push(json!(p.id)),
             }
@@ -601,17 +645,21 @@ impl Lookout {
     pub fn put_card(&self, id: &str, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
         self.project(id)?;
         let previous = self.store.latest_card(id)?;
+        let sent = sent_fields(&payload, merge);
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
         let (clean, warnings) = cards::validate(Kind::Card, &payload).map_err(|problems| {
-            let merged = if merge { " With --merge, fields you did not send come from the previous card: send corrected versions of those too." } else { "" };
-            LookoutError::new("invalid_card", format!("The card was not saved: {}", problems.join("; ")))
+            let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
+            LookoutError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `lookout schema card` prints the full schema."))
         })?;
         if dry_run {
-            return Ok(json!({"saved": false, "dry_run": true, "project": id, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}));
+            let items = dry_items(Kind::Card, &payload, &clean);
+            return Ok(json!({"saved": false, "dry_run": true, "project": id, "warnings": warnings, "items": items}));
         }
         let stored = self.stored_facts(id)?;
-        let version = self.store.add_card(id, &self.now(), &stored.fingerprint, stored.data["head"].as_str(), settled_ci(&stored.data), &clean)?;
+        let parts = facts::basis(&stored.data);
+        let basis = CardBasis { fingerprint: &stored.fingerprint, head: stored.data["head"].as_str(), ci: settled_ci(&stored.data), parts: &parts };
+        let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
         Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
     }
 
@@ -637,7 +685,7 @@ impl Lookout {
                 let c = &card.data;
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
                 json!({
-                    "updated_at": card.created_at, "outdated": card_outdated,
+                    "created_at": card.created_at, "outdated": card_outdated,
                     "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
                     "waiting_on_you": picked("waiting_on_you", &["id", "title"]),
@@ -677,9 +725,10 @@ impl Lookout {
 
     pub fn put_portfolio(&self, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
         let previous = self.store.latest_portfolio()?;
+        let sent = sent_fields(&payload, merge);
         let payload = Self::merged(previous.as_ref().map(|p| &p.data), payload, merge, "portfolio brief")?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload).map_err(|problems| {
-            LookoutError::new("invalid_portfolio", format!("The brief was not saved: {}", problems.join("; ")))
+            LookoutError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint("Fix the listed fields and send it again. `lookout schema portfolio` prints the full schema.")
         })?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
@@ -701,7 +750,7 @@ impl Lookout {
                 .hint(format!("Use the ids from `lookout portfolio context`: {}.", known.join(", "))));
         }
         if dry_run {
-            return Ok(json!({"saved": false, "dry_run": true, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}));
+            return Ok(json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}));
         }
         let version = self.store.add_portfolio(&self.now(), &clean)?;
         Ok(json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}))

@@ -239,7 +239,12 @@ fn worktrees(repo: &Path) -> Value {
             }
         }
     }
-    let extra: Vec<Value> = items.into_iter().skip(1).collect(); // the first entry is the main checkout
+    let mut extra: Vec<Value> = items.into_iter().skip(1).collect(); // the first entry is the main checkout
+    for item in &mut extra {
+        let path = Path::new(item["path"].as_str().unwrap_or(""));
+        let dirty = if path.is_dir() { git(path, &["status", "--porcelain", "--untracked-files=all"]).map(|s| s.lines().count()) } else { None };
+        item["dirty_files"] = json!(dirty);
+    }
     let prunable = extra.iter().filter(|w| w["prunable"] == json!(true)).count();
     json!({"count": extra.len(), "prunable": prunable, "items": extra})
 }
@@ -405,19 +410,35 @@ pub fn last_commit_date(path: &str) -> Option<String> {
     (!out.is_empty()).then(|| out.to_owned())
 }
 
-/// What must change before a project needs a fresh interpretation. Commits in extra worktrees
-/// and unmerged branches count too; without either the key keeps its original form.
-pub fn fingerprint(facts: &Value) -> String {
+/// The facts that decide whether a card still holds, by what they mean: new commits, uncommitted
+/// work, unpushed commits, edited docs, commits in extra worktrees or unmerged branches, readability.
+pub fn basis(facts: &Value) -> Value {
     let d = &facts["dirty"];
-    let mut key = json!([facts["head"], d["files"], d["lines_added"], d["lines_removed"], facts["ahead"], facts["docs_mtime"], facts["ok"]]);
     let side_heads: Vec<&Value> = [&facts["worktrees"]["items"], &facts["branches"]["unmerged"]]
         .into_iter()
         .flat_map(|list| list.as_array().into_iter().flatten())
         .map(|item| &item["head"])
         .filter(|h| h.is_string())
         .collect();
-    if !side_heads.is_empty() {
-        key.as_array_mut().expect("the key is a list").push(json!(side_heads));
+    json!({
+        "commits": facts["head"], "uncommitted": [d["files"], d["lines_added"], d["lines_removed"]], "unpushed": facts["ahead"],
+        "docs": facts["docs_mtime"], "side_branches": side_heads, "readable": facts["ok"],
+    })
+}
+
+/// The names of the basis parts that differ between two measurements.
+pub fn changes(before: &Value, after: &Value) -> Vec<String> {
+    after.as_object().into_iter().flatten().filter(|(k, v)| before.get(k.as_str()) != Some(*v)).map(|(k, _)| k.clone()).collect()
+}
+
+/// What must change before a project needs a fresh interpretation: a digest of the basis.
+/// Without commits in worktrees or unmerged branches the key keeps its original form.
+pub fn fingerprint(facts: &Value) -> String {
+    let b = basis(facts);
+    let u = &b["uncommitted"];
+    let mut key = json!([b["commits"], u[0], u[1], u[2], b["unpushed"], b["docs"], b["readable"]]);
+    if b["side_branches"].as_array().is_some_and(|s| !s.is_empty()) {
+        key.as_array_mut().expect("the key is a list").push(b["side_branches"].clone());
     }
     let digest = Sha1::digest(key.to_string().as_bytes());
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()

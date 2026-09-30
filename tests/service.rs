@@ -21,7 +21,7 @@ fn morning_run_cycle() {
 
     std::fs::write(repo.join("f0.txt"), "more\n").unwrap();
     git(&repo, &["commit", "-qam", "second"]);
-    assert_eq!(svc.due(14, true).unwrap()["projects"][0]["reason"], "changed");
+    assert_eq!(svc.due(14, true).unwrap()["projects"][0], json!({"id": "demo", "name": "demo", "reason": "changed", "changes": ["commits"]}));
     assert_eq!(svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"], true);
     let ctx = svc.context("demo").unwrap();
     assert_eq!(ctx["previous_card"]["card"]["headline"], "Alles ruhig");
@@ -62,12 +62,19 @@ fn invalid_cards_are_refused_with_field_paths() {
     let long = json!({"headline": "Eins zwei drei vier fünf sechs sieben acht neun zehn – elf"});
     let err = svc.put_card("demo", card_with(long), false, false).unwrap_err();
     assert!(err.message.contains("headline: Text should have at most 10 words, has 11"), "{}", err.message);
-    // a dry run reports what would be saved and saves nothing
+    // a dry run reports what would be saved and saves nothing; new items get their id only when saved
     let tried = svc.put_card("demo", card_with(json!({"colour": "blue"})), false, true).unwrap();
     assert_eq!((tried["saved"].as_bool(), tried["warnings"].clone()), (Some(false), json!(["ignored unknown field: colour"])));
+    assert_eq!(tried["items"][0]["id"], json!(null));
     assert_eq!(svc.card("demo").unwrap_err().code, "no_card");
     let saved = svc.put_card("demo", card_with(json!({"colour": "blue", "vision": {"statement": "Ziel", "size": 3}})), false, false).unwrap();
     assert_eq!(saved["warnings"], json!(["ignored unknown field: colour", "ignored unknown field: vision.size"]));
+    // with --merge, a problem in a field the agent did not send is marked as inherited
+    let stored = svc.store().latest_card("demo").unwrap().unwrap();
+    let old = card_with(json!({"health_notes": ["wort ".repeat(31)]}));
+    svc.store().add_card("demo", &svc.now(), &lookout::store::CardBasis { fingerprint: &stored.fingerprint, head: None, ci: None, parts: &json!(null) }, &old).unwrap();
+    let err = svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap_err();
+    assert!(err.message.contains("health_notes[0]: Text should have at most 30 words, has 31 (from the previous card)"), "{}", err.message);
 }
 
 #[test]
@@ -236,7 +243,8 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
 
     // cards written before questions had ids get them when Lookout opens
     let stored = svc.store().latest_card("other").unwrap().unwrap();
-    svc.store().add_card("other", &svc.now(), &stored.fingerprint, None, None, &card_with(json!({"waiting_on_you": [{"title": "Alt?"}]}))).unwrap();
+    let basis = lookout::store::CardBasis { fingerprint: &stored.fingerprint, head: None, ci: None, parts: &json!(null) };
+    svc.store().add_card("other", &svc.now(), &basis, &card_with(json!({"waiting_on_you": [{"title": "Alt?"}]}))).unwrap();
     let reopened = lookout::Lookout::open(&tmp.path().join("lookout.db")).unwrap();
     assert!(reopened.card("other").unwrap()["card"]["waiting_on_you"][0]["id"].as_str().unwrap().starts_with("q-"));
 }
