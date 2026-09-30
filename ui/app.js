@@ -9,13 +9,13 @@
   const CI = { green: ['grün', 'good'], red: ['rot', 'bad'], running: ['läuft', ''], none: ['keins', ''], unknown: ['unbekannt', ''], skipped: ['—', ''] };
   const VERDICT = { park: ['parken', 'warn'], revive: ['zurückholen', 'good'], finish: ['fertig machen', 'good'], archive: ['archivieren', 'bad'] };
   const MOD_TITLES = {
-    focus: 'Heute zuerst', waiting: 'Wartet auf dich', safety: 'Sicherheitslage', recent: 'Was passiert ist', patterns: 'Muster',
-    ideas: 'Ideen aus den Projekten', synergies: 'Querverbindungen', newapps: 'Neue App-Ideen', park: 'Parken oder zurückholen?',
-    pulse: 'Puls', voices: 'Die Projekte melden sich', kpis: 'Lage auf einen Blick', cards: 'Projekte',
+    focus: 'Heute zuerst', projects: 'Deine Projekte', waiting: 'Wartet auf dich', safety: 'Sicherheitslage', recent: 'Was passiert ist',
+    across: 'Quer durch alle Projekte', ideas: 'Ideen', pulse: 'Puls', kpis: 'Lage auf einen Blick', cards: 'Projekte',
   };
 
   let S = null;           // state from the app core
   let showRated = false;  // show suggestions the owner already rated away
+  let showAllRecent = false;
   let openId = null;      // project whose drawer is open
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
@@ -64,6 +64,7 @@
       const lines = (d.lines_added || 0) + (d.lines_removed || 0);
       const age = d.oldest_change ? daysSince(d.oldest_change) : 0;
       out.unsaved = `${num(d.files)} Dateien, +${num(d.lines_added)}/−${num(d.lines_removed)}${age > 0 ? `, seit ${age} ${age === 1 ? 'Tag' : 'Tagen'}` : ''}`;
+      out.unsavedShort = `${num(d.files)} ${d.files === 1 ? 'Datei' : 'Dateien'} offen${age > 0 ? ` · ${age} T` : ''}`;
       out.level = lines > 500 || age > 3 ? 'bad' : 'warn';
     }
     const unmerged = ((f.branches || {}).unmerged || []).length;
@@ -103,13 +104,13 @@
   }
   const weekly = p => (p.facts && p.facts.commits && p.facts.commits.weekly) || new Array(26).fill(0);
 
-  function ideaCard(s, projects, projectId) {
+  function ideaCard(s, projects, projectId, kind) {
     if (hiddenByRating(s.id)) return '';
-    return `<div class="idea"><div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div>${s.effort ? `<span class="effort">${esc(s.effort)}</span>` : ''}</div>
+    return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div>${s.effort ? `<span class="effort">${esc(s.effort)}</span>` : ''}</div>
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
-      <div class="foot"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id, projectId, s.title)}</div></div>`;
+      <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id, projectId, s.title)}</div></div>`;
   }
 
   function blockFocus() {
@@ -118,19 +119,69 @@
     return mod('focus', 'Heute zuerst', 'Über alle Projekte hinweg ausgewählt', `<div class="focus">${t.slice(0, 3).map((it, i) => `
       <div class="item"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
       <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span></div>
-      <div class="muted" style="font-size:14px;margin-top:4px">${esc(it.why)}</div></div></div>`).join('')}</div>`);
+      <div class="why">${esc(it.why)}</div></div></div>`).join('')}</div>`);
+  }
+
+  // what the facts say about a project, as a few short badges
+  function signals(p) {
+    const f = p.facts || {};
+    if (!f.is_git) return `<span class="tag">${f.error === 'path_missing' ? 'Ordner fehlt' : 'kein Git'}</span>`;
+    const s = safety(p);
+    const out = [];
+    if (!s.remote) out.push('<span class="tag bad">kein Remote</span>');
+    if (s.unsavedShort) out.push(`<span class="tag ${s.level}">${esc(s.unsavedShort)}</span>`);
+    if (s.ahead) out.push(`<span class="tag warn">${s.ahead} ungepusht</span>`);
+    if (s.ci === 'red') out.push('<span class="tag bad">CI rot</span>');
+    if (!out.length) out.push('<span class="tag good">gesichert</span>');
+    return out.join('');
+  }
+  const risk = p => { const s = safety(p); return (p.facts && p.facts.is_git && !s.remote ? 2 : 0) + (s.level === 'bad' ? 2 : s.level === 'warn' ? 1 : 0) + (s.ci === 'red' ? 1 : 0) + (s.ahead ? 1 : 0); };
+
+  function blockProjects() {
+    const list = [...visible()].sort((a, b) => risk(b) - risk(a) || (lastWork(b) || '').localeCompare(lastWork(a) || ''));
+    if (!list.length) return '';
+    const tile = p => {
+      const c = p.card, waiting = c ? c.waiting_on_you.length : 0;
+      const fresh = isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : '';
+      return `<button class="tile" type="button" data-open="${esc(p.id)}">
+        <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span class="pills">${fresh}${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
+        <p class="voice">${c ? `„${esc(c.personality || c.headline)}“` : '<span class="faint">Noch keine Einschätzung. Kommt beim nächsten Agent-Lauf.</span>'}</p>
+        <div class="badges">${signals(p)}${waiting ? `<span class="tag ask">${waiting} ${waiting === 1 ? 'Entscheidung' : 'Entscheidungen'}</span>` : ''}</div>
+        <div class="tfoot">${spark(weekly(p), color(p.id), 22)}<span>zuletzt ${ago(lastWork(p))}</span></div>
+      </button>`;
+    };
+    return mod('projects', 'Deine Projekte', 'Die riskantesten zuerst. Klick öffnet den Steckbrief', `<div class="tiles">${list.map(tile).join('')}</div>`);
   }
 
   function blockWaiting(limitPer = 2) {
     const groups = visible().filter(p => p.card && p.card.waiting_on_you.length);
     if (!groups.length) return '';
     const total = groups.reduce((a, p) => a + p.card.waiting_on_you.length, 0);
-    const li = w => `<div class="row"><div class="t">${esc(w.title)}</div>${w.source ? `<div class="d mono" style="font-size:12px">${esc(w.source)}</div>` : ''}</div>`;
+    const li = w => `<li${w.source ? ` title="Quelle: ${esc(w.source)}"` : ''}>${esc(w.title)}</li>`;
     const body = groups.map(p => {
       const items = p.card.waiting_on_you, head = items.slice(0, limitPer), rest = items.slice(limitPer);
-      return `<div class="group-h">${plink(p.id)}<span class="faint">${items.length} offen</span></div><div class="list">${head.map(li).join('')}${rest.length ? `<details><summary class="more">+ ${rest.length} weitere</summary>${rest.map(li).join('')}</details>` : ''}</div>`;
+      return `<div class="group"><div class="group-h">${plink(p.id)}<span class="count">${items.length}</span></div>
+        <ul class="qs">${head.map(li).join('')}</ul>${rest.length ? `<details><summary class="more">+ ${rest.length} weitere</summary><ul class="qs">${rest.map(li).join('')}</ul></details>` : ''}</div>`;
     }).join('');
-    return mod('waiting', 'Wartet auf dich', `${total} Entscheidungen, die nur du treffen kannst`, body);
+    return mod('waiting', 'Wartet auf dich', `${total} Entscheidungen, die nur du treffen kannst`, `<div class="groups">${body}</div>`);
+  }
+
+  function blockRecent(limit = 10) {
+    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map(c => ({ ...c, project: p.id }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date));
+    if (!items.length) return '';
+    const prevDay = S.previous_visit ? S.previous_visit.slice(0, 10) : null;
+    const shownItems = showAllRecent ? items : items.slice(0, limit);
+    let last = '';
+    const body = shownItems.map(c => {
+      const h = c.date !== last ? `<div class="day-h">${fmtShort(c.date)} · ${ago(c.date)}</div>` : '';
+      last = c.date;
+      const fresh = prevDay && c.date >= prevDay ? ' <span class="pill new">neu</span>' : '';
+      const p = byId(c.project);
+      const head = `<span class="t">${esc(c.title)}${fresh}</span><span class="pmark">${dot(c.project)}${esc(p ? p.name : c.project)}</span>`;
+      return `${h}${c.detail ? `<details class="ev-item"><summary>${head}</summary><p>${esc(c.detail)}</p></details>` : `<div class="ev-item"><div class="sum">${head}</div></div>`}`;
+    }).join('');
+    const more = items.length > limit ? `<button class="more" type="button" data-recent-all>${showAllRecent ? 'weniger anzeigen' : `alle ${items.length} anzeigen`}</button>` : '';
+    return mod('recent', 'Was passiert ist', 'Die größeren Änderungen der letzten 14 Tage. Klick zeigt Details', `<div class="events">${body}</div>${more}`);
   }
 
   function blockSafety() {
@@ -148,20 +199,6 @@
     return mod('safety', 'Sicherheitslage', 'Was verloren ginge, wenn heute die Platte stirbt oder ein Agent falsch auscheckt', `<div class="tablewrap"><table class="safety"><thead><tr><th>Projekt</th><th>Backup</th><th>Ungesichert</th><th>Liegengeblieben</th><th>CI</th></tr></thead><tbody>${rows}</tbody></table></div>`);
   }
 
-  function blockRecent() {
-    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map(c => ({ ...c, project: p.id }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date));
-    if (!items.length) return '';
-    let last = '';
-    const prevDay = S.previous_visit ? S.previous_visit.slice(0, 10) : null;
-    const body = items.map(c => {
-      const h = c.date !== last ? `<div class="day-h">${fmtShort(c.date)} · ${ago(c.date)}</div>` : '';
-      last = c.date;
-      const fresh = prevDay && c.date >= prevDay ? ' <span class="pill new">neu</span>' : '';
-      return `${h}<div class="row"><div class="t">${esc(c.title)}${fresh}</div><div>${plink(c.project)}</div>${c.detail ? `<div class="d">${esc(c.detail)}</div>` : ''}</div>`;
-    }).join('');
-    return mod('recent', 'Was passiert ist', 'Die größeren Änderungen der letzten 14 Tage, als Themen statt Commits', `<div class="list">${body}</div>`);
-  }
-
   function blockPulse() {
     const list = visible().filter(p => p.facts && p.facts.is_git);
     if (!list.length) return '';
@@ -169,39 +206,37 @@
     const total = shares.reduce((a, [, v]) => a + v, 0) || 1;
     const bar = shares.map(([id, v]) => v ? `<span style="width:${(v / total * 100).toFixed(2)}%;background:${color(id)}" title="${esc(byId(id).name)}: ${v}"></span>` : '').join('');
     const legend = shares.map(([id, v]) => `<span>${dot(id)}${esc(byId(id).name)} <b class="mono">${num(v)}</b></span>`).join('');
-    const rows = byLastWork(list).map(p => `<div class="spark-row"><div>${plink(p.id)}</div>${spark(weekly(p), color(p.id), 26)}<div class="last faint" style="font-size:12.5px">${ago(lastWork(p))}</div></div>`).join('');
-    const note = (S.portfolio && S.portfolio.attention_note) || 'Commits der letzten 30 Tage und Verlauf über 26 Wochen';
-    return mod('pulse', 'Puls', note, `<div class="attn-bar" role="img" aria-label="Anteil der Commits in 30 Tagen">${bar}</div><div class="attn-legend">${legend}</div><div style="margin-top:14px">${rows}</div><p class="faint" style="font-size:12.5px;margin-top:6px">Jede Kurve hat ihre eigene Skala. „zuletzt“ zählt auch nicht committete Arbeit.</p>`);
+    const note = (S.portfolio && S.portfolio.attention_note) || 'Wohin deine Commits der letzten 30 Tage gingen';
+    return mod('pulse', 'Puls', note, `<div class="attn-bar" role="img" aria-label="Anteil der Commits in 30 Tagen">${bar}</div><div class="attn-legend">${legend}</div>`);
   }
 
-  function blockProjectIdeas() {
-    const cards = visible().map(p => {
+  // patterns, synergies and verdicts: what shows only when all projects lie side by side
+  function blockAcross() {
+    const pf = S.portfolio || {};
+    const verdict = r => {
+      if (hiddenByRating(r.id)) return '';
+      const v = VERDICT[r.verdict] || [r.verdict, ''];
+      const name = byId(r.project) ? byId(r.project).name : r.project;
+      return `<div class="idea"><div class="kind">Parken oder zurückholen?</div><div class="h"><div class="t">${esc(name)}</div><span class="tag ${v[1]}">${esc(v[0])}</span></div>
+        <div class="why">${esc(r.why)}</div><div class="foot"><div class="who">${plink(r.project)}</div>${fbButtons(r.id, r.project, `${v[0]}: ${name}`)}</div></div>`;
+    };
+    const cards = [
+      ...(pf.patterns || []).map(s => ideaCard(s, s.projects, null, 'Muster')),
+      ...(pf.synergies || []).map(s => ideaCard(s, s.projects, null, 'Querverbindung')),
+      ...(pf.park_or_revive || []).map(verdict),
+    ].filter(Boolean);
+    return cards.length ? mod('across', 'Quer durch alle Projekte', 'Was man erst sieht, wenn alle nebeneinander liegen', `<div class="cards3">${cards.join('')}</div>`) : '';
+  }
+
+  function blockIdeas() {
+    const fromProjects = visible().map(p => {
       const list = ((p.card || {}).suggestions || []).filter(s => !hiddenByRating(s.id));
       const s = list.find(x => x.type === 'feature') || list[0];
-      return s ? ideaCard(s, [p.id], p.id) : '';
-    }).filter(Boolean);
-    if (!cards.length) return '';
-    return mod('ideas', 'Ideen aus den Projekten', 'Pro Projekt der interessanteste Vorschlag. Weitere stehen im Steckbrief', `<div class="cards2">${cards.join('')}</div>`);
-  }
-
-  function blockPortfolioList(id, key, title, sub) {
-    const items = ((S.portfolio || {})[key] || []).map(s => ideaCard(s, s.projects || [], null)).filter(Boolean);
-    return items.length ? mod(id, title, sub, `<div class="cards2">${items.join('')}</div>`) : '';
-  }
-
-  function blockPark() {
-    const it = ((S.portfolio || {}).park_or_revive || []).filter(r => !hiddenByRating(r.id));
-    if (!it.length) return '';
-    return mod('park', 'Parken oder zurückholen?', 'Ehrliche Einschätzung zu den stillen Projekten', `<div class="list">${it.map(r => {
-      const v = VERDICT[r.verdict] || [r.verdict, ''];
-      return `<div class="row"><div>${plink(r.project)}</div><div><span class="tag ${v[1]}">${esc(v[0])}</span></div><div class="d">${esc(r.why)}</div><div style="grid-column:1/-1">${fbButtons(r.id, r.project, `${v[0]}: ${byId(r.project) ? byId(r.project).name : r.project}`)}</div></div>`;
-    }).join('')}</div>`);
-  }
-
-  function blockVoices() {
-    const list = visible().filter(p => p.card && p.card.personality);
-    if (!list.length) return '';
-    return mod('voices', 'Die Projekte melden sich', 'Ein Satz pro Projekt, aus seiner Sicht', `<div class="quotes">${list.map(p => `<div class="quote">${plink(p.id)}<p>„${esc(p.card.personality)}“</p></div>`).join('')}</div>`);
+      return s ? ideaCard(s, [p.id], p.id, 'Aus dem Projekt') : '';
+    });
+    const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App'));
+    const cards = [...fromProjects, ...apps].filter(Boolean);
+    return cards.length ? mod('ideas', 'Ideen', 'Pro Projekt der interessanteste Vorschlag, dazu neue App-Ideen. Weitere stehen im Steckbrief', `<div class="cards3">${cards.join('')}</div>`) : '';
   }
 
   function missingCardsNote() {
@@ -215,15 +250,13 @@
     const n = visible().length;
     const greeting = (S.portfolio && S.portfolio.greeting) || `Guten Morgen. ${n} ${n === 1 ? 'Projekt' : 'Projekte'} im Blick.`;
     const fresh = isNew(S.portfolio_updated_at) ? '<span class="pill new">neu</span>' : '';
+    const aside = blockRecent() + blockPulse();
     return `<div class="handover">
       <div class="greet"><div class="kicker">Übergabe · ${n} ${n === 1 ? 'Projekt' : 'Projekte'} ${fresh}</div><h2>${esc(greeting)}</h2></div>
       ${missingCardsNote()}
-      ${blockFocus()}${blockWaiting()}${blockSafety()}${blockRecent()}
-      ${blockPortfolioList('patterns', 'patterns', 'Muster, die du vielleicht nicht siehst', 'Alle Projekte nebeneinander gelegt')}
-      ${blockProjectIdeas()}
-      ${blockPortfolioList('synergies', 'synergies', 'Querverbindungen', 'Was ein Projekt vom anderen übernehmen könnte')}
-      ${blockPortfolioList('newapps', 'new_apps', 'Neue App-Ideen', 'Abgeleitet aus dem, was du baust und was dir offenbar fehlt')}
-      ${blockPark()}${blockPulse()}${blockVoices()}
+      ${blockFocus()}${blockProjects()}
+      <div class="duo">${blockWaiting()}${aside ? `<div class="aside">${aside}</div>` : ''}</div>
+      ${blockAcross()}${blockIdeas()}
     </div>`;
   }
 
@@ -264,8 +297,8 @@
       <div class="kpi"><div class="v">${waiting}</div><div class="l">Entscheidungen offen</div></div></div>`;
     const grid = mod('cards', 'Projekte', 'Sortiert nach letzter Arbeit. Klick öffnet den Steckbrief', `<div class="grid">${byLastWork(list).map(card).join('')}</div>`);
     return `${mod('kpis', 'Lage auf einen Blick', null, kpis)}
-      <div class="board"><div>${grid}${blockPulse()}${blockRecent()}</div>
-      <aside class="side">${blockFocus()}${blockPortfolioList('patterns', 'patterns', 'Muster, die du vielleicht nicht siehst', null)}${blockPortfolioList('newapps', 'new_apps', 'Neue App-Ideen', null)}${blockPark()}</aside></div>`;
+      <div class="board"><div>${grid}${blockSafety()}${blockRecent()}${blockPulse()}</div>
+      <aside class="side">${blockFocus()}${blockWaiting(1)}${blockAcross()}</aside></div>`;
   }
 
   // ---------- drawer ----------
@@ -528,6 +561,7 @@
     const unhide = t.closest('[data-unhide]');
     if (unhide) { setPref('hidden_modules', [...hiddenMods()].filter(x => x !== unhide.dataset.unhide)); return; }
     if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
+    if (t.closest('[data-recent-all]')) { showAllRecent = !showAllRecent; render(); return; }
     const st = t.closest('[data-status]');
     if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return; }
     if (t.closest('[data-open-settings]')) { openPanel(); return; }
