@@ -313,7 +313,14 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     let (svc, clock) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
-    svc.put_card("demo", card(), false, false).unwrap();
+    let changes = json!([{"date": "2026-09-20", "title": "Davor"}, {"date": "2026-09-22", "title": "In der Woche"}]);
+    svc.put_card(
+        "demo",
+        card_with(json!({"recent_changes": changes})),
+        false,
+        false,
+    )
+    .unwrap();
     svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
         .unwrap();
     assert_eq!(svc.add_idea("  ").unwrap_err().code, "invalid_idea");
@@ -338,6 +345,11 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     assert_eq!(
         ctx["review_week"],
         json!({"week": "2026-W39", "from": "2026-09-21", "to": "2026-09-27", "due": true})
+    );
+    // the review gets the card changes from the review week's start on
+    assert_eq!(
+        ctx["projects"][0]["card"]["recent_changes"],
+        json!([{"date": "2026-09-22", "title": "In der Woche"}])
     );
 
     let check = json!({"idea": id, "verdict": "fold_in", "fits": ["demo"], "why": "Passt in demo.", "effort": "S"});
