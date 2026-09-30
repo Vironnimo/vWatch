@@ -55,7 +55,7 @@ const SHORT: Ty = Ty::Str { min: 1, max: 160, words: None };
 const TEXT: Ty = Ty::Str { min: 0, max: 600, words: None };
 /// Required short text of at most `n` words: the page has room for exactly that.
 const fn words(n: usize) -> Ty {
-    Ty::Str { min: 1, max: 160, words: Some(n) }
+    Ty::Str { min: 1, max: 600, words: Some(n) }
 }
 /// Optional text of at most `n` words; "one sentence" fields allow 30.
 const fn sentence(n: usize) -> Ty {
@@ -67,7 +67,7 @@ const WHY: Ty = Ty::Str { min: 1, max: 600, words: Some(25) };
 const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
 const SIZE: &[&str] = &["S", "M", "L"];
 /// A command, URL, shortcut or path the owner types or clicks.
-const COMMAND: Ty = Ty::Str { min: 1, max: 300, words: None };
+const COMMAND: Ty = Ty::Str { min: 1, max: 600, words: None };
 use Default::{Empty, Filled, Null, Required, Text};
 
 const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", SENTENCE, Text(""))];
@@ -87,12 +87,14 @@ const VISION: &[Field] = &[
 ];
 const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", SENTENCE, Text(""))];
 const RUN: &[Field] = &[f("what", words(6), Required), f("how", COMMAND, Required)];
-const PLACE: &[Field] = &[f("path", SHORT, Required), f("what", words(12), Required)];
-const READ: &[Field] = &[f("path", SHORT, Required), f("why", words(12), Required)];
+const PLACE: &[Field] = &[f("path", COMMAND, Required), f("what", words(12), Required)];
+const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Required)];
+const INSTALLED: &[Field] = &[f("version", words(4), Required), f("path", COMMAND, Required)];
 const TERM: &[Field] = &[f("term", words(4), Required), f("meaning", words(20), Required)];
 /// What someone returning after months needs to find their way around.
 const HANDBOOK: &[Field] = &[
     f("run", Ty::List(&Ty::Obj(RUN), Some(6)), Empty),
+    f("installed", Ty::Nullable(&Ty::Obj(INSTALLED)), Null),
     f("architecture", sentence(60), Text("")),
     f("places", Ty::List(&Ty::Obj(PLACE), Some(10)), Empty),
     f("read_first", Ty::List(&Ty::Obj(READ), Some(5)), Empty),

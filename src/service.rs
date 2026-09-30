@@ -166,6 +166,12 @@ fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
         .collect()
 }
 
+/// The top-level fields whose content differs from the previous version (all of them for a first version).
+fn changed_fields(previous: Option<&Value>, clean: &Value) -> Vec<String> {
+    let map = clean.as_object().into_iter().flatten();
+    map.filter(|(k, v)| previous.is_none_or(|p| p.get(k.as_str()) != Some(v))).map(|(k, _)| k.clone()).collect()
+}
+
 fn top_fields(doc: &Value) -> Vec<String> {
     doc.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default()
 }
@@ -679,15 +685,16 @@ impl Lookout {
             LookoutError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `lookout schema card` prints the full schema."))
         })?;
+        let changed = changed_fields(previous.as_ref().map(|c| &c.data), &clean);
         if dry_run {
             let items = dry_items(Kind::Card, &payload, &clean);
-            return Ok(json!({"saved": false, "dry_run": true, "project": id, "warnings": warnings, "items": items}));
+            return Ok(json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "warnings": warnings, "items": items}));
         }
         let stored = self.stored_facts(id)?;
         let parts = facts::basis(&stored.data);
         let basis = CardBasis { fingerprint: &stored.fingerprint, head: stored.data["head"].as_str(), ci: settled_ci(&stored.data), parts: &parts };
         let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
-        Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
+        Ok(json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}))
     }
 
     pub fn card(&self, id: &str) -> Result<Value> {

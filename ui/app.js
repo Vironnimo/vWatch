@@ -339,12 +339,13 @@
   // ---------- handbook ----------
   // how to start a project, how it is built, where things are: for coming back after a long time
   const HB_LISTS = ['run', 'places', 'read_first', 'needs', 'terms'];
-  const hbEmpty = h => !h || (!h.architecture && !HB_LISTS.some(k => (h[k] || []).length));
+  const hbEmpty = h => !h || (!h.architecture && !h.installed && !HB_LISTS.some(k => (h[k] || []).length));
   function hbParts(h) {
     h = h || {};
     const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
+    const inst = h.installed ? `<div class="hb-inst">Installiert: <b>${esc(h.installed.version)}</b> <span class="mono faint">${esc(h.installed.path)}</span></div>` : '';
     return {
-      run: (h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : '',
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><span class="w">${esc(r.what)}</span><code class="mono">${esc(r.how)}</code><button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono'),
       read: kv(h.read_first, 'path', 'why', 'mono'),

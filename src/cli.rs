@@ -195,7 +195,10 @@ fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
                 .hint("Pass --file <path>, --file - for stdin, or --json '<object>'."))
         }
     };
-    serde_json::from_str(&text).map_err(|e| LookoutError::new("invalid_json", format!("{origin} is not valid JSON: {e}.")))
+    serde_json::from_str(&text).map_err(|e| {
+        LookoutError::new("invalid_json", format!("{origin} is not valid JSON: {e}."))
+            .hint("Write the JSON to a file with a file-writing tool rather than a shell heredoc, which can change backslashes, and use forward slashes in paths.")
+    })
 }
 
 fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {

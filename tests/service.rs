@@ -76,7 +76,8 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
     let first = svc.put_card("demo", card_with(json!({"features": ["Suche"]})), false, false).unwrap();
     let sid = first["items"][0]["id"].as_str().unwrap().to_owned();
 
-    svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap();
+    let saved = svc.put_card("demo", json!({"headline": "Neu"}), true, false).unwrap();
+    assert_eq!(saved["changed_fields"], json!(["headline"]));
     let current = &svc.card("demo").unwrap()["card"];
     assert_eq!((current["headline"].clone(), current["features"].clone()), (json!("Neu"), json!(["Suche"])));
     assert_eq!(current["suggestions"][0]["id"], json!(sid));

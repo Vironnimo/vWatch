@@ -27,7 +27,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 
 `one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Lookout checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `lookout schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
 
-Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12; `reentry.next_step` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. In `handbook`: `run.what` 6, `architecture` 60, `places.what` and `read_first.why` 12, `needs` 15 each, `terms.term` 4 and `terms.meaning` 20. `source`, `evidence`, paths and commands have no word limit.
+Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12; `reentry.next_step` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. In `handbook`: `run.what` 6, `architecture` 60, `places.what` and `read_first.why` 12, `needs` 15 each, `terms.term` 4 and `terms.meaning` 20. `source`, `evidence`, paths and commands have no word limit. Every text has at most 600 characters.
 
 **Each finding has one home.** Unfinished work (uncommitted or unpushed changes, a branch, a half-done plan) goes into `open_ends`; a risk or rot that is not unfinished work into `health_notes`; a decision into `waiting_on_you`; a proposal for new work into `suggestions`. The obvious fix of a finding (commit it, push it, merge it) is not a separate suggestion, and the step named in `reentry` never reappears as one. `headline` and `reentry` may point to the most important finding in their own words; do not repeat it in further fields.
 
@@ -47,13 +47,16 @@ Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8
 - `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions. If the previous card has no `decisions`, check the docs for them; most projects have none, and then the list stays empty.
 - `suggestions` (up to 4; fewer when fewer findings deserve one): see below.
 - `cross_project_hints`: things that look reusable in, or overlap with, other kinds of projects; one sentence each. The portfolio brief builds on them.
-- `handbook`: what the owner needs to find their way around after months away. It is opened rarely, so make it complete and exact; change it only when the project's commands, structure or docs change (with `--merge` it carries over).
-  - `run` (up to 6): how to start, open, test or release the project, each with `what` (for example "Entwicklung starten", "Installierte App", "Tests") and `how`: the exact command with the folder it runs in, a URL, or a Start-menu shortcut. Take every command from the project's own files; never guess one.
+- `handbook`: what the owner needs to find their way around after months away. It describes the project as it is on disk, uncommitted work included. It is opened rarely, so make it complete and exact; change it only when the project's commands, structure or docs change. With `--merge` it carries over; when you change part of it, send the whole `handbook`, because a field you send replaces its previous version completely.
+  - `run` (up to 6): how to start, open, test or release the project, each with `what` (for example "Entwicklung starten", "Installierte App", "Tests") and `how`: a URL, a Start-menu shortcut, or the exact command with the folder it runs in, for example "`npm run dev` (in `webui/`)". Take every command from the project's own files, including test names in the source; never invent one. Write `<placeholders>` for values that depend on the situation, such as a free port. When the project is installed, one entry says how to open the installed app.
+  - `installed`: the installed build's `version` and `path`, or null when the project is not installed on this machine.
   - `architecture` (2-3 sentences): the main parts and how they work together.
-  - `places` (3-10): key folders and files, each with `path` (relative to the repository, absolute for data outside it) and `what`. Include where its data and configuration live.
-  - `read_first` (1-5): the documents to read first when coming back, each with `path` and `why`.
-  - `needs`: what must be installed or available: runtimes, services, hardware, and API keys by name and where they are configured, never their values.
+  - `places` (3-10): key folders and files (a folder or a pattern such as `src/*_tests.rs` is fine), each with `path` and `what`. Include where its data and configuration live.
+  - `read_first` (1-5): the documents to read first when coming back, each with `path` and `why`. The project's own notes count, git-ignored ones too.
+  - `needs` (up to 8): what must be installed or available: runtimes, services, hardware, and API keys by name and where they are configured, never their values.
   - `terms` (up to 8): project-specific words the owner would otherwise forget, each with `term` and `meaning`. No standard vocabulary.
+
+  Paths are relative to the repository; outside it, write them with environment variables (`%LOCALAPPDATA%/Gusto`, `%APPDATA%/…`, `~/.vbot`) so the card holds no user name. Use forward slashes in paths and commands: Windows understands them, and they need no escaping in JSON.
 
 ## Suggestions
 
