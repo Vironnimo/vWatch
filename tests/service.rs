@@ -59,6 +59,10 @@ fn invalid_cards_are_refused_with_field_paths() {
     let empty_title = json!({"suggestions": [{"type": "feature", "title": "", "why": "w", "effort": "S"}]});
     let err = svc.put_card("demo", card_with(empty_title), false).unwrap_err();
     assert!(err.message.contains("suggestions[0].title"), "{}", err.message);
+    // the word limits the page is designed for; dashes do not count as words
+    let long = json!({"headline": "Eins zwei drei vier fünf sechs sieben acht neun zehn – elf"});
+    let err = svc.put_card("demo", card_with(long), false).unwrap_err();
+    assert!(err.message.contains("headline: Text should have at most 10 words, has 11"), "{}", err.message);
     let saved = svc.put_card("demo", card_with(json!({"colour": "blue", "vision": {"statement": "Ziel", "size": 3}})), false).unwrap();
     assert_eq!(saved["warnings"], json!(["ignored unknown field: colour", "ignored unknown field: vision.size"]));
 }
@@ -72,6 +76,8 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     let mut brief = json!({"greeting": "Moin", "focus": [{"project": "ghost", "title": "x", "why": "y", "effort": "1h"}]});
     let err = svc.put_portfolio(brief.clone(), false).unwrap_err();
     assert_eq!(err.code, "unknown_project");
+    let four = json!({"greeting": "Moin", "focus": vec![brief["focus"][0].clone(); 4]});
+    assert!(svc.put_portfolio(four, false).unwrap_err().message.contains("focus: List should have at most 3 items"));
     assert!(err.hint.unwrap().contains("demo"));
 
     brief["focus"][0]["project"] = json!("demo");
@@ -122,6 +128,8 @@ fn status_and_registration_rules() {
     assert_eq!(batch["failed"][0]["error"]["code"], "already_registered");
 
     svc.put_card("demo", card(), false).unwrap();
+    // versions count per project
+    assert_eq!(svc.put_card("other-app", card(), false).unwrap()["version"], 1);
     clock.advance(Duration::minutes(1));
     svc.set_status("demo", "parked", Some("wartet auf Key")).unwrap();
     let due = svc.due(14, true).unwrap();
@@ -149,4 +157,31 @@ fn owner_choices_show_up_in_the_window_state() {
     assert_eq!((p["card"]["headline"].as_str(), p["facts"]["is_git"].as_bool()), (Some("Alles ruhig"), Some(true)));
     assert_eq!(state["feedback"][&sid]["value"], "later");
     assert_eq!(state["prefs"], json!({"style": "handover", "hidden_modules": ["pulse"]}));
+}
+
+#[test]
+fn a_ci_turning_red_or_green_makes_the_card_due() {
+    use std::sync::{Arc, Mutex};
+    let tmp = tempfile::tempdir().unwrap();
+    let ci = Arc::new(Mutex::new("green"));
+    let seen = ci.clone();
+    let collect = move |path: &str, today, _ci| {
+        let mut f = lookout::facts::collect(path, today, false);
+        f["ci"] = json!({"state": *seen.lock().unwrap()});
+        f
+    };
+    let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z").unwrap().to_utc();
+    let store = lookout::store::Store::open(&tmp.path().join("lookout.db")).unwrap();
+    let svc = lookout::Lookout::with_parts(store, Box::new(move || now), Box::new(collect));
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None).unwrap();
+    svc.put_card("demo", card(), false).unwrap();
+    let reasons = |svc: &lookout::Lookout| svc.due(14, true).unwrap()["projects"].as_array().unwrap().iter().map(|p| p["reason"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+
+    // a lookup that settles nothing (running, unknown) never makes a card due
+    *ci.lock().unwrap() = "running";
+    assert!(reasons(&svc).is_empty());
+    *ci.lock().unwrap() = "red";
+    assert_eq!(reasons(&svc), ["ci_changed"]);
+    svc.put_card("demo", card(), false).unwrap();
+    assert!(reasons(&svc).is_empty());
 }

@@ -132,6 +132,12 @@ fn find_repos(dir: &Path, depth: usize) -> Vec<PathBuf> {
     repos
 }
 
+/// A CI state firm enough to compare: `green` or `red`. Running, unknown or skipped
+/// lookups say nothing about whether a card's CI statement still holds.
+fn settled_ci(facts: &Value) -> Option<&str> {
+    facts["ci"]["state"].as_str().filter(|s| matches!(*s, "green" | "red"))
+}
+
 fn resolve(path: &str) -> PathBuf {
     let expanded = match path.strip_prefix('~') {
         Some(rest) => {
@@ -420,6 +426,9 @@ impl Lookout {
             let reason = match &card {
                 None => Some("no_card"),
                 Some(c) if stored.as_ref().is_some_and(|s| s.fingerprint != c.fingerprint) => Some("changed"),
+                Some(c) if stored.as_ref().and_then(|s| settled_ci(&s.data)).is_some_and(|now| c.ci.as_deref().is_some_and(|then| then != now)) => {
+                    Some("ci_changed")
+                }
                 Some(c) if p.status_changed_at.as_ref().is_some_and(|at| *at > c.created_at) => Some("status_changed"),
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
                 Some(_) => None,
@@ -511,7 +520,7 @@ impl Lookout {
                 .hint("Fix the listed fields and send the card again. `lookout schema card` prints the full schema.")
         })?;
         let stored = self.stored_facts(id)?;
-        let version = self.store.add_card(id, &self.now(), &stored.fingerprint, stored.data["head"].as_str(), &clean)?;
+        let version = self.store.add_card(id, &self.now(), &stored.fingerprint, stored.data["head"].as_str(), settled_ci(&stored.data), &clean)?;
         let rated: Vec<Value> = clean["suggestions"].as_array().into_iter().flatten().map(|s| pick(s, &["id", "title"])).collect();
         Ok(json!({"saved": true, "project": id, "version": version, "warnings": warnings, "rated_items": rated}))
     }

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS facts(
   project_id TEXT PRIMARY KEY, collected_at TEXT NOT NULL, fingerprint TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cards(
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, created_at TEXT NOT NULL,
-  fingerprint TEXT NOT NULL, head TEXT, data TEXT NOT NULL);
+  fingerprint TEXT NOT NULL, head TEXT, data TEXT NOT NULL, ci TEXT);
 CREATE INDEX IF NOT EXISTS cards_by_project ON cards(project_id, id);
 CREATE TABLE IF NOT EXISTS portfolio(
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, data TEXT NOT NULL);
@@ -46,10 +46,13 @@ pub struct StoredFacts {
 }
 
 pub struct StoredCard {
+    /// Counts this project's cards: its first card is version 1.
     pub version: i64,
     pub created_at: String,
     pub fingerprint: String,
     pub head: Option<String>,
+    /// The CI state (`green` or `red`) the card was written against, if it was known.
+    pub ci: Option<String>,
     pub data: Value,
 }
 
@@ -98,6 +101,11 @@ impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let db = open(path)?;
         db.execute_batch(SCHEMA)?;
+        // Databases from before cards remembered their CI state.
+        let has_ci: bool = db.query_row("SELECT COUNT(*) FROM pragma_table_info('cards') WHERE name = 'ci'", [], |r| r.get(0))?;
+        if !has_ci {
+            db.execute_batch("ALTER TABLE cards ADD COLUMN ci TEXT")?;
+        }
         Ok(Store { db: Mutex::new(db) })
     }
 
@@ -162,20 +170,20 @@ impl Store {
     }
 
     // cards
-    pub fn add_card(&self, id: &str, at: &str, fingerprint: &str, head: Option<&str>, data: &Value) -> Result<i64> {
+    pub fn add_card(&self, id: &str, at: &str, fingerprint: &str, head: Option<&str>, ci: Option<&str>, data: &Value) -> Result<i64> {
         self.with(|db| {
             db.execute(
-                "INSERT INTO cards(project_id, created_at, fingerprint, head, data) VALUES(?1, ?2, ?3, ?4, ?5)",
-                params![id, at, fingerprint, head, data.to_string()],
+                "INSERT INTO cards(project_id, created_at, fingerprint, head, ci, data) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, at, fingerprint, head, ci, data.to_string()],
             )?;
-            Ok(db.last_insert_rowid())
+            db.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1", [id], |r| r.get(0))
         })
     }
 
     pub fn latest_card(&self, id: &str) -> Result<Option<StoredCard>> {
         self.with(|db| {
-            db.query_row("SELECT id, created_at, fingerprint, head, data FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
-                Ok(StoredCard { version: r.get(0)?, created_at: r.get(1)?, fingerprint: r.get(2)?, head: r.get(3)?, data: json(r.get(4)?) })
+            db.query_row("SELECT (SELECT COUNT(*) FROM cards WHERE project_id = ?1), created_at, fingerprint, head, ci, data FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
+                Ok(StoredCard { version: r.get(0)?, created_at: r.get(1)?, fingerprint: r.get(2)?, head: r.get(3)?, ci: r.get(4)?, data: json(r.get(5)?) })
             })
             .optional()
         })

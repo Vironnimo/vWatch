@@ -265,14 +265,19 @@ fn github_slug(url: &str) -> Option<String> {
     (parts.next().is_none() && !owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
 }
 
+/// CI state of the default branch (the remote's HEAD, else the checked-out branch):
+/// the newest run of every workflow counts, and the worst of them decides.
 fn ci(repo: &Path, remotes: &[(String, String)], branch: Option<&str>) -> Value {
     let mut ordered: Vec<&(String, String)> = remotes.iter().collect();
     ordered.sort_by_key(|(name, _)| name != "origin");
-    let Some(slug) = ordered.iter().find_map(|(_, url)| github_slug(url)) else {
+    let Some((remote, slug)) = ordered.iter().find_map(|(name, url)| github_slug(url).map(|s| (name.as_str(), s))) else {
         return json!({"state": "none"});
     };
-    let mut args = vec!["run", "list", "-R", slug.as_str(), "-L", "1", "--json", "status,conclusion,createdAt,displayTitle,workflowName,url"];
-    if let Some(b) = branch.filter(|b| *b != "HEAD") {
+    let default_branch = git(repo, &["symbolic-ref", "--short", &format!("refs/remotes/{remote}/HEAD")])
+        .and_then(|r| r.trim().strip_prefix(&format!("{remote}/")).map(str::to_owned))
+        .or_else(|| branch.filter(|b| *b != "HEAD").map(str::to_owned));
+    let mut args = vec!["run", "list", "-R", slug.as_str(), "-L", "40", "--json", "status,conclusion,createdAt,displayTitle,workflowName,url,event"];
+    if let Some(b) = default_branch.as_deref() {
         args.splice(4..4, ["-b", b]);
     }
     let (ok, out) = run("gh", &args, repo, GH_TIMEOUT);
@@ -283,21 +288,43 @@ fn ci(repo: &Path, remotes: &[(String, String)], branch: Option<&str>) -> Value 
     let Ok(Value::Array(runs)) = serde_json::from_str::<Value>(&out) else {
         return json!({"state": "unknown", "repo": slug});
     };
-    let Some(run) = runs.first() else {
-        return json!({"state": "none", "repo": slug});
-    };
-    let state = if run["status"] != "completed" {
-        "running"
-    } else {
-        match run["conclusion"].as_str() {
-            Some("success") => "green",
-            Some("failure" | "cancelled" | "timed_out" | "startup_failure") => "red",
-            _ => "unknown",
+    let mut result = ci_state(&runs);
+    result["repo"] = json!(slug);
+    result["branch"] = json!(default_branch);
+    result
+}
+
+/// Newest run per workflow, newest first as `gh run list` returns them; the worst state decides.
+/// Dependabot's own update jobs (event "dynamic") say nothing about the code and are skipped.
+fn ci_state(runs: &[Value]) -> Value {
+    let state_of = |run: &Value| {
+        if run["status"] != "completed" {
+            "running"
+        } else {
+            match run["conclusion"].as_str() {
+                Some("success") => "green",
+                Some("failure" | "cancelled" | "timed_out" | "startup_failure") => "red",
+                _ => "unknown",
+            }
         }
     };
+    let mut seen: Vec<&str> = Vec::new();
+    let mut latest: Vec<(&Value, &str)> = Vec::new();
+    for run in runs.iter().filter(|r| r["event"] != "dynamic") {
+        let workflow = run["workflowName"].as_str().unwrap_or("");
+        if !seen.contains(&workflow) {
+            seen.push(workflow);
+            latest.push((run, state_of(run)));
+        }
+    }
+    let rank = |state: &str| ["red", "running", "unknown", "green"].iter().position(|s| *s == state).unwrap_or(2);
+    let Some(&(run, state)) = latest.iter().min_by_key(|(_, state)| rank(state)) else {
+        return json!({"state": "none"});
+    };
+    let failing: Vec<&str> = latest.iter().filter(|(_, s)| *s == "red").map(|(r, _)| r["workflowName"].as_str().unwrap_or("")).collect();
     json!({
-        "state": state, "repo": slug, "workflow": run["workflowName"], "title": run["displayTitle"],
-        "at": run["createdAt"], "url": run["url"],
+        "state": state, "workflow": run["workflowName"], "title": run["displayTitle"],
+        "at": run["createdAt"], "url": run["url"], "failing": failing,
     })
 }
 
@@ -388,5 +415,22 @@ mod tests {
         assert_eq!(github_slug("git@github.com:owner/repo.git").as_deref(), Some("owner/repo"));
         assert_eq!(github_slug("https://github.com/owner/repo/").as_deref(), Some("owner/repo"));
         assert_eq!(github_slug("https://gitlab.com/owner/repo"), None);
+    }
+
+    #[test]
+    fn ci_state_is_the_worst_newest_run_per_workflow() {
+        let r = |wf: &str, status: &str, conclusion: &str, event: &str| json!({"workflowName": wf, "status": status, "conclusion": conclusion, "event": event, "displayTitle": wf});
+        let runs = [
+            r("Dependabot Updates", "completed", "failure", "dynamic"),
+            r("docs", "completed", "success", "push"),
+            r("quality", "completed", "failure", "push"),
+            r("docs", "completed", "failure", "push"), // older run, superseded
+        ];
+        let ci = ci_state(&runs);
+        assert_eq!((ci["state"].as_str(), ci["workflow"].as_str()), (Some("red"), Some("quality")));
+        assert_eq!(ci["failing"], json!(["quality"]));
+        assert_eq!(ci_state(&runs[..2])["state"], "green");
+        assert_eq!(ci_state(&[r("build", "in_progress", "", "push")])["state"], "running");
+        assert_eq!(ci_state(&runs[..1])["state"], "none");
     }
 }

@@ -20,7 +20,8 @@ pub enum Kind {
 }
 
 enum Ty {
-    Str { min: usize, max: usize },
+    /// Text of `min..=max` characters and, when set, at most `words` words.
+    Str { min: usize, max: usize, words: Option<usize> },
     Date,
     Enum(&'static [&'static str]),
     Int { min: i64, max: i64 },
@@ -49,46 +50,52 @@ const fn f(name: &'static str, ty: Ty, default: Default) -> Field {
     Field { name, ty, default }
 }
 
-const SHORT: Ty = Ty::Str { min: 1, max: 160 };
-const TEXT: Ty = Ty::Str { min: 0, max: 600 };
+const SHORT: Ty = Ty::Str { min: 1, max: 160, words: None };
+const TEXT: Ty = Ty::Str { min: 0, max: 600, words: None };
+/// Required short text of at most `n` words: the page has room for exactly that.
+const fn words(n: usize) -> Ty {
+    Ty::Str { min: 1, max: 160, words: Some(n) }
+}
+/// A one-sentence reason of at most 25 words.
+const WHY: Ty = Ty::Str { min: 1, max: 600, words: Some(25) };
 const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
 const SIZE: &[&str] = &["S", "M", "L"];
 use Default::{Empty, Filled, Null, Required, Text};
 
-const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", SHORT, Required), f("detail", TEXT, Text(""))];
+const CHANGE: &[Field] = &[f("date", Ty::Date, Required), f("title", words(8), Required), f("detail", TEXT, Text(""))];
 const MILESTONE: &[Field] = &[f("date", Ty::Date, Required), f("title", SHORT, Required)];
 const OPEN_END: &[Field] = &[
     f("kind", Ty::Enum(&["worktree", "branch", "uncommitted", "flagged", "todo", "plan", "other"]), Text("other")),
-    f("title", SHORT, Required),
+    f("title", words(10), Required),
     f("detail", TEXT, Text("")),
     f("source", TEXT, Text("")),
     f("age_days", Ty::Nullable(&Ty::Int { min: 0, max: 100_000 }), Null),
 ];
-const QUESTION: &[Field] = &[f("title", SHORT, Required), f("source", TEXT, Text(""))];
+const QUESTION: &[Field] = &[f("title", words(12), Required), f("source", TEXT, Text(""))];
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&TEXT), Null),
     f("progress_note", Ty::Nullable(&TEXT), Null),
     f("progress_pct", Ty::Nullable(&Ty::Int { min: 0, max: 100 }), Null),
 ];
-const REENTRY: &[Field] = &[f("next_step", SHORT, Required), f("effort", Ty::Enum(EFFORT), Required), f("why", TEXT, Text(""))];
+const REENTRY: &[Field] = &[f("next_step", words(20), Required), f("effort", Ty::Enum(EFFORT), Required), f("why", TEXT, Text(""))];
 const SUGGESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("type", Ty::Enum(&["next", "feature", "cleanup", "park"]), Required),
-    f("title", SHORT, Required),
-    f("why", TEXT, Required),
+    f("title", words(8), Required),
+    f("why", WHY, Required),
     f("evidence", TEXT, Text("")),
     f("effort", Ty::Enum(SIZE), Required),
 ];
 const CARD: &[Field] = &[
-    f("one_liner", SHORT, Required),
+    f("one_liner", words(15), Required),
     f("stack", TEXT, Text("")),
     f("phase", Ty::Enum(&["active", "cooling", "dormant", "maintenance", "done"]), Required),
     f("phase_evidence", TEXT, Text("")),
-    f("headline", SHORT, Required),
+    f("headline", words(10), Required),
     f("personality", TEXT, Text("")),
     f("recent_changes", Ty::List(&Ty::Obj(CHANGE), None), Empty),
     f("milestones", Ty::List(&Ty::Obj(MILESTONE), None), Empty),
-    f("features", Ty::List(&SHORT, None), Empty),
+    f("features", Ty::List(&words(8), None), Empty),
     f("open_ends", Ty::List(&Ty::Obj(OPEN_END), None), Empty),
     f("waiting_on_you", Ty::List(&Ty::Obj(QUESTION), None), Empty),
     f("vision", Ty::Obj(VISION), Filled),
@@ -100,8 +107,8 @@ const CARD: &[Field] = &[
 
 const FOCUS: &[Field] = &[
     f("project", SHORT, Required),
-    f("title", SHORT, Required),
-    f("why", TEXT, Required),
+    f("title", words(8), Required),
+    f("why", WHY, Required),
     f("effort", Ty::Enum(EFFORT), Required),
 ];
 const PATTERN: &[Field] = &[
@@ -135,7 +142,7 @@ const VERDICT: &[Field] = &[
 ];
 const PORTFOLIO: &[Field] = &[
     f("greeting", TEXT, Required),
-    f("focus", Ty::List(&Ty::Obj(FOCUS), Some(5)), Empty),
+    f("focus", Ty::List(&Ty::Obj(FOCUS), Some(3)), Empty),
     f("patterns", Ty::List(&Ty::Obj(PATTERN), None), Empty),
     f("synergies", Ty::List(&Ty::Obj(SYNERGY), None), Empty),
     f("new_apps", Ty::List(&Ty::Obj(APP_IDEA), None), Empty),
@@ -244,10 +251,13 @@ fn check(ty: &Ty, value: &Value, path: &str, problems: &mut Vec<String>, unknown
         Ty::Nullable(inner) => {
             if value.is_null() { Some(Value::Null) } else { check(inner, value, path, problems, unknown) }
         }
-        Ty::Str { min, max } => match value.as_str() {
+        Ty::Str { min, max, words } => match value.as_str() {
             None => fail("Input should be a string".into()),
             Some(s) if s.chars().count() < *min => fail(format!("String should have at least {min} character")),
             Some(s) if s.chars().count() > *max => fail(format!("String should have at most {max} characters")),
+            Some(s) if words.is_some_and(|w| word_count(s) > w) => {
+                fail(format!("Text should have at most {} words, has {}", words.unwrap_or_default(), word_count(s)))
+            }
             Some(s) => Some(json!(s)),
         },
         Ty::Date => match value.as_str() {
@@ -296,6 +306,10 @@ fn check(ty: &Ty, value: &Value, path: &str, problems: &mut Vec<String>, unknown
     }
 }
 
+fn word_count(s: &str) -> usize {
+    s.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
+}
+
 fn valid_item_id(s: &str) -> bool {
     let b = s.as_bytes();
     (3..=64).contains(&b.len())
@@ -338,10 +352,13 @@ fn obj_schema(fields: &[Field]) -> Value {
 
 fn ty_schema(ty: &Ty) -> Value {
     match ty {
-        Ty::Str { min, max } => {
+        Ty::Str { min, max, words } => {
             let mut s = json!({"type": "string", "maxLength": max});
             if *min > 0 {
                 s["minLength"] = json!(min);
+            }
+            if let Some(w) = words {
+                s["description"] = json!(format!("At most {w} words."));
             }
             s
         }
