@@ -137,6 +137,94 @@ fn fingerprint_changes_with_new_work() {
         facts::fingerprint(&facts::collect(path, today(), false)),
         before
     );
+    let edited = facts::fingerprint(&facts::collect(path, today(), false));
+    let modified = std::fs::metadata(repo.join("f0.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::write(repo.join("f0.txt"), "newest\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(repo.join("f0.txt"))
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_ne!(
+        facts::fingerprint(&facts::collect(path, today(), false)),
+        edited,
+        "changing an already dirty file must count even when line counts stay equal"
+    );
+}
+
+#[test]
+fn facts_count_staged_and_unterminated_lines_before_the_first_commit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(tmp.path(), "empty", &[]);
+    std::fs::write(repo.join("staged.txt"), "one\ntwo").unwrap();
+    common::git(&repo, &["add", "staged.txt"]);
+    std::fs::write(repo.join("untracked.txt"), "three").unwrap();
+    let f = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(f["dirty"]["files"], 2);
+    assert_eq!(f["dirty"]["lines_added"], 3);
+    assert_eq!(f["dirty"]["lines_removed"], 0);
+    let subdir = repo.join("subdir");
+    std::fs::create_dir(&subdir).unwrap();
+    let nested = facts::collect(subdir.to_str().unwrap(), today(), false);
+    assert_eq!(
+        nested["dirty"], f["dirty"],
+        "repository-relative paths stay valid when registered from a subdirectory"
+    );
+}
+
+#[test]
+fn measuring_a_repository_never_refreshes_its_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(tmp.path());
+    let index = repo.join(".git/index");
+    let before = std::fs::read(&index).unwrap();
+    let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(repo.join("f0.txt"))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let f = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(f["dirty"]["files"], 0);
+    assert_eq!(std::fs::read(index).unwrap(), before);
+}
+
+#[test]
+fn linked_checkout_excludes_itself_and_tracks_dirty_work_in_other_checkouts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(tmp.path());
+    let wt = tmp.path().join("linked");
+    common::git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature",
+            wt.to_str().unwrap(),
+        ],
+    );
+    let linked_path = wt.to_str().unwrap();
+    let before = facts::collect(linked_path, today(), false);
+    assert_eq!(before["worktrees"]["count"], 1);
+    assert_eq!(before["worktrees"]["items"][0]["branch"], "main");
+    std::fs::write(repo.join("f0.txt"), "other checkout\n").unwrap();
+    let after = facts::collect(linked_path, today(), false);
+    assert_ne!(facts::fingerprint(&before), facts::fingerprint(&after));
+    assert_eq!(after["night"]["uncommitted_touched"], 1);
+    assert_eq!(after["collisions"], serde_json::json!([]));
+    let second_before = facts::fingerprint(&after);
+    std::fs::write(repo.join("f0.txt"), "next variation\n").unwrap();
+    assert_ne!(
+        second_before,
+        facts::fingerprint(&facts::collect(linked_path, today(), false))
+    );
 }
 
 #[test]
@@ -152,6 +240,15 @@ fn non_repositories_report_why() {
         facts::collect(tmp.path().join("gone").to_str().unwrap(), today(), false)["error"],
         "path_missing"
     );
+    let broken = common::demo_repo(tmp.path());
+    std::fs::write(broken.join(".git/index"), "invalid index").unwrap();
+    let f = facts::collect(broken.to_str().unwrap(), today(), false);
+    assert_eq!(
+        f["ok"], false,
+        "a failed git status must never appear clean"
+    );
+    assert_eq!(f["is_git"], true);
+    assert_eq!(f["error"], "git_status_failed");
 }
 
 #[test]

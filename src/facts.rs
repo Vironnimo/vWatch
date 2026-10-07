@@ -18,6 +18,7 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_UNTRACKED_FILES: usize = 20_000;
 const MAX_UNTRACKED_BYTES: u64 = 2_000_000;
+const MAX_FINGERPRINT_BYTES: u64 = 20_000_000;
 /// Folders a build or package manager recreates; their size is space the owner could free.
 const REBUILDABLE: &[&str] = &[
     "target",
@@ -63,11 +64,13 @@ fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -> (bool, St
         Err(e) => return (false, e.to_string()),
     };
     let reader = |mut pipe: Box<dyn Read + Send>| {
+        let (send, receive) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut buf = Vec::new();
             let _ = pipe.read_to_end(&mut buf);
-            buf
-        })
+            let _ = send.send(buf);
+        });
+        receive
     };
     let out = reader(Box::new(child.stdout.take().expect("piped stdout")));
     let err = reader(Box::new(child.stderr.take().expect("piped stderr")));
@@ -76,26 +79,67 @@ fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -> (bool, St
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
+            _ => break None,
         }
     };
-    let out = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
-    let err = String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned();
-    match status {
-        Some(s) if s.success() => (true, out),
-        Some(_) => (false, err),
-        None => (false, format!("{program} timed out")),
+    // A hook or other descendant may keep the pipes open after its parent exits.
+    // The deadline therefore covers both the process and its output readers.
+    if let Some(status) = status {
+        if let (Ok(out), Ok(err)) = (
+            out.recv_timeout(deadline.saturating_duration_since(Instant::now())),
+            err.recv_timeout(deadline.saturating_duration_since(Instant::now())),
+        ) {
+            return if status.success() {
+                (true, String::from_utf8_lossy(&out).into_owned())
+            } else {
+                (false, String::from_utf8_lossy(&err).into_owned())
+            };
+        }
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Try the process tree before killing only the parent, so Git's helpers
+        // do not outlive a timed-out measurement. Cleanup has its own short budget.
+        if let Ok(mut killer) = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+        {
+            let cleanup_deadline = Instant::now() + Duration::from_millis(250);
+            loop {
+                match killer.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if Instant::now() < cleanup_deadline => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    _ => {
+                        let _ = killer.kill();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if child.kill().is_ok() {
+        #[cfg(windows)]
+        let _ = child.try_wait();
+        #[cfg(not(windows))]
+        let _ = child.wait();
+    }
+    (false, format!("{program} timed out"))
 }
 
 fn git(repo: &Path, args: &[&str]) -> Option<String> {
     let mut full = vec![
+        "--no-optional-locks",
         "-c",
         "core.quotepath=off",
+        "-c",
+        "diff.autoRefreshIndex=false",
         "-c",
         "i18n.logOutputEncoding=utf-8",
     ];
@@ -222,6 +266,10 @@ fn status_paths(dir: &Path) -> Option<Vec<String>> {
         dir,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     )?;
+    Some(parse_status_paths(&raw))
+}
+
+fn parse_status_paths(raw: &str) -> Vec<String> {
     let tokens: Vec<&str> = raw.split('\0').collect();
     let mut out = Vec::new();
     let mut i = 0;
@@ -236,15 +284,52 @@ fn status_paths(dir: &Path) -> Option<Vec<String>> {
         }
         out.push(token[3..].to_owned());
     }
-    Some(out)
+    out
 }
 
-fn dirty(repo: &Path, has_head: bool) -> Dirty {
+/// Notice edits even when file and line counts stay the same. Content reads are bounded;
+/// larger files still contribute their full size and high-resolution modification time.
+fn dirty_fingerprint<'a>(repo: &Path, raw: &str, paths: impl Iterator<Item = &'a str>) -> Value {
+    if raw.is_empty() {
+        return Value::Null;
+    }
+    let mut hash = Sha1::new();
+    hash.update(raw.as_bytes());
+    let mut remaining = MAX_FINGERPRINT_BYTES;
+    for path in paths {
+        hash.update(path.as_bytes());
+        let full = repo.join(path);
+        if let Ok(meta) = std::fs::symlink_metadata(&full) {
+            hash.update(meta.len().to_le_bytes());
+            if let Ok(at) = meta.modified() {
+                let at = DateTime::<Utc>::from(at);
+                hash.update(at.timestamp().to_le_bytes());
+                hash.update(at.timestamp_subsec_nanos().to_le_bytes());
+            }
+            if meta.is_symlink() {
+                if let Ok(target) = std::fs::read_link(&full) {
+                    hash.update(target.to_string_lossy().as_bytes());
+                }
+            } else if meta.is_file() && meta.len() <= MAX_UNTRACKED_BYTES && meta.len() <= remaining
+            {
+                if let Ok(file) = std::fs::File::open(full) {
+                    let mut data = Vec::new();
+                    if file.take(remaining).read_to_end(&mut data).is_ok() {
+                        remaining -= data.len() as u64;
+                        hash.update(data);
+                    }
+                }
+            }
+        }
+    }
+    json!(format!("{:x}", hash.finalize()))
+}
+
+fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     let raw = git(
         repo,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )
-    .unwrap_or_default();
+    )?;
     let tokens: Vec<&str> = raw.split('\0').collect();
     let (mut modified, mut untracked, mut deleted) = (0u64, 0u64, 0u64);
     let mut paths: Vec<&str> = Vec::new();
@@ -272,10 +357,28 @@ fn dirty(repo: &Path, has_head: bool) -> Dirty {
     }
 
     let (mut added, mut removed) = (0u64, 0u64);
-    if has_head {
-        for line in git(repo, &["diff", "HEAD", "--numstat"])
+    // An unborn branch has no HEAD, but its index still contains staged additions.
+    let baseline = if has_head {
+        "HEAD".to_owned()
+    } else {
+        git(repo, &["hash-object", "-t", "tree", "--stdin"])
             .unwrap_or_default()
-            .lines()
+            .trim()
+            .to_owned()
+    };
+    if !baseline.is_empty() {
+        for line in git(
+            repo,
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                &baseline,
+                "--numstat",
+            ],
+        )
+        .unwrap_or_default()
+        .lines()
         {
             let parts: Vec<&str> = line.split('\t').collect();
             if let (Some(Ok(a)), Some(Ok(r))) = (
@@ -298,6 +401,7 @@ fn dirty(repo: &Path, has_head: bool) -> Dirty {
         if let Ok(data) = std::fs::read(&full) {
             if !data.contains(&0) {
                 added += data.iter().filter(|b| **b == b'\n').count() as u64;
+                added += u64::from(!data.is_empty() && !data.ends_with(b"\n"));
             }
         }
     }
@@ -328,16 +432,17 @@ fn dirty(repo: &Path, has_head: bool) -> Dirty {
         _ if mtimes.is_empty() => (None, None),
         _ => (last_commit, last_commit),
     };
-    Dirty {
+    Some(Dirty {
         value: json!({
             "files": paths.len(), "modified": modified, "untracked": untracked, "deleted": deleted,
             "lines_added": added, "lines_removed": removed,
             "oldest_change": oldest.map(iso), "newest_change": newest.map(iso),
+            "fingerprint": dirty_fingerprint(repo, &raw, paths.iter().copied()),
         }),
         newest,
         paths: paths.iter().map(|p| (*p).to_owned()).collect(),
         mtimes,
-    }
+    })
 }
 
 fn worktrees(repo: &Path) -> Value {
@@ -358,16 +463,33 @@ fn worktrees(repo: &Path) -> Value {
             }
         }
     }
-    let mut extra: Vec<Value> = items.into_iter().skip(1).collect(); // the first entry is the main checkout
+    let current = std::fs::canonicalize(repo).ok();
+    let mut extra: Vec<Value> = items
+        .into_iter()
+        .filter(|item| {
+            let path = item["path"].as_str().unwrap_or("");
+            current.is_none() || std::fs::canonicalize(path).ok() != current
+        })
+        .collect();
     for item in &mut extra {
         let path = Path::new(item["path"].as_str().unwrap_or(""));
-        let dirty = if path.is_dir() {
-            git(path, &["status", "--porcelain", "--untracked-files=all"])
-                .map(|s| s.lines().count())
+        let raw = if path.is_dir() {
+            git(
+                path,
+                &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            )
         } else {
             None
         };
-        item["dirty_files"] = json!(dirty);
+        let paths = raw.as_deref().map(parse_status_paths);
+        let fingerprint = match (raw.as_deref(), paths.as_ref()) {
+            (Some(raw), Some(paths)) => {
+                dirty_fingerprint(path, raw, paths.iter().map(String::as_str))
+            }
+            _ => Value::Null,
+        };
+        item["dirty_files"] = json!(paths.as_ref().map(Vec::len));
+        item["dirty_fingerprint"] = fingerprint;
     }
     let prunable = extra
         .iter()
@@ -482,7 +604,7 @@ fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, worktrees: &Value) -> Val
 
 /// Files that two lines of work change at once: the main checkout's uncommitted files, each extra
 /// worktree (uncommitted plus committed on its branch) and each unmerged branch without a worktree.
-/// Merging them later collides on exactly these files.
+/// These shared files may need coordination before merging.
 fn collisions(
     repo: &Path,
     base: Option<&str>,
@@ -492,9 +614,24 @@ fn collisions(
 ) -> Value {
     let base = base.filter(|b| *b != "HEAD");
     let diff = |dir: &Path, range: String| -> Vec<String> {
-        git(dir, &["diff", "--name-only", &range])
-            .map(|o| o.lines().map(str::to_owned).collect())
-            .unwrap_or_default()
+        git(
+            dir,
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-only",
+                "-z",
+                &range,
+            ],
+        )
+        .map(|o| {
+            o.split('\0')
+                .filter(|path| !path.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
     };
     let mut lines: Vec<(Value, std::collections::BTreeSet<String>)> = Vec::new();
     lines.push((
@@ -591,8 +728,21 @@ pub fn space(path: &str, today: NaiveDate) -> Value {
 
 /// "owner/repo" of a github.com remote URL (https or ssh form).
 fn github_slug(url: &str) -> Option<String> {
-    let rest = &url[url.find("github.com")? + "github.com".len()..];
-    let rest = rest.trim_start_matches([':', '/']).trim_end_matches('/');
+    let (host, rest) = if let Some((scheme, rest)) = url.split_once("://") {
+        if !matches!(scheme, "https" | "http" | "ssh" | "git") {
+            return None;
+        }
+        let (authority, path) = rest.split_once('/')?;
+        let host = authority.rsplit('@').next()?.split(':').next()?;
+        (host, path)
+    } else {
+        let (authority, path) = url.split_once(':')?;
+        (authority.rsplit('@').next()?, path)
+    };
+    if !host.eq_ignore_ascii_case("github.com") {
+        return None;
+    }
+    let rest = rest.trim_end_matches('/');
     let rest = rest.strip_suffix(".git").unwrap_or(rest);
     let mut parts = rest.split('/');
     let (owner, repo) = (parts.next()?, parts.next()?);
@@ -727,9 +877,10 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
     if !repo.is_dir() {
         return json!({"ok": false, "error": "path_missing", "is_git": false});
     }
-    if git(repo, &["rev-parse", "--show-toplevel"]).is_none() {
+    let Some(root) = git(repo, &["rev-parse", "--show-toplevel"]) else {
         return json!({"ok": false, "error": "not_a_git_repository", "is_git": false});
-    }
+    };
+    let repo = Path::new(root.trim());
     let trimmed = |v: Option<String>| v.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
     let head = trimmed(git(repo, &["rev-parse", "HEAD"]));
     let branch = trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]));
@@ -739,7 +890,9 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
         empty_commits()
     };
     let remotes = remotes(repo);
-    let dirty = dirty(repo, head.is_some());
+    let Some(dirty) = dirty(repo, head.is_some()) else {
+        return json!({"ok": false, "error": "git_status_failed", "is_git": true});
+    };
     let (upstream, ahead, behind, unpushed_since) = upstream(repo);
     let newest_local = dirty
         .newest
@@ -824,6 +977,21 @@ pub fn last_commit_date(path: &str) -> Option<String> {
 /// work, unpushed commits, edited docs, commits in extra worktrees or unmerged branches, readability.
 pub fn basis(facts: &Value) -> Value {
     let d = &facts["dirty"];
+    let mut uncommitted = vec![
+        d["files"].clone(),
+        d["lines_added"].clone(),
+        d["lines_removed"].clone(),
+    ];
+    let side_dirty: Vec<Value> = facts["worktrees"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["dirty_fingerprint"].is_string())
+        .map(|item| json!([item["path"], item["dirty_fingerprint"]]))
+        .collect();
+    if d["fingerprint"].is_string() || !side_dirty.is_empty() {
+        uncommitted.push(json!([d["fingerprint"], side_dirty]));
+    }
     let side_heads: Vec<&Value> = [&facts["worktrees"]["items"], &facts["branches"]["unmerged"]]
         .into_iter()
         .flat_map(|list| list.as_array().into_iter().flatten())
@@ -831,7 +999,7 @@ pub fn basis(facts: &Value) -> Value {
         .filter(|h| h.is_string())
         .collect();
     json!({
-        "commits": facts["head"], "uncommitted": [d["files"], d["lines_added"], d["lines_removed"]], "unpushed": facts["ahead"],
+        "commits": facts["head"], "uncommitted": uncommitted, "unpushed": facts["ahead"],
         "docs": facts["docs_mtime"], "side_branches": side_heads, "readable": facts["ok"],
     })
 }
@@ -866,6 +1034,11 @@ pub fn fingerprint(facts: &Value) -> String {
             .expect("the key is a list")
             .push(b["side_branches"].clone());
     }
+    if let Some(dirty) = u.get(3) {
+        key.as_array_mut()
+            .expect("the key is a list")
+            .push(dirty.clone());
+    }
     let digest = Sha1::digest(key.to_string().as_bytes());
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
@@ -873,6 +1046,26 @@ pub fn fingerprint(facts: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn command_timeout_includes_descendant_output_pipes() {
+        let dir = tempfile::tempdir().unwrap();
+        for command in ["ping -n 4 127.0.0.1", "start \"\" /B ping -n 4 127.0.0.1"] {
+            let started = Instant::now();
+            let result = run(
+                "cmd.exe",
+                &["/D", "/C", command],
+                dir.path(),
+                Duration::from_millis(100),
+            );
+            assert_eq!(result, (false, "cmd.exe timed out".to_owned()));
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "the output pipes exceeded the command's timeout: {command}"
+            );
+        }
+    }
 
     #[test]
     fn remote_urls_lose_credentials_and_yield_github_slugs() {
@@ -893,6 +1086,16 @@ mod tests {
             Some("owner/repo")
         );
         assert_eq!(github_slug("https://gitlab.com/owner/repo"), None);
+        assert_eq!(github_slug("https://notgithub.com/owner/repo"), None);
+        assert_eq!(
+            github_slug("https://github.com.attacker.test/owner/repo"),
+            None
+        );
+        assert_eq!(github_slug("C:/mirrors/github.com/owner/repo"), None);
+        assert_eq!(
+            github_slug("ssh://git@github.com/owner/repo.git").as_deref(),
+            Some("owner/repo")
+        );
     }
 
     #[test]
