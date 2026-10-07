@@ -9,6 +9,10 @@ Watchtower holds two kinds of data:
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
+The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. A changes digest lists new and resolved open ends since you last marked it read.
+
+Copy a task and separately mark it assigned when you hand it to an agent. Watchtower keeps its completion criterion and reported result even when the original suggestion changes; you confirm the result or reopen the task. Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact remains visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
+
 ## One folder, one program
 
 ```
@@ -35,7 +39,7 @@ Builds the release exe (needs Rust), copies it to `%LOCALAPPDATA%\Programs\Watch
 
 ## Agents
 
-The Skill (`skill/watchtower/`, embedded in the exe) teaches an agent to operate Watchtower completely: the daily run (`due` → study repositories read-only → `card put` → `portfolio put`), changing a project's status, and answering questions from the stored data.
+The Skill (`skill/watchtower/`, embedded in the exe) teaches the tracked daily run (`runs start` → study due repositories read-only → `context` → `card put` → `portfolio context` → `portfolio put` → `runs finish`), task reports, project intent and questions from stored data. Card and portfolio writes require the `--context-token` returned by their context command. If another agent or the owner changes that context, the write is rejected until the agent rereads and reconciles it.
 
 In vBot, copy the install command from Watchtower's settings:
 

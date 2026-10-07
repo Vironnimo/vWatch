@@ -14,6 +14,8 @@ The facts see only what git sees: work in git-ignored folders (local data, priva
 
 `watchtower context <id>` gives you the path, the facts, the previous card and the commits since it. Then read, in roughly this order, whatever exists:
 
+Read its `tasks` and `warning_acknowledgements` too. An assigned task remains unfinished; `review` means an agent reported a result and the owner has not yet confirmed it. Check result evidence against the repository before describing progress. A warning acknowledged with an owner reason is an intentional choice; preserve it in `decisions` where relevant and report material worsening instead of repeating the original proposal.
+
 1. The previous card, if any. For `changed` or `stale`, most of it probably still holds; check what the new commits and edits change.
 2. The commit history: `git log --format="%cs %s"`. For large histories, group by prefix or scope and look at merge commits rather than reading every line. Use `git show --stat <commit>` only where a theme is unclear.
 3. The project's own documents: README, AGENTS.md or CLAUDE.md, VISION, ROADMAP, TODO, IDEAS, CHANGELOG, `.vorch/PROJECT.md`, `.vorch/FLAGGED.md`, plans under `.vorch/plans/` or `docs/`, review and audit reports. Private notes (for example git-ignored TODO files) often say what the owner actually wants.
@@ -62,7 +64,7 @@ Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8
 
 A suggestion is worth showing when the owner reads it and thinks "right, I had not seen that". Each has `type` (`next`, `feature`, `cleanup`, `park`), `title` (≤ 8 words), `why` (one sentence, ≤ 25 words), `evidence` (what you saw, with file paths or commits), `effort` (`S`, `M`, `L`) and `done_when`.
 
-The owner can hand a suggestion or the `reentry` step to a coding agent with one click; Watchtower then builds the task from `title`, `why`, `evidence`, `done_when`, the card's `decisions` and the handbook. `done_when` (≤ 20 words) says how that agent would know it is finished: an observable result, for example "Monatsraten stimmen mit dem Kalender überein; `pytest tests/schedule` ist grün."
+The owner can copy a suggestion or the `reentry` step for a coding agent, and separately mark it assigned. Watchtower builds the task from `title`, `why`, `evidence`, `done_when`, the card's `decisions` and the handbook, and keeps an assigned task's original text through later card rewrites. `done_when` (≤ 20 words) says how that agent would know it is finished: an observable result, for example "Monatsraten stimmen mit dem Kalender überein; `pytest tests/schedule` ist grün."
 
 - Ground every suggestion in a finding. "Erinnerung reparieren: der Zeitplan rechnet Monate als 30 Tage (src/schedule.ts, addMonths)" is good. "Fehlerbehandlung verbessern" is not. In `evidence` and `source`, name files, functions and commits rather than line numbers, which move with every edit.
 - Features should follow the project's own vision or the owner's notes, not your taste.

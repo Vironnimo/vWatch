@@ -105,6 +105,206 @@ pub struct Watchtower {
     collect: Collector,
 }
 
+/// Semantic identities keep regenerated item ids and advancing age counters out
+/// of the owner's unread list. The visible text remains exactly as authored.
+fn digest_text(value: &Value) -> String {
+    value
+        .as_str()
+        .unwrap_or("")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn digest_identity(category: &str, item: &Value) -> String {
+    format!(
+        "{category}:{}:{}",
+        digest_text(&item["title"]),
+        digest_text(&item["source"])
+    )
+}
+
+/// An unavailable observation cannot erase the last known risk when the owner
+/// acknowledges other changes. The window still renders the actual facts.
+fn digest_measurements(current: &Value, baseline: Option<&Value>) -> Value {
+    let mut current = current.clone();
+    let Some(previous) = baseline.and_then(|b| b["snapshot"]["projects"].as_array()) else {
+        return current;
+    };
+    for project in current["projects"].as_array_mut().into_iter().flatten() {
+        let Some(old) = previous.iter().find(|p| p["id"] == project["id"]) else {
+            continue;
+        };
+        if project["facts"]["ok"] != true {
+            project["facts"] = old["facts"].clone();
+        } else if !matches!(
+            project["facts"]["ci"]["state"].as_str(),
+            Some("green" | "red" | "none")
+        ) {
+            project["facts"]["ci"] = old["facts"]["ci"].clone();
+        }
+    }
+    current
+}
+
+struct DigestItem {
+    category: &'static str,
+    title: String,
+    detail: String,
+    next_step: String,
+    comparison: Value,
+}
+
+fn digest_items(
+    project: &Value,
+    feedback: &[Value],
+) -> std::collections::BTreeMap<String, DigestItem> {
+    let mut items = std::collections::BTreeMap::new();
+    let facts = &project["facts"];
+    for warning in fact_warnings(facts) {
+        let key = warning["key"].as_str().unwrap_or("");
+        let title = warning["title"].as_str().unwrap_or("").to_owned();
+        // A new HEAD is not a new warning. Worktree identities and dirtiness are
+        // meaningful; elapsed age and collection times never are.
+        let comparison = if key == "worktrees" {
+            warning["basis"].clone()
+        } else {
+            json!(title)
+        };
+        items.insert(
+            format!("risk:{key}"),
+            DigestItem {
+                category: "risk",
+                title,
+                detail: String::new(),
+                next_step: "Projekt prüfen und nächsten Schritt festlegen.".into(),
+                comparison,
+            },
+        );
+    }
+    for (key, count, title, step) in [
+        (
+            "dirty",
+            facts["dirty"]["files"].as_u64().unwrap_or(0),
+            "Dateien nicht committet",
+            "Offene Arbeit prüfen und einen Auftrag daraus machen.",
+        ),
+        (
+            "ahead",
+            facts["ahead"].as_u64().unwrap_or(0),
+            "Commits nicht gepusht",
+            "Lokale Commits prüfen und bei Bedarf sichern lassen.",
+        ),
+        (
+            "branches",
+            facts["branches"]["unmerged"]
+                .as_array()
+                .map_or(0, |v| v.len() as u64),
+            "Branches nicht gemergt",
+            "Offene Branches prüfen und das weitere Vorgehen festlegen.",
+        ),
+    ] {
+        if count > 0 {
+            items.insert(
+                format!("risk:{key}"),
+                DigestItem {
+                    category: "risk",
+                    title: format!("{count} {title}"),
+                    detail: String::new(),
+                    next_step: step.into(),
+                    comparison: json!(count),
+                },
+            );
+        }
+    }
+    let card = &project["card"];
+    for item in card["open_ends"].as_array().into_iter().flatten() {
+        let detail = item["detail"].as_str().unwrap_or("").to_owned();
+        items.insert(
+            digest_identity("open", item),
+            DigestItem {
+                category: "open",
+                title: item["title"].as_str().unwrap_or("").into(),
+                detail,
+                next_step: "Offenes Ende im Projekt prüfen oder als Auftrag übernehmen.".into(),
+                comparison: json!({"kind": item["kind"], "detail": digest_text(&item["detail"])}),
+            },
+        );
+    }
+    for item in card["waiting_on_you"].as_array().into_iter().flatten() {
+        let answered = feedback.iter().any(|f| {
+            f["project"] == project["id"]
+                && f["id"] == item["id"]
+                && matches!(f["value"].as_str(), Some("answered" | "done"))
+        });
+        if !answered {
+            items.insert(
+                digest_identity("question", item),
+                DigestItem {
+                    category: "question",
+                    title: item["title"].as_str().unwrap_or("").into(),
+                    detail: item["source"].as_str().unwrap_or("").into(),
+                    next_step: "Frage im Projekt beantworten.".into(),
+                    comparison: item["options"].clone(),
+                },
+            );
+        }
+    }
+    for item in card["recent_changes"].as_array().into_iter().flatten() {
+        items.insert(
+            digest_identity("change", item),
+            DigestItem {
+                category: "change",
+                title: item["title"].as_str().unwrap_or("").into(),
+                detail: item["detail"].as_str().unwrap_or("").into(),
+                next_step: String::new(),
+                comparison: json!(digest_text(&item["detail"])),
+            },
+        );
+    }
+    for decision in card["decisions"].as_array().into_iter().flatten() {
+        items.insert(
+            format!("decision:{}", digest_text(decision)),
+            DigestItem {
+                category: "decision",
+                title: decision.as_str().unwrap_or("").into(),
+                detail: "In der aktuellen Karte dokumentiert.".into(),
+                next_step: String::new(),
+                comparison: Value::Null,
+            },
+        );
+    }
+    for feedback in feedback.iter().filter(|f| {
+        f["project"] == project["id"] && f["value"] == "answered" && f["item"]["kind"] == "question"
+    }) {
+        let Some(id) = feedback["id"].as_str() else {
+            continue;
+        };
+        let applied = &project["owner_basis"]["questions"][id];
+        if applied["value"] != feedback["value"] || applied["note"] != feedback["note"] {
+            continue;
+        }
+        let key = format!(
+            "applied:{}:{}:{}",
+            digest_text(&feedback["title"]),
+            digest_text(&feedback["item"]["source"]),
+            digest_text(&feedback["note"])
+        );
+        items.insert(
+            key,
+            DigestItem {
+                category: "applied",
+                title: feedback["title"].as_str().unwrap_or("").into(),
+                detail: feedback["note"].as_str().unwrap_or("").into(),
+                next_step: "Aktuelle Karte lesen.".into(),
+                comparison: Value::Null,
+            },
+        );
+    }
+    items
+}
+
 fn stamp(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
@@ -330,8 +530,123 @@ fn dry_items(kind: Kind, sent: &Value, clean: &Value) -> Vec<Value> {
 fn feedback_json(f: &Feedback) -> Value {
     json!({
         "id": f.item_id, "project": f.project_id, "value": f.value, "note": f.note, "at": f.at,
+        "snoozed_until": snoozed_until(f),
         "item": f.item.clone().unwrap_or_else(|| json!({"title": f.title})),
     })
+}
+
+fn snoozed_until(f: &Feedback) -> Option<String> {
+    (f.value == "later").then(|| {
+        f.snoozed_until.clone().unwrap_or_else(|| {
+            (parse(&f.at).with_timezone(&Local).date_naive() + chrono::Duration::days(SNOOZE_DAYS))
+                .to_string()
+        })
+    })
+}
+
+/// Measured warnings independent of the owner's decisions or the observation time.
+pub(crate) fn fact_warnings(facts: &Value) -> Vec<Value> {
+    if facts["ok"] != true {
+        return Vec::new();
+    }
+    let mut warnings = Vec::new();
+    let warning = |key: &str, severity: &str, title: &str, basis: Value, can_acknowledge: bool| {
+        json!({"key": key, "kind": key, "severity": severity, "title": title, "basis": basis,
+            "can_acknowledge": can_acknowledge})
+    };
+    if facts["has_remote"] == false {
+        warnings.push(warning(
+            "no_remote",
+            "risk",
+            "Arbeit liegt nur lokal",
+            json!({
+                "head": facts["head"], "commits": facts["commits"]["total"],
+                "dirty": pick(&facts["dirty"], &["files", "lines_added", "lines_removed"]),
+            }),
+            true,
+        ));
+    }
+    if facts["ci"]["state"] == "none" {
+        warnings.push(warning(
+            "ci_none",
+            "info",
+            "Keine CI eingerichtet",
+            json!({"state": "none"}),
+            true,
+        ));
+    } else if facts["ci"]["state"] == "red" {
+        warnings.push(warning(
+            "ci_red",
+            "risk",
+            "CI ist fehlgeschlagen",
+            json!({
+                "state": "red", "failing": facts["ci"]["failing"],
+            }),
+            false,
+        ));
+    }
+    let mut worktrees: Vec<Value> = facts["worktrees"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            pick(
+                item,
+                &[
+                    "path",
+                    "head",
+                    "dirty_files",
+                    "dirty_fingerprint",
+                    "prunable",
+                ],
+            )
+        })
+        .collect();
+    if !worktrees.is_empty() {
+        worktrees.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+        let severity = if worktrees.iter().any(|w| w["prunable"] == true) {
+            "warn"
+        } else {
+            "info"
+        };
+        warnings.push(warning(
+            "worktrees",
+            severity,
+            "Weitere Arbeitsverzeichnisse vorhanden",
+            json!({"items": worktrees}),
+            true,
+        ));
+    }
+    warnings
+}
+
+fn warning_ack_applies(key: &str, before: &Value, now: &Value) -> bool {
+    match key {
+        "no_remote" => {
+            before["head"] == now["head"]
+                && now["commits"].as_u64().unwrap_or(0) <= before["commits"].as_u64().unwrap_or(0)
+                && ["files", "lines_added", "lines_removed"]
+                    .iter()
+                    .all(|field| {
+                        now["dirty"][*field].as_u64().unwrap_or(0)
+                            <= before["dirty"][*field].as_u64().unwrap_or(0)
+                    })
+        }
+        "worktrees" => now["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|current| {
+                before["items"].as_array().into_iter().flatten().any(|old| {
+                    ["path", "head", "dirty_files", "dirty_fingerprint"]
+                        .iter()
+                        .all(|field| old[*field] == current[*field])
+                        && (current["prunable"] != true || old["prunable"] == true)
+                })
+            }),
+        "ci_none" => before == now,
+        _ => false,
+    }
 }
 
 /// The owner's ratings counted per kind and type of item: which directions they tend to take up or reject.
@@ -377,10 +692,16 @@ fn ci_changed(card: &StoredCard, facts: &Value) -> bool {
     })
 }
 
-fn owner_changes(card: &StoredCard, project: &Project, reactions: &[Feedback]) -> (bool, bool) {
+fn owner_changes(
+    card: &StoredCard,
+    project: &Project,
+    reactions: &[Feedback],
+    warning_acks: &Value,
+    tasks: &Value,
+) -> (bool, bool) {
     match &card.owner_basis {
         Some(before) => {
-            let owner = owner_basis(project, reactions);
+            let owner = owner_basis(project, reactions, warning_acks, tasks);
             (
                 before["questions"] != owner["questions"],
                 before["project"] != owner["project"],
@@ -395,7 +716,9 @@ fn owner_changes(card: &StoredCard, project: &Project, reactions: &[Feedback]) -
             project
                 .status_changed_at
                 .as_ref()
-                .is_some_and(|at| *at > card.created_at),
+                .is_some_and(|at| *at > card.created_at)
+                || warning_acks.as_array().is_some_and(|acks| !acks.is_empty())
+                || tasks.as_array().is_some_and(|tasks| !tasks.is_empty()),
         ),
     }
 }
@@ -405,9 +728,12 @@ fn card_outdated(
     facts: Option<&StoredFacts>,
     project: &Project,
     reactions: &[Feedback],
+    warning_acks: &Value,
+    tasks: &Value,
 ) -> bool {
     card.is_some_and(|card| {
-        let (answered, status_changed) = owner_changes(card, project, reactions);
+        let (answered, status_changed) =
+            owner_changes(card, project, reactions, warning_acks, tasks);
         answered
             || status_changed
             || facts.is_some_and(|facts| {
@@ -442,14 +768,24 @@ fn project_json(p: &Project) -> Value {
 }
 
 /// Content, rather than timestamps, keeps owner edits within one clock tick visible.
-fn owner_basis(p: &Project, reactions: &[Feedback]) -> Value {
+fn owner_basis(p: &Project, reactions: &[Feedback], warning_acks: &Value, tasks: &Value) -> Value {
     let questions: Map<String, Value> = reactions
         .iter()
         .filter(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question")
         .map(|f| (f.item_id.clone(), json!({"value": f.value, "note": f.note})))
         .collect();
+    let mut project = pick(
+        &project_json(p),
+        &["status", "status_note", "goal", "goal_due"],
+    );
+    if warning_acks.as_array().is_some_and(|acks| !acks.is_empty()) {
+        project["warning_acks"] = warning_acks.clone();
+    }
+    if tasks.as_array().is_some_and(|tasks| !tasks.is_empty()) {
+        project["tasks"] = tasks.clone();
+    }
     json!({
-        "project": pick(&project_json(p), &["status", "status_note", "goal", "goal_due"]),
+        "project": project,
         "questions": questions,
     })
 }
@@ -882,9 +1218,11 @@ impl Watchtower {
                             .is_none_or(|f| !f.is_empty());
                 }
             }
+            let warning_acks = self.warning_acknowledgements(&p.id)?;
+            let tasks = self.project_task_basis(&p.id)?;
             let (answered, status_changed) = card
                 .as_ref()
-                .map(|c| owner_changes(c, &p, &reactions))
+                .map(|c| owner_changes(c, &p, &reactions, &warning_acks, &tasks))
                 .unwrap_or_default();
             if stored
                 .as_ref()
@@ -953,10 +1291,10 @@ impl Watchtower {
         // cards that only gain new fields do not change what the brief builds on
         let brief_affected = projects.iter().any(|e| e["reason"] != "new_fields");
         let next = if any_due {
-            "For each project listed: `watchtower context <id>`, study the repository, then `watchtower card put <id> --file <card.json>`. \
-             Afterwards: `watchtower portfolio context` and `watchtower portfolio put --file <portfolio.json>`."
+            "For each project listed: `watchtower context <id>`, study the repository, then `watchtower card put <id> --file <card.json> --context-token <context_token>`. \
+             Afterwards: `watchtower portfolio context` and `watchtower portfolio put --file <portfolio.json> --context-token <context_token>`. Use the token from each corresponding context."
         } else if portfolio_reason.is_some() {
-            "Every card is current; only the portfolio brief is due: `watchtower portfolio context`, then `watchtower portfolio put --file <portfolio.json>`."
+            "Every card is current; only the portfolio brief is due: `watchtower portfolio context`, then `watchtower portfolio put --file <portfolio.json> --context-token <context_token>` with that context's token."
         } else {
             "Nothing is due. Every card and the portfolio brief are current."
         };
@@ -974,6 +1312,79 @@ impl Watchtower {
     }
 
     pub fn context(&self, id: &str) -> Result<Value> {
+        self.project(id)?;
+        self.stored_facts(id)?;
+        self.context_with_token(Some(id), || self.context_data(id))
+    }
+
+    fn context_with_token(
+        &self,
+        project: Option<&str>,
+        read: impl Fn() -> Result<Value>,
+    ) -> Result<Value> {
+        // Recheck around the read so the token never blesses a mixture of versions.
+        for _ in 0..3 {
+            let token = self.store.context_token(project)?;
+            let mut data = read()?;
+            if token == self.store.context_token(project)? {
+                data["context_token"] = json!(token);
+                return Ok(data);
+            }
+        }
+        Err(Self::version_conflict(project))
+    }
+
+    fn version_conflict(project: Option<&str>) -> WatchtowerError {
+        let command = project.map_or_else(
+            || "watchtower portfolio context".to_owned(),
+            |id| format!("watchtower context {id}"),
+        );
+        WatchtowerError::new("version_conflict", "The context changed. Nothing was saved.")
+            .hint(format!("Read `{command}` again, reconcile your document with the new facts, owner instructions and previous document, then retry with its context_token. Do not merely replace the token."))
+    }
+
+    fn check_context(
+        &self,
+        project: Option<&str>,
+        token: Option<&str>,
+        dry_run: bool,
+    ) -> Result<()> {
+        match token {
+            Some(token) if token != self.store.context_token(project)? => {
+                Err(Self::version_conflict(project))
+            }
+            None if !dry_run => {
+                let command = project.map_or_else(
+                    || "watchtower portfolio context".to_owned(),
+                    |id| format!("watchtower context {id}"),
+                );
+                Err(WatchtowerError::new("context_required", "Saving requires the context_token from the context you used.")
+                    .hint(format!("Read `{command}`, prepare your document from that context, and pass `--context-token <context_token>`. Schema-only --dry-run may omit it.")))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn guarded_version(
+        write: crate::store::GuardedWrite,
+        kind: Kind,
+        project: Option<&str>,
+    ) -> Result<i64> {
+        match write {
+            crate::store::GuardedWrite::Saved(version) => Ok(version),
+            crate::store::GuardedWrite::Conflict => Err(Self::version_conflict(project)),
+            crate::store::GuardedWrite::ItemConflict(conflicts) => {
+                let (code, name) = match kind {
+                    Kind::Card => ("invalid_card", "card"),
+                    Kind::Portfolio => ("invalid_portfolio", "brief"),
+                };
+                Err(WatchtowerError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
+                    .hint("Keep an existing id only for the same item in the same project card or brief. Omit id for a new item."))
+            }
+        }
+    }
+
+    fn context_data(&self, id: &str) -> Result<Value> {
         let project = self.project(id)?;
         let stored = self.stored_facts(id)?;
         let card = self.store.latest_card(id)?;
@@ -995,7 +1406,7 @@ impl Watchtower {
             .map(feedback_json)
             .collect();
         let next = format!(
-            "Write the card with `watchtower card put {id} --file <card.json>`{}",
+            "Write the card with `watchtower card put {id} --file <card.json> --context-token <context_token>`{}",
             if card.is_some() {
                 " (add --merge to send only the fields that changed)."
             } else {
@@ -1011,6 +1422,8 @@ impl Watchtower {
             "since_previous_card": since,
             "feedback": feedback,
             "feedback_summary": feedback_summary(&reactions),
+            "tasks": self.tasks(Some(id))?["tasks"],
+            "warning_acknowledgements": self.warning_acknowledgements(id)?,
             "next": next,
         }))
     }
@@ -1035,6 +1448,23 @@ impl Watchtower {
 
     /// Validates and saves a card; with `dry_run` only validates and reports what would be saved.
     pub fn put_card(&self, id: &str, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
+        self.project(id)?;
+        if !dry_run {
+            self.stored_facts(id)?;
+        }
+        let token = self.store.context_token(Some(id))?;
+        self.put_card_guarded(id, payload, merge, dry_run, Some(&token))
+    }
+
+    pub fn put_card_guarded(
+        &self,
+        id: &str,
+        payload: Value,
+        merge: bool,
+        dry_run: bool,
+        context_token: Option<&str>,
+    ) -> Result<Value> {
+        self.check_context(Some(id), context_token, dry_run)?;
         let project = self.project(id)?;
         let previous = self.store.latest_card(id)?;
         let sent = sent_fields(&payload, merge);
@@ -1079,6 +1509,7 @@ impl Watchtower {
             ));
         }
         if dry_run {
+            self.check_context(Some(id), context_token, true)?;
             let items = dry_items(Kind::Card, &payload, &clean);
             return Ok(
                 json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": items}),
@@ -1086,7 +1517,12 @@ impl Watchtower {
         }
         let stored = self.stored_facts(id)?;
         let parts = facts::basis(&stored.data);
-        let owner = owner_basis(&project, &self.store.feedback()?);
+        let owner = owner_basis(
+            &project,
+            &self.store.feedback()?,
+            &self.warning_acknowledgements(id)?,
+            &self.project_task_basis(id)?,
+        );
         let basis = CardBasis {
             fingerprint: &stored.fingerprint,
             head: stored.data["head"].as_str(),
@@ -1094,7 +1530,14 @@ impl Watchtower {
             parts: &parts,
             owner: Some(&owner),
         };
-        let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
+        let write = self.store.add_card_guarded(
+            id,
+            &self.now(),
+            &basis,
+            &clean,
+            context_token.expect("checked before validation"),
+        )?;
+        let version = Self::guarded_version(write, Kind::Card, Some(id))?;
         Ok(
             json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
         )
@@ -1112,6 +1555,10 @@ impl Watchtower {
     }
 
     pub fn portfolio_context(&self) -> Result<Value> {
+        self.context_with_token(None, || self.portfolio_context_data())
+    }
+
+    fn portfolio_context_data(&self) -> Result<Value> {
         let mut rows = Vec::new();
         let previous = self.store.latest_portfolio()?;
         let reactions = self.store.feedback()?;
@@ -1127,7 +1574,14 @@ impl Watchtower {
                 (Some(pf), Some(c)) => json!(self.brief_changes(&p.id, &c.data, pf)?),
                 _ => Value::Null,
             };
-            let card_outdated = card_outdated(card.as_ref(), stored.as_ref(), &p, &reactions);
+            let card_outdated = card_outdated(
+                card.as_ref(),
+                stored.as_ref(),
+                &p,
+                &reactions,
+                &self.warning_acknowledgements(&p.id)?,
+                &self.project_task_basis(&p.id)?,
+            );
             let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
             let card_json = card.map(|card| {
                 let c = &card.data;
@@ -1148,6 +1602,7 @@ impl Watchtower {
             });
             rows.push(json!({
                 "id": p.id, "name": p.name, "status": p.status, "status_note": p.status_note, "goal": p.goal, "goal_due": p.goal_due,
+                "warning_acknowledgements": self.warning_acknowledgements(&p.id)?,
                 "facts": {
                     "last_work": f["last_work"],
                     "commits": pick(&f["commits"], &["total", "last_7d", "last_30d", "last"]),
@@ -1175,11 +1630,24 @@ impl Watchtower {
             "owner_last_opened": self.store.pref("last_visit")?,
             "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
-            "next": "Write the brief with `watchtower portfolio put --file <portfolio.json>`.",
+            "tasks": self.tasks(None)?["tasks"],
+            "next": "Write the brief with `watchtower portfolio put --file <portfolio.json> --context-token <context_token>`.",
         }))
     }
 
     pub fn put_portfolio(&self, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
+        let token = self.store.context_token(None)?;
+        self.put_portfolio_guarded(payload, merge, dry_run, Some(&token))
+    }
+
+    pub fn put_portfolio_guarded(
+        &self,
+        payload: Value,
+        merge: bool,
+        dry_run: bool,
+        context_token: Option<&str>,
+    ) -> Result<Value> {
+        self.check_context(None, context_token, dry_run)?;
         let previous = self.store.latest_portfolio()?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|p| &p.data), sent.as_deref());
@@ -1257,13 +1725,18 @@ impl Watchtower {
             }
         }
         if dry_run {
+            self.check_context(None, context_token, true)?;
             return Ok(
                 json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}),
             );
         }
-        let version = self
-            .store
-            .add_portfolio(&self.now(), &clean, &self.portfolio_basis()?)?;
+        let write = self.store.add_portfolio_guarded(
+            &self.now(),
+            &clean,
+            &self.portfolio_basis()?,
+            context_token.expect("checked before validation"),
+        )?;
+        let version = Self::guarded_version(write, Kind::Portfolio, None)?;
         Ok(
             json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
         )
@@ -1322,6 +1795,76 @@ impl Watchtower {
         value: Option<&str>,
         note: Option<&str>,
     ) -> Result<Value> {
+        self.set_feedback_until(item_id, value, note, None)
+    }
+
+    pub fn set_feedback_until(
+        &self,
+        item_id: &str,
+        value: Option<&str>,
+        note: Option<&str>,
+        until: Option<&str>,
+    ) -> Result<Value> {
+        self.write_feedback(item_id, value, note, until, false)
+    }
+
+    pub fn restore_feedback(&self, item_id: &str, snapshot: Option<&Value>) -> Result<Value> {
+        let Some(snapshot) = snapshot.filter(|s| !s.is_null()) else {
+            return self.write_feedback(item_id, None, None, None, true);
+        };
+        let invalid = || {
+            WatchtowerError::new("invalid_feedback", "The previous reaction must contain value, note and an optional snoozed_until date.")
+            .hint("Restore the exact reaction snapshot captured before the change.")
+        };
+        let object = snapshot.as_object().ok_or_else(invalid)?;
+        if object
+            .keys()
+            .any(|key| !["value", "note", "snoozed_until", "at"].contains(&key.as_str()))
+        {
+            return Err(invalid());
+        }
+        let value = snapshot["value"].as_str().ok_or_else(invalid)?;
+        let note = snapshot["note"].as_str().ok_or_else(invalid)?;
+        let until = match snapshot.get("snoozed_until") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(date)) => Some(date.as_str()),
+            _ => return Err(invalid()),
+        };
+        if value == "later" && until.is_none() {
+            return Err(invalid());
+        }
+        self.write_feedback(item_id, Some(value), Some(note), until, true)
+    }
+
+    fn write_feedback(
+        &self,
+        item_id: &str,
+        value: Option<&str>,
+        note: Option<&str>,
+        until: Option<&str>,
+        restore: bool,
+    ) -> Result<Value> {
+        let invalid_snooze = || {
+            WatchtowerError::new(
+                "invalid_snooze",
+                "A snooze date must be a future date as YYYY-MM-DD and only applies to later.",
+            )
+            .hint("Choose a date after today for later, or omit until for other reactions.")
+        };
+        let explicit_until = if let Some(until) = until {
+            let date =
+                NaiveDate::parse_from_str(until, "%Y-%m-%d").map_err(|_| invalid_snooze())?;
+            if value != Some("later")
+                || until.len() != 10
+                || date.to_string() != until
+                || (!restore && date <= self.today())
+            {
+                return Err(invalid_snooze());
+            }
+            Some(until.to_owned())
+        } else {
+            None
+        };
         let Some(value) = value else {
             self.store.delete_feedback(item_id)?;
             return Ok(json!({"item_id": item_id, "value": null}));
@@ -1374,6 +1917,13 @@ impl Watchtower {
             (None, None) => String::new(),
         };
         let at = self.now();
+        let snoozed_until = if value == "later" {
+            explicit_until
+                .or_else(|| existing.as_ref().and_then(snoozed_until))
+                .or_else(|| Some((self.today() + chrono::Duration::days(SNOOZE_DAYS)).to_string()))
+        } else {
+            None
+        };
         self.store.set_feedback(&Feedback {
             item_id: item_id.to_owned(),
             project_id,
@@ -1382,8 +1932,11 @@ impl Watchtower {
             at,
             note: note.clone(),
             item,
+            snoozed_until: snoozed_until.clone(),
         })?;
-        Ok(json!({"item_id": item_id, "value": value, "note": note}))
+        Ok(
+            json!({"item_id": item_id, "value": value, "note": note, "snoozed_until": snoozed_until}),
+        )
     }
 
     /// The item with this id in the current cards and brief: (its project, the item with its `kind`).
@@ -1432,6 +1985,77 @@ impl Watchtower {
                 .map(feedback_json)
                 .collect(),
         ))
+    }
+
+    pub fn warning_acknowledgements(&self, id: &str) -> Result<Value> {
+        self.project(id)?;
+        Ok(self.store.warning_acknowledgements(id)?)
+    }
+
+    pub fn project_warnings(&self, id: &str) -> Result<Value> {
+        self.project(id)?;
+        let facts = self
+            .store
+            .facts(id)?
+            .map(|facts| facts.data)
+            .unwrap_or(Value::Null);
+        let acknowledgements = self.store.warning_acknowledgements(id)?;
+        let mut warnings = fact_warnings(&facts);
+        for warning in &mut warnings {
+            let previous = acknowledgements
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|ack| ack["key"] == warning["key"]);
+            warning["acknowledged"] = json!(previous.is_some_and(|ack| warning_ack_applies(
+                warning["key"].as_str().unwrap_or(""),
+                &ack["basis"],
+                &warning["basis"]
+            )));
+            warning["note"] = previous
+                .map(|ack| ack["note"].clone())
+                .unwrap_or_else(|| json!(""));
+        }
+        Ok(json!(warnings))
+    }
+
+    pub fn set_warning_ack(&self, id: &str, key: &str, note: Option<&str>) -> Result<Value> {
+        self.project(id)?;
+        if !["no_remote", "ci_none", "worktrees"].contains(&key) {
+            return Err(WatchtowerError::new(
+                "invalid_warning",
+                "This warning cannot be acknowledged.",
+            )
+            .hint("Use no_remote, ci_none or worktrees from the project's current warnings."));
+        }
+        let note = note.map(str::trim);
+        if note.is_some_and(|note| note.is_empty() || note.chars().count() > 600) {
+            return Err(WatchtowerError::new("invalid_warning", "An acknowledgement needs a reason of 1 to 600 characters.")
+                .hint("Explain why the measured condition is intentional, or omit the note to withdraw the acknowledgement."));
+        }
+        let warnings = self.project_warnings(id)?;
+        let current = warnings
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|warning| warning["key"] == key);
+        if note.is_some() && current.is_none() {
+            return Err(WatchtowerError::new(
+                "warning_not_present",
+                "This measured warning is not present.",
+            )
+            .hint("Refresh the project and choose one of its current warnings."));
+        }
+        self.store.set_warning_ack(
+            id,
+            key,
+            note,
+            &current
+                .map(|warning| warning["basis"].clone())
+                .unwrap_or(Value::Null),
+            &self.now(),
+        )?;
+        Ok(json!({"project": id, "key": key, "warnings": self.project_warnings(id)?}))
     }
 
     /// Feedback is keyed globally by item id, so an id must remain in its original
@@ -1570,6 +2194,19 @@ impl Watchtower {
     /// What the brief builds on, including removals and owner changes without a new card.
     fn portfolio_basis(&self) -> Result<Value> {
         let mut basis = Map::new();
+        let tasks = self.store.tasks()?;
+        if !tasks.is_empty() {
+            // The brief also assesses standalone work and tasks whose project was removed.
+            basis.insert(
+                "@tasks".to_owned(),
+                Value::Array(
+                    tasks
+                        .iter()
+                        .map(|task| pick(task, &["id", "status", "revision"]))
+                        .collect(),
+                ),
+            );
+        }
         for p in self
             .store
             .projects()?
@@ -1580,12 +2217,370 @@ impl Watchtower {
                 .store
                 .latest_card(&p.id)?
                 .map(|c| pick(&c.data, BRIEF_FIELDS));
-            basis.insert(p.id.clone(), json!({
+            let mut entry = json!({
                 "project": pick(&project_json(&p), &["name", "status", "status_note", "goal", "goal_due"]),
                 "card": card,
-            }));
+            });
+            let warning_acks = self.warning_acknowledgements(&p.id)?;
+            if warning_acks.as_array().is_some_and(|acks| !acks.is_empty()) {
+                entry["warning_acks"] = warning_acks;
+            }
+            let tasks = self.project_task_basis(&p.id)?;
+            if tasks.as_array().is_some_and(|tasks| !tasks.is_empty()) {
+                entry["tasks"] = tasks;
+            }
+            basis.insert(p.id.clone(), entry);
         }
         Ok(Value::Object(basis))
+    }
+
+    fn project_task_basis(&self, id: &str) -> Result<Value> {
+        Ok(Value::Array(
+            self.store
+                .tasks()?
+                .iter()
+                .filter(|task| {
+                    task["projects"]
+                        .as_array()
+                        .is_some_and(|projects| projects.iter().any(|p| p == id))
+                })
+                .map(|task| pick(task, &["id", "status", "revision"]))
+                .collect(),
+        ))
+    }
+
+    // ---------- tracked daily runs ----------
+    pub fn run_start(&self, refresh: bool) -> Result<Value> {
+        let due = self.due(14, refresh)?;
+        let mut projects = Vec::new();
+        for project in self
+            .store
+            .projects()?
+            .into_iter()
+            .filter(|p| p.status != "archived")
+        {
+            let mut reason = due["projects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|entry| entry["id"] == project.id)
+                .map(|entry| entry["reason"].clone())
+                .or_else(|| {
+                    due["problems"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|entry| entry["id"] == project.id)
+                        .map(|entry| entry["problem"].clone())
+                });
+            let facts = self.store.facts(&project.id)?;
+            if facts.as_ref().is_none_or(|facts| facts.data["ok"] != true) {
+                reason = Some(
+                    facts
+                        .as_ref()
+                        .and_then(|facts| facts.data.get("error"))
+                        .cloned()
+                        .unwrap_or_else(|| json!("facts_missing")),
+                );
+            }
+            projects.push(json!({
+                "id": project.id, "name": project.name,
+                "initial_version": self.store.latest_card(&project.id)?.map(|card| card.version).unwrap_or(0),
+                "was_due": reason.is_some(), "reason": reason,
+            }));
+        }
+        let initial = json!({
+            "projects": projects,
+            "portfolio_version": self.store.latest_portfolio()?.map(|brief| brief.version).unwrap_or(0),
+            "portfolio_due": due["portfolio"]["due"],
+        });
+        let id = self.store.start_agent_run(&self.now(), &initial)?;
+        let mut status = self.agent_run_response(id)?;
+        status["due"] = due;
+        status["next"] = json!(format!("For every project in due.projects: read `watchtower context <id>`, study the repository, and save its card with that context_token. Then read `watchtower portfolio context` and save the due brief with its context_token. Record failures with `watchtower runs fail {id}`. Finish with `watchtower runs finish {id}`, even when nothing was due; only complete confirms a successful run."));
+        Ok(status)
+    }
+
+    fn require_agent_run(&self, id: i64) -> Result<crate::store::StoredAgentRun> {
+        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower runs status` to see the latest run, or `watchtower runs start` to begin one."))
+    }
+
+    pub fn run_fail(&self, run_id: i64, project_id: Option<&str>, error: &str) -> Result<Value> {
+        let run = self.require_agent_run(run_id)?;
+        if run
+            .result
+            .as_ref()
+            .is_some_and(|result| result["state"] == "complete")
+        {
+            return Err(WatchtowerError::new(
+                "run_complete",
+                "A successfully completed run is immutable.",
+            )
+            .hint("Start another run to record new work or failures."));
+        }
+        let error = error.trim();
+        if error.is_empty() || error.chars().count() > 2_000 {
+            return Err(WatchtowerError::new(
+                "invalid_run_error",
+                "Give a nonempty failure description of at most 2000 characters.",
+            )
+            .hint("Describe the failed step briefly, without credentials."));
+        }
+        if let Some(id) = project_id {
+            self.project(id)?;
+        }
+        if !self.store.fail_agent_run(
+            run_id,
+            project_id.unwrap_or("@portfolio"),
+            &json!({"error": error, "at": self.now()}),
+        )? {
+            return Err(WatchtowerError::new(
+                "run_complete",
+                "The run completed before this failure was recorded.",
+            )
+            .hint("Start another run to record new work or failures."));
+        }
+        self.agent_run_response(run_id)
+    }
+
+    pub fn run_finish(&self, run_id: i64) -> Result<Value> {
+        self.require_agent_run(run_id)?;
+        // A view spans several reads. Compare its starting evidence again inside
+        // the final write transaction, including failures reported by other agents.
+        for _ in 0..3 {
+            let expected = self.store.agent_run_token(run_id)?;
+            let run = self.require_agent_run(run_id)?;
+            if run
+                .result
+                .as_ref()
+                .is_some_and(|result| result["state"] == "complete")
+            {
+                return self.agent_run_response(run_id);
+            }
+            let result = self.agent_run_view(&run, true)?;
+            if self
+                .store
+                .finish_agent_run(run_id, &self.now(), &result, &expected)?
+            {
+                return self.agent_run_response(run_id);
+            }
+        }
+        Err(WatchtowerError::new("run_conflict", "The run or its project evidence kept changing. No completion was recorded.")
+            .hint(format!("Inspect `watchtower runs status` and retry `watchtower runs finish {run_id}` after current writes finish.")))
+    }
+
+    fn agent_run_response(&self, run_id: i64) -> Result<Value> {
+        let mut status = self.run_status()?;
+        let run = self.agent_run_view(&self.require_agent_run(run_id)?, false)?;
+        status["state"] = run["state"].clone();
+        status["run_id"] = json!(run_id);
+        status["repair_task"] = json!(Self::agent_run_repair_task(&run));
+        status["run"] = run;
+        Ok(status)
+    }
+
+    fn agent_run_repair_task(run: &Value) -> Option<String> {
+        if run["state"] == "complete" {
+            return None;
+        }
+        let projects = run["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|project| project["status"] != "current")
+            .filter_map(|project| project["id"].as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower runs status` und `watchtower due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler mit `watchtower runs fail {}`. Schließe mit `watchtower runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
+    }
+
+    fn pending_run_replies(
+        &self,
+        project: &Project,
+        card: Option<&StoredCard>,
+        reactions: &[Feedback],
+    ) -> usize {
+        reactions
+            .iter()
+            .filter(|reply| {
+                reply.project_id.as_deref() == Some(project.id.as_str())
+                    && kind_of(reply) == "question"
+                    && matches!(reply.value.as_str(), "answered" | "done")
+                    && card.is_none_or(|card| match &card.owner_basis {
+                        Some(basis) => {
+                            basis["questions"].get(&reply.item_id)
+                                != Some(&json!({"value": reply.value, "note": reply.note}))
+                        }
+                        None => reply.at > card.created_at,
+                    })
+            })
+            .count()
+    }
+
+    fn agent_run_view(&self, run: &crate::store::StoredAgentRun, finishing: bool) -> Result<Value> {
+        if let Some(result) = run
+            .result
+            .as_ref()
+            .filter(|result| result["state"] == "complete")
+        {
+            return Ok(result.clone());
+        }
+        let due = self.due(14, false)?;
+        let reactions = self.store.feedback()?;
+        let registered = self.store.projects()?;
+        let mut initial = run.initial["projects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for project in registered
+            .iter()
+            .filter(|project| project.status != "archived")
+        {
+            if !initial.iter().any(|entry| entry["id"] == project.id) {
+                initial.push(json!({"id": project.id, "name": project.name, "initial_version": 0, "was_due": true}));
+            }
+        }
+        let mut projects = Vec::new();
+        for initial in initial {
+            let id = initial["id"].as_str().unwrap_or("");
+            let current = registered.iter().find(|project| project.id == id);
+            let card = self.store.latest_card(id)?;
+            let version = card.as_ref().map(|card| card.version).unwrap_or(0);
+            let mut item = json!({
+                "id": id, "name": current.map(|project| project.name.as_str()).unwrap_or(initial["name"].as_str().unwrap_or(id)),
+                "initial_version": initial["initial_version"], "card_version": version,
+                "was_due": initial["was_due"], "status": "current", "reason": null,
+                "pending_owner_replies": 0, "error": null,
+            });
+            if current.is_none_or(|project| project.status == "archived") {
+                item["reason"] = json!(if current.is_some() {
+                    "project_archived"
+                } else {
+                    "project_removed"
+                });
+                projects.push(item);
+                continue;
+            }
+            let project = current.expect("active project was checked");
+            item["pending_owner_replies"] =
+                json!(self.pending_run_replies(project, card.as_ref(), &reactions));
+            let facts = self.store.facts(id)?;
+            item["facts_collected_at"] = json!(facts.as_ref().map(|facts| &facts.collected_at));
+            if facts.as_ref().is_none_or(|facts| facts.data["ok"] != true) {
+                item["status"] = json!("failed");
+                item["error"] = facts
+                    .as_ref()
+                    .and_then(|facts| facts.data.get("error"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("facts_missing"));
+                item["reason"] = item["error"].clone();
+            } else if card.is_none() {
+                item["status"] = json!("pending");
+                item["reason"] = json!("no_card");
+            } else if let Some(reason) = due["projects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|entry| entry["id"] == id)
+            {
+                item["status"] = json!("pending");
+                item["reason"] = reason["reason"].clone();
+            }
+            if let Some(failure) = run
+                .failures
+                .get(id)
+                .filter(|failure| version <= failure["version"].as_i64().unwrap_or(0))
+            {
+                item["status"] = json!("failed");
+                item["reason"] = json!("agent_failed");
+                item["error"] = failure["error"].clone();
+            }
+            projects.push(item);
+        }
+        let current = projects
+            .iter()
+            .filter(|project| project["status"] == "current")
+            .count();
+        let failed = projects
+            .iter()
+            .filter(|project| project["status"] == "failed")
+            .count();
+        let pending = projects.len() - current - failed;
+        let version = self
+            .store
+            .latest_portfolio()?
+            .map(|brief| brief.version)
+            .unwrap_or(0);
+        let mut portfolio = json!({
+            "initial_version": run.initial["portfolio_version"], "version": version,
+            "status": if due["portfolio"]["due"] == true { "pending" } else { "current" },
+            "reason": due["portfolio"]["reason"], "error": null,
+        });
+        if let Some(failure) = run
+            .failures
+            .get("@portfolio")
+            .filter(|failure| version <= failure["version"].as_i64().unwrap_or(0))
+        {
+            portfolio["status"] = json!("failed");
+            portfolio["reason"] = json!("agent_failed");
+            portfolio["error"] = failure["error"].clone();
+        }
+        let complete = pending == 0 && failed == 0 && portfolio["status"] == "current";
+        let state = if finishing && complete {
+            "complete"
+        } else if failed > 0 || portfolio["status"] == "failed" {
+            "failed"
+        } else if finishing || run.finished_at.is_some() {
+            "incomplete"
+        } else if (self.clock)() - parse(&run.started_at) >= chrono::Duration::hours(2) {
+            "stalled"
+        } else {
+            "running"
+        };
+        Ok(json!({
+            "id": run.id, "started_at": run.started_at,
+            "finished_at": if finishing { Some(self.now()) } else { run.finished_at.clone() },
+            "state": state, "counts": {"total": projects.len(), "current": current, "pending": pending, "failed": failed},
+            "projects": projects, "portfolio": portfolio,
+        }))
+    }
+
+    /// Stored data only: opening the window never starts Git or the agent.
+    pub fn run_status(&self) -> Result<Value> {
+        let runs = self.store.agent_runs()?;
+        let latest = runs
+            .first()
+            .map(|run| self.agent_run_view(run, false))
+            .transpose()?;
+        let state = latest
+            .as_ref()
+            .and_then(|run| run["state"].as_str())
+            .unwrap_or("unknown");
+        let reactions = self.store.feedback()?;
+        let mut pending_owner_replies = 0;
+        for project in self
+            .store
+            .projects()?
+            .into_iter()
+            .filter(|project| project.status != "archived")
+        {
+            pending_owner_replies += self.pending_run_replies(
+                &project,
+                self.store.latest_card(&project.id)?.as_ref(),
+                &reactions,
+            );
+        }
+        let repair_task = latest.as_ref().and_then(Self::agent_run_repair_task);
+        let last_successful = self.store.last_successful_agent_run()?.map(|run| json!({"id": run.id, "started_at": run.started_at, "finished_at": run.finished_at}));
+        let history: Vec<Value> = runs.iter().map(|run| {
+            let state = latest.as_ref().filter(|latest| latest["id"] == run.id).and_then(|latest| latest["state"].as_str())
+                .or_else(|| run.result.as_ref().and_then(|result| result["state"].as_str()))
+                .unwrap_or_else(|| if (self.clock)() - parse(&run.started_at) >= chrono::Duration::hours(2) { "stalled" } else { "running" });
+            json!({"id": run.id, "started_at": run.started_at, "finished_at": run.finished_at, "state": state})
+        }).collect();
+        Ok(
+            json!({"state": state, "latest": latest, "last_successful": last_successful, "pending_owner_replies": pending_owner_replies, "repair_task": repair_task, "history": history}),
+        )
     }
 
     // ---------- the window ----------
@@ -1638,6 +2633,112 @@ impl Watchtower {
         }}))
     }
 
+    /// Changes remain unread until the owner explicitly acknowledges the exact
+    /// snapshot they saw, including across window refreshes and restarts.
+    fn changes_digest(&self, first_visit: bool) -> Result<Value> {
+        let state = self.store.changes_snapshot(first_visit, &self.now())?;
+        let current_snapshot = digest_measurements(&state.current, state.baseline.as_ref());
+        let mut entries = Vec::new();
+        if let Some(baseline) = &state.baseline {
+            let before = &baseline["snapshot"];
+            let old_feedback = before["feedback"].as_array().cloned().unwrap_or_default();
+            let feedback = current_snapshot["feedback"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for project in current_snapshot["projects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|p| p["status"] != "archived")
+            {
+                let old = before["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|p| p["id"] == project["id"] && p["status"] != "archived");
+                let previous = old
+                    .map(|p| digest_items(p, &old_feedback))
+                    .unwrap_or_default();
+                let current = digest_items(project, &feedback);
+                for (key, item) in &current {
+                    let prior = previous.get(key);
+                    if prior.is_some_and(|old| old.comparison == item.comparison) {
+                        continue;
+                    }
+                    let (kind, prefix) = match item.category {
+                        "applied" => ("decision_applied", "Antwort in Karte berücksichtigt"),
+                        "risk" if prior.is_some() => ("new", "Risiko verändert"),
+                        "risk" => ("new", "Neues Risiko"),
+                        "open" if prior.is_some() => ("new", "Offenes Ende aktualisiert"),
+                        "open" => ("new", "Neu offen"),
+                        "question" if prior.is_some() => ("new", "Frage aktualisiert"),
+                        "question" => ("new", "Neue Frage"),
+                        "decision" => ("new", "Entscheidung dokumentiert"),
+                        _ => ("new", "Neu"),
+                    };
+                    entries.push(json!({
+                        "project": project["id"], "kind": kind,
+                        "title": format!("{prefix}: {}", item.title),
+                        "detail": item.detail, "next_step": item.next_step,
+                    }));
+                }
+                for (key, item) in &previous {
+                    if current.contains_key(key) {
+                        continue;
+                    }
+                    let (prefix, detail) = match item.category {
+                        "risk" => ("Nicht mehr gemessen", "Die aktuellen Git-Fakten zeigen dieses Risiko nicht mehr."),
+                        "open" => ("Nicht mehr offen in der Karte", "Die aktuelle Karte führt dieses offene Ende nicht mehr auf."),
+                        "question" => ("Frage nicht mehr offen", "Die Frage ist beantwortet, abgehakt oder wird in der aktuellen Karte nicht mehr gestellt."),
+                        _ => continue,
+                    };
+                    // A failed measurement is not proof that measured risks
+                    // disappeared. Keep the last known warning unread instead.
+                    if item.category == "risk"
+                        && (project["facts"]["ok"] != true
+                            || (key == "risk:ci_red" && project["facts"]["ci"]["state"] != "green")
+                            || (key == "risk:ci_none"
+                                && !matches!(
+                                    project["facts"]["ci"]["state"].as_str(),
+                                    Some("green" | "red")
+                                ))
+                            || (key == "risk:no_remote" && project["facts"]["has_remote"] != true))
+                    {
+                        continue;
+                    }
+                    entries.push(json!({
+                        "project": project["id"], "kind": "resolved",
+                        "title": format!("{prefix}: {}", item.title),
+                        "detail": detail, "next_step": "",
+                    }));
+                }
+            }
+        }
+        Ok(json!({
+            "since": state.baseline.as_ref().map(|b| b["at"].clone()),
+            "token": state.token, "total": entries.len(), "entries": entries,
+            "has_baseline": state.baseline.is_some(),
+        }))
+    }
+
+    pub fn mark_changes_read(&self, token: &str) -> Result<Value> {
+        let state = self.store.changes_snapshot(false, &self.now())?;
+        let snapshot = digest_measurements(&state.current, state.baseline.as_ref());
+        if state.token != token
+            || !self
+                .store
+                .acknowledge_changes(token, &snapshot, &self.now())?
+        {
+            return Err(WatchtowerError::new(
+                "stale_changes",
+                "New changes arrived while you were reading.",
+            )
+            .hint("Refresh the overview, read the new changes, then mark them as read."));
+        }
+        Ok(json!({"ok": true, "changes": self.changes_digest(false)?}))
+    }
+
     /// Everything the window renders. A visit more than an hour after the last one
     /// moves the "new since your last visit" line forward.
     pub fn state(&self, visit: bool) -> Result<Value> {
@@ -1663,7 +2764,14 @@ impl Watchtower {
         for p in self.store.projects()? {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
-            let outdated = card_outdated(card.as_ref(), stored.as_ref(), &p, &reactions);
+            let outdated = card_outdated(
+                card.as_ref(),
+                stored.as_ref(),
+                &p,
+                &reactions,
+                &self.warning_acknowledgements(&p.id)?,
+                &self.project_task_basis(&p.id)?,
+            );
             // the headline of every card version, newest first: the project's story in one line per update
             let history: Vec<Value> = self
                 .store
@@ -1692,17 +2800,20 @@ impl Watchtower {
                     "card": card.as_ref().map(|c| c.data.clone()),
                     "card_updated_at": card.map(|c| c.created_at),
                     "card_outdated": outdated,
+                    "warnings": self.project_warnings(&p.id)?,
                     "history": history,
                 }),
             ));
         }
+        let changes = self.changes_digest(visit)?;
         let portfolio = self.store.latest_portfolio()?;
         let feedback: Map<String, Value> = reactions
             .into_iter()
             .map(|f| {
+                let until = snoozed_until(&f);
                 (
                     f.item_id,
-                    json!({"value": f.value, "at": f.at, "note": f.note}),
+                    json!({"value": f.value, "at": f.at, "note": f.note, "snoozed_until": until}),
                 )
             })
             .collect();
@@ -1710,11 +2821,14 @@ impl Watchtower {
             "today": self.today().to_string(),
             "now": stamp(now),
             "previous_visit": previous,
+            "changes": changes,
             "projects": projects,
             "portfolio": portfolio.as_ref().map(|p| p.data.clone()),
             "portfolio_updated_at": portfolio.map(|p| p.created_at),
             "ideas": self.store.ideas()?.iter().map(idea_json).collect::<Vec<_>>(),
+            "tasks": self.store.tasks()?,
             "review_week": self.review_week().0,
+            "run_status": self.run_status()?,
             "feedback": feedback,
             "snooze_days": SNOOZE_DAYS,
             "prefs": {
@@ -1723,4 +2837,247 @@ impl Watchtower {
             },
         }))
     }
+}
+
+// An assigned task keeps its own snapshot; rewriting cards never loses the handoff.
+impl Watchtower {
+    pub fn create_task(&self, payload: Value) -> Result<Value> {
+        let object = payload
+            .as_object()
+            .ok_or_else(|| task_error("The task must be a JSON object."))?;
+        let allowed = [
+            "projects",
+            "source_id",
+            "title",
+            "why",
+            "evidence",
+            "done_when",
+        ];
+        if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+            return Err(task_error(format!("Unknown task field '{key}'.")));
+        }
+        let mut projects = object
+            .get("projects")
+            .and_then(Value::as_array)
+            .ok_or_else(|| task_error("projects must be an array of project ids."))?
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| task_error("Every project id must be a string."))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        projects.sort();
+        projects.dedup();
+        let project_snapshots = projects
+            .iter()
+            .map(|id| {
+                self.project(id)
+                    .map(|project| pick(&project_json(&project), &["id", "name", "path"]))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let title = task_text(&payload, "title", true, 600)?;
+        let why = task_text(&payload, "why", false, 2000)?;
+        let evidence = task_text(&payload, "evidence", false, 4000)?;
+        let done_when = task_text(&payload, "done_when", false, 2000)?;
+        let source = task_text(&payload, "source_id", false, 1000)?;
+        let source_id = (!source.is_empty()).then_some(source);
+        let source_key = source_id
+            .as_ref()
+            .map(|source| json!([projects, source]).to_string());
+        let at = self.now();
+        let data = json!({
+            "projects": projects, "project_snapshots": project_snapshots, "source_id": source_id, "title": title, "why": why,
+            "evidence": evidence, "done_when": done_when, "created_at": at, "updated_at": at,
+            "reported_at": null, "completed_at": null, "result": "", "result_evidence": "",
+            "history": [{"actor": "owner", "status": "assigned", "at": at}],
+        });
+        let (task, created) = self
+            .store
+            .create_tracked_task(source_key.as_deref(), &data)?;
+        Ok(json!({"created": created, "task": task}))
+    }
+
+    pub fn tasks(&self, project_id: Option<&str>) -> Result<Value> {
+        if let Some(id) = project_id {
+            self.project(id)?;
+        }
+        let tasks: Vec<Value> = self
+            .store
+            .tasks()?
+            .into_iter()
+            .filter(|task| {
+                project_id.is_none_or(|id| {
+                    task["projects"]
+                        .as_array()
+                        .is_some_and(|projects| projects.iter().any(|project| project == id))
+                })
+            })
+            .collect();
+        Ok(json!({"tasks": tasks}))
+    }
+
+    pub fn report_task(
+        &self,
+        id: i64,
+        status: &str,
+        result: &str,
+        evidence: &str,
+    ) -> Result<Value> {
+        let target = match status {
+            "done" => "review",
+            "blocked" => "blocked",
+            _ => return Err(WatchtowerError::new("invalid_task_status", "Agents report a task as done or blocked.")
+                .hint("Use done with a result and evidence; completion still needs the owner's confirmation.")),
+        };
+        let result = task_text(&json!({"result": result}), "result", true, 4000)?;
+        let evidence = task_text(
+            &json!({"evidence": evidence}),
+            "evidence",
+            target == "review",
+            4000,
+        )?;
+        let mut task = self.tracked_task(id)?;
+        if !active_task(&task) {
+            return Err(WatchtowerError::new(
+                "invalid_task_transition",
+                "This task is already closed.",
+            )
+            .hint("Read the task's current state. Only the owner can reopen it."));
+        }
+        if task["status"] == target
+            && task["result"] == result
+            && task["result_evidence"] == evidence
+        {
+            return Ok(json!({"task": task}));
+        }
+        let at = self.now();
+        task["result"] = json!(result);
+        task["result_evidence"] = json!(evidence);
+        task["reported_at"] = json!(at);
+        task["completed_at"] = Value::Null;
+        self.save_task_change(task, target, json!({"actor": "agent", "status": target, "at": at, "result": result, "evidence": evidence}))
+    }
+
+    pub fn set_task_status(&self, id: i64, status: &str) -> Result<Value> {
+        self.change_task_status(id, status, None)
+    }
+
+    /// Confirm only the report or state that was actually shown to the owner.
+    pub fn set_task_status_guarded(&self, id: i64, status: &str, revision: i64) -> Result<Value> {
+        self.change_task_status(id, status, Some(revision))
+    }
+
+    fn change_task_status(&self, id: i64, status: &str, revision: Option<i64>) -> Result<Value> {
+        if !matches!(status, "assigned" | "done" | "cancelled") {
+            return Err(WatchtowerError::new("invalid_task_status", "Owner task status must be assigned, done or cancelled.")
+                .hint("assigned reopens a task; done confirms its reported result; cancelled closes it without completion."));
+        }
+        let mut task = self.tracked_task(id)?;
+        if revision.is_some_and(|revision| task["revision"] != revision) {
+            return Err(WatchtowerError::new("task_changed", "The task changed since it was displayed.")
+                .hint("Reload the task and read its latest result before confirming, reopening or cancelling it."));
+        }
+        if task["status"] == status {
+            return Ok(json!({"task": task}));
+        }
+        if (status == "done" && task["status"] != "review")
+            || (status == "cancelled" && task["status"] == "done")
+        {
+            return Err(WatchtowerError::new("invalid_task_transition", "This task cannot make that transition.")
+                .hint("Confirm done only after an agent report is ready for review. Reopen a completed task before cancelling it."));
+        }
+        if status == "assigned"
+            && !task["source_id"].is_null()
+            && self.store.tasks()?.iter().any(|other| {
+                other["id"] != task["id"]
+                    && active_task(other)
+                    && other["source_id"] == task["source_id"]
+                    && other["projects"] == task["projects"]
+            })
+        {
+            return Err(WatchtowerError::new(
+                "invalid_task_transition",
+                "Another active task already tracks this source.",
+            )
+            .hint("Continue or close that task before reopening this one."));
+        }
+        let at = self.now();
+        task["completed_at"] = if status == "done" {
+            json!(at)
+        } else {
+            Value::Null
+        };
+        self.save_task_change(
+            task,
+            status,
+            json!({"actor": "owner", "status": status, "at": at}),
+        )
+    }
+
+    fn tracked_task(&self, id: i64) -> Result<Value> {
+        self.store.task(id)?.ok_or_else(|| {
+            WatchtowerError::new("unknown_task", format!("Task {id} does not exist."))
+                .hint("Use `watchtower tasks list` to find the current task ids.")
+        })
+    }
+
+    fn save_task_change(&self, mut task: Value, status: &str, event: Value) -> Result<Value> {
+        let id = task["id"].as_i64().expect("stored task id");
+        let revision = task["revision"].as_i64().expect("stored task revision");
+        task["updated_at"] = event["at"].clone();
+        task["history"]
+            .as_array_mut()
+            .expect("stored task history")
+            .push(event);
+        task["status"] = json!(status);
+        task["revision"] = json!(revision + 1);
+        let saved = self.store.replace_task(id, revision, status, &task).map_err(|error| {
+            if matches!(&error, rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ErrorCode::ConstraintViolation) {
+                WatchtowerError::new("invalid_task_transition", "Another active task already tracks this source.")
+                    .hint("Reload the tasks before continuing.")
+            } else { error.into() }
+        })?;
+        if !saved {
+            return Err(WatchtowerError::new(
+                "task_changed",
+                "The task changed while this update was being saved.",
+            )
+            .hint("Reload the task and check the latest owner decision before retrying."));
+        }
+        Ok(json!({"task": task}))
+    }
+}
+
+fn active_task(task: &Value) -> bool {
+    matches!(
+        task["status"].as_str(),
+        Some("assigned" | "blocked" | "review")
+    )
+}
+
+fn task_error(message: impl Into<String>) -> WatchtowerError {
+    WatchtowerError::new("invalid_task", message)
+        .hint("Use projects (an array of ids), title, and optional source_id, why, evidence and done_when text.")
+}
+
+fn task_text(payload: &Value, field: &str, required: bool, max: usize) -> Result<String> {
+    let invalid = |message: String| {
+        WatchtowerError::new("invalid_task", message).hint(format!(
+            "Send {field} as {}text with at most {max} characters.",
+            if required { "nonempty " } else { "" }
+        ))
+    };
+    let text = match payload.get(field) {
+        None | Some(Value::Null) if !required => "",
+        Some(Value::String(text)) => text.trim(),
+        _ => return Err(invalid(format!("{field} must be text."))),
+    };
+    if (required && text.is_empty()) || text.chars().count() > max {
+        return Err(invalid(format!(
+            "{field} must {}contain at most {max} characters.",
+            if required { "be nonempty and " } else { "" }
+        )));
+    }
+    Ok(text.to_owned())
 }

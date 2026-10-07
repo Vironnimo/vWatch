@@ -54,11 +54,65 @@ async fn set_feedback(
     item_id: String,
     value: Option<String>,
     note: Option<String>,
+    until: Option<String>,
 ) -> Reply {
     work(&app, move |s| {
-        s.set_feedback(&item_id, value.as_deref(), note.as_deref())
+        s.set_feedback_until(
+            &item_id,
+            value.as_deref(),
+            note.as_deref(),
+            until.as_deref(),
+        )
     })
     .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn create_task(app: State<'_, AppState>, payload: Value) -> Reply {
+    work(&app, move |s| s.create_task(payload)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn restore_feedback(
+    app: State<'_, AppState>,
+    item_id: String,
+    snapshot: Option<Value>,
+) -> Reply {
+    work(&app, move |s| {
+        s.restore_feedback(&item_id, snapshot.as_ref())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_task_status(
+    app: State<'_, AppState>,
+    id: i64,
+    status: String,
+    revision: i64,
+) -> Reply {
+    work(&app, move |s| {
+        s.set_task_status_guarded(id, &status, revision)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_warning_ack(
+    app: State<'_, AppState>,
+    project: String,
+    key: String,
+    note: Option<String>,
+) -> Reply {
+    work(&app, move |s| {
+        s.set_warning_ack(&project, &key, note.as_deref())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn mark_changes_read(app: State<'_, AppState>, token: String) -> Reply {
+    work(&app, move |s| s.mark_changes_read(&token)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -238,6 +292,11 @@ pub fn run() {
             state,
             refresh,
             set_feedback,
+            create_task,
+            restore_feedback,
+            set_task_status,
+            set_warning_ack,
+            mark_changes_read,
             open_project,
             set_pref,
             set_status,

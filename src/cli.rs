@@ -72,6 +72,16 @@ enum Cmd {
         #[command(subcommand)]
         action: IdeasCmd,
     },
+    /// Track the completeness of a daily agent run
+    Runs {
+        #[command(subcommand)]
+        action: RunsCmd,
+    },
+    /// Read assigned work and report results for the owner to review
+    Tasks {
+        #[command(subcommand)]
+        action: TasksCmd,
+    },
     /// JSON schema of a document
     Schema { kind: SchemaKind },
 }
@@ -84,6 +94,46 @@ enum IdeasCmd {
     Add { text: String },
     /// Remove a parked idea
     Remove { id: i64 },
+}
+
+#[derive(Subcommand)]
+enum RunsCmd {
+    /// Start a tracked daily run, refreshing facts first
+    Start {
+        #[arg(long)]
+        no_refresh: bool,
+    },
+    /// Latest run, pending work and last fully successful run
+    Status,
+    /// Record a project failure (omit --project for the portfolio brief)
+    Fail {
+        id: i64,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        error: String,
+    },
+    /// Close the run; success requires current cards and a current brief
+    Finish { id: i64 },
+}
+
+#[derive(Subcommand)]
+enum TasksCmd {
+    /// Assigned work, reported results and completed tasks
+    List {
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Report an outcome; done awaits the owner's confirmation
+    Report {
+        id: i64,
+        #[arg(long, value_parser = ["done", "blocked"])]
+        status: String,
+        #[arg(long)]
+        result: String,
+        #[arg(long, default_value = "")]
+        evidence: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -176,6 +226,9 @@ struct DocArgs {
     /// Check the document and show what would be saved, without saving it
     #[arg(long)]
     dry_run: bool,
+    /// Token from the context used to write this document; required when saving
+    #[arg(long)]
+    context_token: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -315,16 +368,23 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         } => svc.due(max_age_days, !no_refresh)?,
         Cmd::Context { id } => svc.context(&id)?,
         Cmd::Card { action } => match action {
-            CardCmd::Put { id, doc } => {
-                svc.put_card(&id, read_document(&doc, stdin)?, doc.merge, doc.dry_run)?
-            }
+            CardCmd::Put { id, doc } => svc.put_card_guarded(
+                &id,
+                read_document(&doc, stdin)?,
+                doc.merge,
+                doc.dry_run,
+                doc.context_token.as_deref(),
+            )?,
             CardCmd::Show { id } => svc.card(&id)?,
         },
         Cmd::Portfolio { action } => match action {
             PortfolioCmd::Context => svc.portfolio_context()?,
-            PortfolioCmd::Put { doc } => {
-                svc.put_portfolio(read_document(&doc, stdin)?, doc.merge, doc.dry_run)?
-            }
+            PortfolioCmd::Put { doc } => svc.put_portfolio_guarded(
+                read_document(&doc, stdin)?,
+                doc.merge,
+                doc.dry_run,
+                doc.context_token.as_deref(),
+            )?,
             PortfolioCmd::Show => svc.portfolio()?,
         },
         Cmd::Feedback { project } => json!({"feedback": svc.feedback(project.as_deref())?}),
@@ -332,6 +392,21 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             IdeasCmd::List => json!({"ideas": svc.ideas()?}),
             IdeasCmd::Add { text } => json!({"idea": svc.add_idea(&text)?}),
             IdeasCmd::Remove { id } => svc.remove_idea(id)?,
+        },
+        Cmd::Runs { action } => match action {
+            RunsCmd::Start { no_refresh } => svc.run_start(!no_refresh)?,
+            RunsCmd::Status => svc.run_status()?,
+            RunsCmd::Fail { id, project, error } => svc.run_fail(id, project.as_deref(), &error)?,
+            RunsCmd::Finish { id } => svc.run_finish(id)?,
+        },
+        Cmd::Tasks { action } => match action {
+            TasksCmd::List { project } => svc.tasks(project.as_deref())?,
+            TasksCmd::Report {
+                id,
+                status,
+                result,
+                evidence,
+            } => svc.report_task(id, &status, &result, &evidence)?,
         },
     })
 }

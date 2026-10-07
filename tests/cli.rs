@@ -10,6 +10,13 @@ fn run(home: &std::path::Path, args: &[&str]) -> (i32, Value) {
     (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
 }
 
+fn card_token(home: &std::path::Path) -> String {
+    run(home, &["context", "demo"]).1["context_token"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[test]
 fn cli_prints_json_for_success_and_expected_failure() {
     let tmp = tempfile::tempdir().unwrap();
@@ -30,7 +37,53 @@ fn cli_prints_json_for_success_and_expected_failure() {
         &home,
         &["card", "put", "demo", "--json", &common::card().to_string()],
     );
+    assert_eq!(
+        (code, out["error"]["code"].as_str()),
+        (1, Some("context_required"))
+    );
+    let token = card_token(&home);
+    let (code, out) = run(
+        &home,
+        &[
+            "card",
+            "put",
+            "demo",
+            "--json",
+            &common::card().to_string(),
+            "--context-token",
+            &token,
+        ],
+    );
     assert_eq!((code, out["saved"].as_bool()), (0, Some(true)));
+    let (code, out) = run(
+        &home,
+        &[
+            "card",
+            "put",
+            "demo",
+            "--json",
+            &common::card().to_string(),
+            "--context-token",
+            &token,
+        ],
+    );
+    assert_eq!(
+        (code, out["error"]["code"].as_str()),
+        (1, Some("version_conflict"))
+    );
+    assert_eq!(run(&home, &["card", "show", "demo"]).1["version"], 1);
+    let (code, out) = run(
+        &home,
+        &[
+            "card",
+            "put",
+            "demo",
+            "--json",
+            &common::card().to_string(),
+            "--dry-run",
+        ],
+    );
+    assert_eq!((code, out["saved"].as_bool()), (0, Some(false)));
 
     // UTF-8 with BOM and UTF-16 (Windows PowerShell's default) both read.
     let patch = tmp.path().join("patch.json");
@@ -48,7 +101,9 @@ fn cli_prints_json_for_success_and_expected_failure() {
                 "demo",
                 "--file",
                 patch.to_str().unwrap(),
-                "--merge"
+                "--merge",
+                "--context-token",
+                &card_token(&home),
             ]
         )
         .1["version"],
@@ -68,6 +123,8 @@ fn cli_prints_json_for_success_and_expected_failure() {
             "--file",
             patch.to_str().unwrap(),
             "--merge",
+            "--context-token",
+            &card_token(&home),
         ],
     );
     assert_eq!(
@@ -132,4 +189,45 @@ fn cli_prints_json_for_success_and_expected_failure() {
     );
 
     assert_eq!(run(&home, &["projects", "status", "demo", "sleeping"]).0, 2);
+
+    let brief = json!({"greeting":"Moin"}).to_string();
+    let (code, out) = run(&home, &["portfolio", "put", "--json", &brief]);
+    assert_eq!(
+        (code, out["error"]["code"].as_str()),
+        (1, Some("context_required"))
+    );
+    let token = run(&home, &["portfolio", "context"]).1["context_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        run(
+            &home,
+            &[
+                "portfolio",
+                "put",
+                "--json",
+                &brief,
+                "--context-token",
+                &token
+            ]
+        )
+        .0,
+        0
+    );
+    let (code, out) = run(
+        &home,
+        &[
+            "portfolio",
+            "put",
+            "--json",
+            &brief,
+            "--context-token",
+            &token,
+        ],
+    );
+    assert_eq!(
+        (code, out["error"]["code"].as_str()),
+        (1, Some("version_conflict"))
+    );
 }

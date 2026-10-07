@@ -17,6 +17,11 @@
   let showRated = false;  // show suggestions the owner already rated away
   let showAllRecent = false;
   let noteFor = null;     // item whose "why?" field shows right after a later/down rating
+  let snoozeFor = null;
+  let snoozeDate = '';
+  let warningFor = null;
+  const warningDrafts = {};
+  const busyTasks = new Set();
   let answering = null;   // question whose answer field is open
   const drafts = {};      // unsent note and answer text per item, kept across re-renders
   let ideaDraft = '';
@@ -62,7 +67,7 @@
   function inputFocus() {
     const el = document.activeElement;
     if (!el || el.tagName !== 'INPUT') return null;
-    const selector = el.id ? `#${CSS.escape(el.id)}` : el.dataset.draft ? `[data-draft="${CSS.escape(el.dataset.draft)}"]` : null;
+    const selector = el.id ? `#${CSS.escape(el.id)}` : el.dataset.draft ? `[data-draft="${CSS.escape(el.dataset.draft)}"]` : el.dataset.warningNote ? `[data-warning-note="${CSS.escape(el.dataset.warningNote)}"]` : null;
     return selector ? { selector, start: el.selectionStart, end: el.selectionEnd } : null;
   }
   function restoreInputFocus(saved) {
@@ -81,10 +86,16 @@
   function rated(id) {
     const f = S.feedback[id];
     if (!f) return null;
-    if (f.value === 'later' && (Date.now() - Date.parse(f.at)) / dayMs >= S.snooze_days) return null;
+    if (f.value === 'later' && snoozedUntil(f) <= S.today) return null;
     return f.value;
   }
-  const hiddenByRating = id => !showRated && (rated(id) === 'down' || rated(id) === 'later');
+  function addDays(date, days) {
+    const d = new Date(date + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  const snoozedUntil = f => f.snoozed_until || addDays(String(f.at).slice(0, 10), S.snooze_days || 7);
+  const hiddenByRating = id => !showRated && snoozeFor !== id && (rated(id) === 'down' || rated(id) === 'later');
   // the owner's reply to a question: answered (with the answer as note) or done
   const reply = id => { const f = id && S.feedback[id]; return f && (f.value === 'answered' || f.value === 'done') ? f : null; };
   const openQs = c => c.waiting_on_you.filter(w => !reply(w.id));
@@ -101,6 +112,24 @@
   }
 
   // ---------- facts-derived safety ----------
+  const acknowledged = (p, key) => !!(p.warnings || []).find(w => w.key === key && w.acknowledged);
+  function noRemoteTag(p) {
+    return acknowledged(p, 'no_remote') ? '<span class="tag">bewusst ohne Remote</span>' : '<span class="tag bad">kein Remote</span>';
+  }
+  function warningControls(p) {
+    const warnings = p.warnings || [];
+    if (!warnings.length) return '';
+    const row = w => {
+      const key = `${p.id}:${w.key}`;
+      const control = w.can_acknowledge === false ? '' : w.acknowledged
+        ? `<span>${esc(w.note)}</span><button class="linkish" type="button" data-warning-clear="${esc(w.key)}" data-project="${esc(p.id)}">wieder warnen</button>`
+        : warningFor === key ? `<div class="inrow"><input type="text" data-warning-note="${esc(key)}" aria-label="Warum ist das bewusst so?" maxlength="300" value="${esc(warningDrafts[key] || '')}" placeholder="z. B. bewusst lokal, kein GitHub-Projekt"><button class="btn" type="button" data-warning-save="${esc(w.key)}" data-project="${esc(p.id)}">Merken</button><button class="linkish" type="button" data-warning-cancel>Abbrechen</button></div>`
+          : `<button class="linkish" type="button" data-warning-open="${esc(w.key)}" data-project="${esc(p.id)}">Bewusst so</button>`;
+      return `<div class="warning-row"><strong>${esc(w.title || w.kind || w.key)}</strong>${control}</div>`;
+    };
+    const active = warnings.filter(w => !w.acknowledged), known = warnings.filter(w => w.acknowledged);
+    return dmod('Warnungen einordnen', active.map(row).join('') + (known.length ? `<details class="acknowledged-warnings"><summary>${known.length} bewusst akzeptiert</summary>${known.map(row).join('')}</details>` : ''), 'Deine Begründung gilt für diesen Befund. Wenn er sich wesentlich ändert, meldet Watchtower ihn wieder.');
+  }
   function safety(p) {
     const f = p.facts || {};
     const d = f.dirty || {};
@@ -133,16 +162,24 @@
   function fbButtons(id) {
     if (!id) return '';
     const cur = rated(id);
-    return `<span class="fb" data-item="${esc(id)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
+    const buttons = `<span class="fb" data-item="${esc(id)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
+    return buttons + snoozeControls(id);
+  }
+  function snoozeControls(id) {
+    const until = rated(id) === 'later' ? `<span class="faint">Wieder am ${fmtDate(snoozedUntil(S.feedback[id]))} · <button class="linkish" type="button" data-snooze-open="${esc(id)}">Datum ändern</button> · <button class="linkish" type="button" data-snooze-clear="${esc(id)}">jetzt zeigen</button></span>` : '';
+    const picker = snoozeFor === id ? `<div class="snooze-picker"><span>Wann möchtest du das wieder sehen?</span><div class="snooze-options"><button class="btn" type="button" data-snooze-days="1">Morgen</button><button class="btn" type="button" data-snooze-days="7">In einer Woche</button><input type="date" id="snooze-date" aria-label="Wieder anzeigen am" min="${addDays(S.today, 1)}" value="${esc(snoozeDate)}"><button class="btn primary" type="button" data-snooze-save>Datum merken</button><button class="linkish" type="button" data-snooze-cancel>Abbrechen</button></div></div>` : '';
+    return until + picker;
   }
 
   // ---------- handing a task to a coding agent ----------
   function taskBtn(key, task) {
-    TASKS[key] = task;
-    return `<button class="linkish task" type="button" data-task="${esc(key)}" title="Kopiert einen fertigen Auftrag für einen Coding-Agent">Auftrag kopieren</button>`;
+    const snapshot = { ...task, source_id: key };
+    const active = (S.tasks || []).find(t => ['assigned', 'blocked', 'review'].includes(t.status) && t.source_id === key && [...t.projects].sort().join('|') === [...task.projects].sort().join('|'));
+    TASKS[key] = active || snapshot;
+    return `<span class="task-actions"><button class="linkish task" type="button" data-task="${esc(key)}" title="Kopiert einen fertigen Auftrag für einen Coding-Agent">Auftrag kopieren</button>${active ? `<span class="faint">${esc(TASK_STATUS[active.status])} · #${active.id}</span>` : `<button class="linkish task" type="button" data-task-assign="${esc(key)}" title="Merkt, dass du diesen Auftrag an einen Agent übergibst">Beauftragt</button>`}</span>`;
   }
   function taskPrompt(t) {
-    const ps = t.projects.map(byId).filter(Boolean);
+    const ps = t.projects.map(id => byId(id) || (t.project_snapshots || []).find(p => p.id === id)).filter(Boolean);
     const lines = [!ps.length ? 'Aufgabe für ein neues Projekt:' : ps.length === 1 ? `Aufgabe im Projekt ${ps[0].name} (${ps[0].path}):` : `Aufgabe über die Projekte ${ps.map(p => `${p.name} (${p.path})`).join(', ')}:`, t.title, ''];
     if (t.why) lines.push(`Warum: ${t.why}`);
     if (t.evidence) lines.push(`Beleg: ${t.evidence}`);
@@ -153,8 +190,63 @@
       if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
       if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
     }
+    if (Number.isInteger(t.id)) lines.push('', `Dieser Auftrag wird in Watchtower als #${t.id} verfolgt. Melde das Ergebnis mit konkretem Beleg zurück:`, `watchtower tasks report ${t.id} --status done --result "Was erledigt wurde" --evidence "Prüfung, Datei oder Commit"`, `Wenn du blockiert bist: watchtower tasks report ${t.id} --status blocked --result "Was fehlt und wer es klären kann"`);
     lines.push('', `Aus Watchtower kopiert am ${fmtDate(S.today)}. Prüfe den Befund zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
     return lines.join('\n');
+  }
+
+  // The owner explicitly records assignments; copying a prompt alone changes nothing.
+  const TASK_STATUS = { assigned: 'Beauftragt', blocked: 'Blockiert', review: 'Zur Prüfung', done: 'Erledigt bestätigt', cancelled: 'Beendet' };
+  function trackedTask(t, history = false) {
+    const key = `tracked:${t.id}`;
+    TASKS[key] = t;
+    const identity = `data-task-id="${t.id}" data-task-revision="${t.revision || 1}"`;
+    const actions = t.status === 'review'
+      ? `<button class="btn primary" type="button" data-task-status="done" ${identity}>Ergebnis bestätigen</button><button class="btn" type="button" data-task-status="assigned" ${identity}>Zurück an den Agent</button>`
+      : t.status === 'blocked' ? `<button class="btn" type="button" data-task-status="assigned" ${identity}>Wieder freigeben</button>`
+        : ['done', 'cancelled'].includes(t.status) ? `<button class="btn" type="button" data-task-status="assigned" ${identity}>Wieder öffnen</button>` : '';
+    const active = ['assigned', 'blocked', 'review'].includes(t.status);
+    const events = history && (t.history || []).length ? `<details class="task-history"><summary class="more">Verlauf</summary><ul class="bullets">${t.history.map(h => `<li>${h.actor === 'owner' ? 'Du' : 'Agent'}: ${esc(TASK_STATUS[h.status] || h.status || '')}${h.at ? ` · ${fmtDate(h.at)}` : ''}${h.result ? ` · ${esc(h.result)}` : ''}${h.evidence ? `<div class="ev">${esc(h.evidence)}</div>` : ''}</li>`).join('')}</ul></details>` : '';
+    return `<article class="idea tracked-task" data-status="${esc(t.status)}"><div class="h"><div class="t">${esc(t.title)}</div><span class="task-status" data-status="${esc(t.status)}">${esc(TASK_STATUS[t.status] || t.status)}</span></div><div class="who">${(t.projects || []).map(plink).join('')}<span class="faint">#${t.id} · ${ago(t.updated_at || t.created_at)}</span></div>${t.result ? `<div class="task-result">${esc(t.result)}</div>` : ''}${t.result_evidence ? `<div class="ev">${esc(t.result_evidence)}</div>` : ''}${t.done_when ? `<div class="why">Fertig, wenn: ${esc(t.done_when)}</div>` : ''}${t.why || t.evidence ? `<details><summary class="more">Ursprünglicher Auftrag</summary><div class="why">${esc(t.why)}</div><div class="ev">${esc(t.evidence)}</div></details>` : ''}<div class="task-actions">${actions}${active ? `<button class="linkish task" type="button" data-task="${key}">Auftrag kopieren</button><button class="linkish" type="button" data-task-status="cancelled" ${identity}>Beenden</button>` : ''}</div>${events}</article>`;
+  }
+  function blockTasks(project = null) {
+    const all = (S.tasks || []).filter(t => !project || (t.projects || []).includes(project));
+    const active = all.filter(t => ['assigned', 'blocked', 'review'].includes(t.status)).sort((a, b) => ({ review: 0, blocked: 1, assigned: 2 }[a.status] - { review: 0, blocked: 1, assigned: 2 }[b.status]));
+    const rest = all.filter(t => !active.includes(t));
+    if (!all.length || (!active.length && !rest.length)) return '';
+    const shownTasks = active.slice(0, 3), remaining = active.slice(3);
+    const body = `<div class="cards2">${shownTasks.map(t => trackedTask(t, !!project)).join('')}</div>${remaining.length ? `<details><summary class="more">${remaining.length} weitere Aufträge</summary><div class="cards2">${remaining.map(t => trackedTask(t, !!project)).join('')}</div></details>` : ''}${rest.length ? `<details><summary class="more">${rest.length} abgeschlossene Aufträge</summary><div class="cards2">${rest.map(t => trackedTask(t, true)).join('')}</div></details>` : ''}`;
+    return project ? dmod('Aufträge', body) : mod('tasks', 'Deine Aufträge', `${active.filter(t => t.status === 'review').length} zur Prüfung · ${active.filter(t => t.status === 'blocked').length} blockiert · ${active.filter(t => t.status === 'assigned').length} beauftragt`, body);
+  }
+
+  function runStatus() {
+    const r = S.run_status;
+    if (!r) return '';
+    const labels = { unknown: 'Noch kein Agent-Lauf erfasst', running: 'Agent-Lauf arbeitet', stalled: 'Agent-Lauf hängt fest', incomplete: 'Agent-Lauf unvollständig', failed: 'Agent-Lauf fehlgeschlagen', complete: 'Agent-Lauf abgeschlossen' };
+    const latest = r.latest || {}, counts = latest.counts || {};
+    const pending = Array.isArray(r.pending_owner_replies) ? r.pending_owner_replies.length : Number(r.pending_owner_replies || 0);
+    const reasonText = value => {
+      if (Array.isArray(value)) return value.map(reasonText).join(', ');
+      if (value && typeof value === 'object') return reasonText(value.message || value.code);
+      const labels = { no_card: 'Einschätzung fehlt', changed: 'Projekt hat sich geändert', ci_changed: 'CI hat sich geändert', answered: 'Deine Antwort fehlt noch in der Karte', status_changed: 'Deine Vorgaben haben sich geändert', new_fields: 'Einschätzung muss ergänzt werden', stale: 'Einschätzung ist veraltet', missing: 'Gesamtbrief fehlt', new_day: 'Gesamtbrief für heute fehlt', owner_idea: 'Deine neue Idee muss eingeschätzt werden', cards_changed: 'Karten wurden aktualisiert', cards_will_change: 'Offene Karten müssen zuerst aktualisiert werden', facts_unreadable: 'Fakten konnten nicht gelesen werden', facts_missing: 'Fakten fehlen', path_missing: 'Projektordner fehlt', not_a_git_repository: 'Kein Git-Repository', git_status_failed: 'Git-Status konnte nicht gelesen werden', agent_failed: 'Agent konnte das Projekt nicht abschließen', project_removed: 'Projekt nicht mehr beobachtet', project_archived: 'Projekt archiviert' };
+      return labels[value] || (typeof value === 'string' && !/^[a-z]+(?:_[a-z]+)+$/.test(value) ? value : 'Weitere Prüfung nötig');
+    };
+    const problems = (latest.projects || []).filter(p => !['current', 'complete', 'completed', 'skipped'].includes(p.status));
+    const lines = problems.map(p => `<li>${plink(p.id)}: ${esc(({ pending: 'steht noch aus', failed: 'fehlgeschlagen', changed: 'erneut geändert', running: 'in Arbeit' })[p.status] || 'noch offen')}${p.error || p.reason ? ` · ${esc(reasonText(p.error || p.reason))}` : ''}</li>`).join('');
+    const repair = typeof r.repair_task === 'string' ? r.repair_task : r.repair_task && (r.repair_task.prompt || r.repair_task.text);
+    const pf = latest.portfolio;
+    return `<section class="run-status" data-state="${esc(r.state || 'unknown')}" aria-label="Agent-Lauf"><div class="run-status-head"><strong>${esc(labels[r.state] || labels.unknown)}</strong><span class="faint">${counts.total ? `${counts.current || 0} von ${counts.total} Karten im Lauf aktuell` : ''}${latest.started_at ? ` · ${ago(latest.started_at)}` : ''}${pending ? ` · ${pending} ${pending === 1 ? 'Antwort wartet' : 'Antworten warten'} auf Übernahme` : ''}</span></div>${r.last_successful ? `<div class="faint">Letzter vollständiger Lauf: ${fmtDate(r.last_successful.finished_at || r.last_successful.started_at || r.last_successful)}</div>` : ''}${lines || pf || repair ? `<details class="run-status-details"><summary class="more">${['failed', 'stalled', 'incomplete'].includes(r.state) ? 'Was fehlt und wie es weitergeht' : 'Lauf ansehen'}</summary>${lines ? `<ul class="run-status-problems">${lines}</ul>` : ''}${pf ? `<p class="faint">Gesamtbrief: ${esc(({ current: 'aktuell', complete: 'aktuell', pending: 'steht aus', failed: 'fehlgeschlagen', written: 'geschrieben' })[pf.status] || 'noch offen')}${pf.error || pf.reason ? ` · ${esc(reasonText(pf.error || pf.reason))}` : ''}</p>` : ''}${repair ? `<button class="btn" type="button" data-copy="${esc(repair)}">Auftrag zum Fortsetzen kopieren</button>` : ''}</details>` : ''}</section>`;
+  }
+
+  function blockChanges() {
+    const c = S.changes;
+    if (!c) return '';
+    const entries = c.entries || [];
+    if (c.has_baseline && !entries.length) return hiddenMods().has('changes') ? '' : `<p class="digest-empty faint">Keine neuen Befunde seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
+    const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: 'Neu', resolved: 'Nicht mehr offen', decision_applied: 'Antwort übernommen' })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${esc(e.title)}</div>${e.detail ? `<div class="why">${esc(e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>Nächster Schritt:</b> ${esc(e.next_step)}</div>` : ''}</div>`;
+    const body = entries.length ? `<div class="digest-items">${entries.slice(0, 3).map(row).join('')}</div>${entries.length > 3 ? `<details><summary class="more">${entries.length - 3} weitere Änderungen</summary><div class="digest-items">${entries.slice(3).map(row).join('')}</div></details>` : ''}` : `<p class="faint">${c.has_baseline ? 'Keine neuen Befunde seit deinem letzten Lesestand.' : 'Markiere den aktuellen Stand als gelesen. Danach siehst du hier nur neue Befunde, erledigte Punkte und übernommene Antworten.'}</p>`;
+    const action = c.token && (entries.length || !c.has_baseline) ? `<div class="actions"><button class="btn" type="button" data-changes-read="${esc(c.token)}">${c.has_baseline ? 'Diese Änderungen als gelesen markieren' : 'Aktuellen Stand als gelesen markieren'}</button></div>` : '';
+    return mod('changes', 'Seit deinem letzten Lesen', c.since ? `Lesestand vom ${fmtDate(c.since)}` : 'Du bestimmst, wann der Stand gelesen ist', `<div class="digest-summary">${body}${action}</div>`);
   }
 
   function spark(weekly, col, h = 38) {
@@ -175,7 +267,7 @@
   function noteForm(id, label) {
     const down = S.feedback[id] && S.feedback[id].value === 'down';
     return `<div class="idea noteform"><div class="kind">${down ? 'Abgelehnt' : 'Später'} · ${esc(label)}</div>
-      <div class="why">Magst du kurz sagen, warum? Die Agents richten künftige Vorschläge danach.</div>
+      ${snoozeControls(id)}<div class="why">Magst du kurz sagen, warum? Die Agents richten künftige Vorschläge danach.</div>
       <div class="inrow"><input type="text" aria-label="Warum" data-draft="${esc(id)}" data-kind="note" maxlength="300" value="${esc(drafts[id] || '')}" placeholder="${down ? 'z. B. passt nicht zum Projekt' : 'z. B. erst nach dem Release'}">
       <button type="button" class="btn primary" data-note-save="${esc(id)}">Merken</button><button type="button" class="btn" data-note-skip>Überspringen</button></div></div>`;
   }
@@ -190,7 +282,7 @@
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
       ${myNote(s.id)}
       <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
-      ${projectId || (projects || []).length ? `<div class="taskrow">${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : projects, title: s.title, why: s.why, evidence: s.evidence, done_when: s.done_when })}</div>` : ''}</div>`;
+      <div class="taskrow">${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when })}</div></div>`;
   }
 
   function blockFocus() {
@@ -229,7 +321,7 @@
     if (!f.is_git) return `<span class="tag">${f.error === 'path_missing' ? 'Ordner fehlt' : 'kein Git'}</span>`;
     const s = safety(p);
     const out = [];
-    if (!s.remote) out.push('<span class="tag bad">kein Remote</span>');
+    if (!s.remote) out.push(noRemoteTag(p));
     if (s.unsavedShort) out.push(`<span class="tag ${s.level}">${esc(s.unsavedShort)}</span>`);
     if (s.ahead) out.push(`<span class="tag warn">${s.ahead} ungepusht</span>`);
     if (s.ci === 'red') out.push('<span class="tag bad">CI rot</span>');
@@ -237,7 +329,7 @@
     out.push(collisionTag(p));
     return out.join('');
   }
-  const risk = p => { const s = safety(p); return (p.facts && p.facts.is_git && !s.remote ? 2 : 0) + (s.level === 'bad' ? 2 : s.level === 'warn' ? 1 : 0) + (s.ci === 'red' ? 1 : 0) + (s.ahead ? 1 : 0); };
+  const risk = p => { const s = safety(p); return (p.facts && p.facts.is_git && !s.remote && !acknowledged(p, 'no_remote') ? 2 : 0) + (s.level === 'bad' ? 2 : s.level === 'warn' ? 1 : 0) + (s.ci === 'red' ? 1 : 0) + (s.ahead ? 1 : 0); };
 
   function blockProjects() {
     const list = [...visible()].sort((a, b) => risk(b) - risk(a) || (lastWork(b) || '').localeCompare(lastWork(a) || ''));
@@ -308,7 +400,7 @@
       const unsaved = [s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : '', s.ahead ? `<span class="tag warn">${s.ahead} ungepusht</span>` : ''].filter(Boolean).join(' ');
       const ci = CI[s.ci] || CI.unknown;
       return `<tr><td>${plink(p.id)}</td>
-        <td>${s.remote ? `<span class="tag good">${esc(p.facts.remotes.map(r => r.name).join(', '))}</span>` : '<span class="tag bad">kein Remote</span>'}</td>
+        <td>${s.remote ? `<span class="tag good">${esc(p.facts.remotes.map(r => r.name).join(', '))}</span>` : noRemoteTag(p)}</td>
         <td>${unsaved || '<span class="faint">sauber</span>'}</td>
         <td>${s.leftovers ? `<span class="faint">${esc(s.leftovers)}</span>` : ''} ${collisionTag(p)}</td>
         <td>${ci[1] ? `<span class="tag ${ci[1]}">${ci[0]}</span>` : `<span class="faint">${ci[0]}</span>`}</td></tr>`;
@@ -375,7 +467,7 @@
   function blockIdeas() {
     const fromProjects = visible().map(p => {
       const list = ((p.card || {}).suggestions || []).filter(s => s.id === noteFor || !hiddenByRating(s.id));
-      const s = list.find(x => x.id === noteFor) || list.find(x => x.type === 'feature') || list[0];
+      const s = list.find(x => x.id === noteFor || x.id === snoozeFor) || list.find(x => x.type === 'feature') || list[0];
       return s ? ideaCard(s, [p.id], p.id, 'Aus dem Projekt') : '';
     });
     const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App'));
@@ -433,7 +525,7 @@
   function card(p) {
     const s = safety(p), c = p.card;
     const badges = [
-      p.facts && p.facts.is_git && !s.remote ? '<span class="tag bad">kein Remote</span>' : '',
+      p.facts && p.facts.is_git && !s.remote ? noRemoteTag(p) : '',
       s.unsaved ? `<span class="tag ${s.level}">${num(p.facts.dirty.files)} Dateien offen</span>` : '',
       s.ahead ? `<span class="tag warn">${s.ahead} ungepusht</span>` : '',
       s.ci === 'red' ? '<span class="tag bad">CI rot</span>' : '',
@@ -458,12 +550,12 @@
   function renderBoard() {
     const list = visible();
     const git = list.filter(p => p.facts && p.facts.is_git);
-    const noRemote = git.filter(p => !p.facts.has_remote).length;
+    const noRemote = git.filter(p => !p.facts.has_remote && !acknowledged(p, 'no_remote')).length;
     const unsaved = git.filter(p => (p.facts.dirty || {}).files || p.facts.ahead).length;
     const red = git.filter(p => (p.facts.ci || {}).state === 'red').length;
     const waiting = list.reduce((a, p) => a + (p.card ? openQs(p.card).length : 0), 0);
     const kpis = `<div class="kpis">
-      <div class="kpi ${noRemote ? 'bad' : 'ok'}"><div class="v">${noRemote}</div><div class="l">Repos ohne Backup</div></div>
+      <div class="kpi ${noRemote ? 'bad' : 'ok'}"><div class="v">${noRemote}</div><div class="l">Remote ungeklärt</div></div>
       <div class="kpi ${unsaved ? 'warn' : 'ok'}"><div class="v">${unsaved}</div><div class="l">mit ungesicherter Arbeit</div></div>
       <div class="kpi ${red ? 'bad' : 'ok'}"><div class="v">${red}</div><div class="l">mit rotem CI</div></div>
       <div class="kpi"><div class="v">${waiting}</div><div class="l">Entscheidungen offen</div></div></div>`;
@@ -547,7 +639,7 @@
     const factsKv = f.is_git ? `<dl class="kv">
       <dt>Commits</dt><dd class="mono">${num(commits.total)} gesamt · 7 T: ${num(commits.last_7d)} · 30 T: ${num(commits.last_30d)} · seit ${commits.first ? fmtDate(commits.first) : '—'}</dd>
       <dt>Branch</dt><dd class="mono">${esc(f.branch || '—')}${f.upstream ? ` → ${esc(f.upstream)}` : ''}${f.ahead ? ` · ${f.ahead} voraus` : ''}${f.behind ? ` · ${f.behind} zurück` : ''}</dd>
-      <dt>Backup</dt><dd>${f.has_remote ? esc(f.remotes.map(r => `${r.name}: ${r.url}`).join(', ')) : '<span class="tag bad">kein Remote</span>'}</dd>
+      <dt>Remote</dt><dd>${f.has_remote ? esc(f.remotes.map(r => `${r.name}: ${r.url}`).join(', ')) : noRemoteTag(p)}</dd>
       <dt>Ungesichert</dt><dd>${s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : 'sauber'}</dd>
       <dt>Liegengeblieben</dt><dd>${esc(s.leftovers || 'nichts')}</dd>
       ${releaseText(p) ? `<dt>Release</dt><dd>${esc(releaseText(p))}</dd>` : ''}
@@ -588,7 +680,7 @@
         + dmod('Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
         + (hbEmpty(c.handbook) ? '' : `<details class="mod hb" data-hb${hbOpen ? ' open' : ''}><summary class="mod-head"><div><h2>Handbuch <span class="chev" aria-hidden="true">▸</span></h2><div class="sub">Starten, Aufbau, wo was liegt: fürs Wiederreinkommen nach längerer Pause</div></div></summary>${handbookBody(c.handbook)}</details>`);
     }
-    body += dmod('Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min${p.card_updated_at ? ` · Karte vom ${fmtDate(p.card_updated_at)}` : ''}` : null);
+    body += blockTasks(p.id) + warningControls(p) + dmod('Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min${p.card_updated_at ? ` · Karte vom ${fmtDate(p.card_updated_at)}` : ''}` : null);
     return `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(p.name)}">${body}</aside>`;
   }
 
@@ -870,7 +962,7 @@
     $('#refresh').hidden = $('.switch').hidden = !S.projects.length;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
     const style = { board: renderBoard, handbook: renderHandbook }[S.prefs.style] || renderHandover;
-    $('#view').innerHTML = !S.projects.length ? renderEmpty() : style();
+    $('#view').innerHTML = runStatus() + (S.projects.length ? blockChanges() : '') + blockTasks() + (!S.projects.length ? renderEmpty() : style());
     renderFoot();
     if (openId) openDrawer(openId, true);
     if (panelOpen) renderPanel(true);
@@ -906,16 +998,16 @@
     refreshing = false;
   }
   // Saves the owner's reaction to an item (a rating, an answer, "done"); `note` undefined keeps the stored one.
-  async function react(id, value, note, msg) {
+  async function react(id, value, note, msg, until) {
     const prev = S.feedback[id] ? { ...S.feedback[id] } : null;
     try {
-      await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note });
-      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: note === undefined ? (prev ? prev.note : '') : note }; else delete S.feedback[id];
+      await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note, until: until === undefined ? null : until });
+      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: note === undefined ? (prev ? prev.note : '') : note, snoozed_until: value === 'later' ? (until || (prev && prev.snoozed_until) || addDays(S.today, S.snooze_days || 7)) : null }; else delete S.feedback[id];
       render();
       if (msg) toast(msg, async () => {
         noteFor = null;
         try {
-          await call('set_feedback', { item_id: id, value: prev ? prev.value : null, note: prev ? prev.note : null });
+          await call('restore_feedback', { item_id: id, snapshot: prev });
           if (prev) S.feedback[id] = prev; else delete S.feedback[id];
         } catch (e) { toast('Rückgängig hat nicht geklappt: ' + errText(e)); }
         render();
@@ -927,10 +1019,69 @@
   const focusDraft = id => { const all = document.querySelectorAll(`[data-draft="${CSS.escape(id)}"]`); if (all.length) all[all.length - 1].focus(); };
   async function setFeedback(el, v) {
     const id = el.dataset.item;
+    if (v === 'later') { openSnooze(id); return; }
     const value = S.feedback[id] && S.feedback[id].value === v ? null : v;
-    noteFor = value === 'down' || value === 'later' ? id : null;
-    const msg = value === 'down' ? 'Ausgeblendet. Die Agents schlagen das nicht mehr vor.' : value === 'later' ? `Kommt in ${S.snooze_days} Tagen wieder.` : null;
+    snoozeFor = null;
+    noteFor = value === 'down' ? id : null;
+    const msg = value === 'down' ? 'Ausgeblendet. Die Agents schlagen das nicht mehr vor.' : null;
     if (await react(id, value, undefined, msg)) focusDraft(id); else noteFor = null;
+  }
+  function openSnooze(id) {
+    snoozeFor = id; noteFor = null;
+    const f = S.feedback[id];
+    snoozeDate = f && rated(id) === 'later' ? snoozedUntil(f) : addDays(S.today, 7);
+    render();
+  }
+  async function saveSnooze(until) {
+    const id = snoozeFor;
+    if (!id) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(until || '') || until <= S.today) { toast('Wähle einen Tag nach heute.'); return; }
+    snoozeFor = null; noteFor = id;
+    if (await react(id, 'later', undefined, `Wieder am ${fmtDate(until)}.`, until)) focusDraft(id);
+    else { noteFor = null; snoozeFor = id; render(); }
+  }
+  async function assignTask(key) {
+    const snapshot = TASKS[key];
+    if (!snapshot || Number.isInteger(snapshot.id) || busyTasks.has(key)) return;
+    busyTasks.add(key);
+    try {
+      const result = await call('create_task', { payload: snapshot });
+      await load(false);
+      toast(result.created ? `Auftrag #${result.task.id} ist als beauftragt gemerkt. Kopiere ihn für deinen Agent.` : `Auftrag #${result.task.id} ist bereits beauftragt.`);
+    } catch (e) { toast('Auftrag nicht gespeichert: ' + errText(e)); }
+    finally { busyTasks.delete(key); }
+  }
+  async function changeTaskStatus(id, status, revision) {
+    const key = `tracked:${id}`;
+    if (busyTasks.has(key)) return;
+    busyTasks.add(key);
+    try {
+      await call('set_task_status', { id, status, revision }); await load(false);
+      toast(status === 'done' ? 'Ergebnis bestätigt.' : status === 'assigned' ? 'Auftrag wieder freigegeben. Kopiere ihn für deinen Agent.' : 'Auftrag beendet.');
+    } catch (e) {
+      if (e && e.code === 'task_changed') { await load(false); toast('Der Auftrag hat sich inzwischen geändert. Prüfe zuerst das neue Ergebnis.'); }
+      else toast('Auftrag nicht geändert: ' + errText(e));
+    }
+    finally { busyTasks.delete(key); }
+  }
+  async function saveWarning(project, key, clear = false) {
+    const draftKey = `${project}:${key}`, note = clear ? null : (warningDrafts[draftKey] || '').trim();
+    if (!clear && !note) { toast('Schreib kurz, warum das bewusst so ist.'); return; }
+    try {
+      await call('set_warning_ack', { project, key, note });
+      warningFor = null; delete warningDrafts[draftKey]; await load(false);
+      toast(clear ? 'Dieser Befund wird wieder als Warnung gezeigt.' : 'Als bewusste Entscheidung gemerkt. Geänderte Befunde werden wieder gemeldet.');
+    } catch (e) { toast('Nicht gespeichert: ' + errText(e)); }
+  }
+  async function markChangesRead(token) {
+    try { await call('mark_changes_read', { token }); await load(false); toast('Lesestand gemerkt. Neu hinzugekommene Änderungen bleiben sichtbar.'); }
+    catch (e) { toast('Lesestand nicht gespeichert: ' + errText(e)); }
+  }
+  async function copyTask(key) {
+    const task = TASKS[key];
+    if (!task) return;
+    try { await navigator.clipboard.writeText(taskPrompt(task)); toast('Auftrag kopiert. Füg ihn bei deinem Coding-Agent ein.'); }
+    catch (e) { toast('Kopieren hat nicht geklappt.'); }
   }
   async function saveNote(id) {
     const text = (drafts[id] || '').trim();
@@ -1010,6 +1161,27 @@
 
   document.addEventListener('click', async e => {
     const t = e.target;
+    const snoozeOpen = t.closest('[data-snooze-open]');
+    if (snoozeOpen) { openSnooze(snoozeOpen.dataset.snoozeOpen); return; }
+    const snoozeDays = t.closest('[data-snooze-days]');
+    if (snoozeDays) { saveSnooze(addDays(S.today, Number(snoozeDays.dataset.snoozeDays))); return; }
+    if (t.closest('[data-snooze-save]')) { saveSnooze(snoozeDate); return; }
+    if (t.closest('[data-snooze-cancel]')) { snoozeFor = null; render(); return; }
+    const snoozeClear = t.closest('[data-snooze-clear]');
+    if (snoozeClear) { snoozeFor = null; noteFor = null; react(snoozeClear.dataset.snoozeClear, null, null, 'Wird wieder angezeigt.'); return; }
+    const assign = t.closest('[data-task-assign]');
+    if (assign) { assignTask(assign.dataset.taskAssign); return; }
+    const taskStatus = t.closest('[data-task-status]');
+    if (taskStatus) { changeTaskStatus(Number(taskStatus.dataset.taskId), taskStatus.dataset.taskStatus, Number(taskStatus.dataset.taskRevision)); return; }
+    const warningOpen = t.closest('[data-warning-open]');
+    if (warningOpen) { warningFor = `${warningOpen.dataset.project}:${warningOpen.dataset.warningOpen}`; render(); return; }
+    const warningSave = t.closest('[data-warning-save]');
+    if (warningSave) { saveWarning(warningSave.dataset.project, warningSave.dataset.warningSave); return; }
+    const warningClear = t.closest('[data-warning-clear]');
+    if (warningClear) { saveWarning(warningClear.dataset.project, warningClear.dataset.warningClear, true); return; }
+    if (t.closest('[data-warning-cancel]')) { warningFor = null; render(); return; }
+    const read = t.closest('[data-changes-read]');
+    if (read) { markChangesRead(read.dataset.changesRead); return; }
     if (t.closest('[data-round-start]')) { startRound(); return; }
     if (t.closest('[data-round-close]')) { closeRound(); return; }
     if (round) {
@@ -1029,11 +1201,7 @@
     const ir = t.closest('[data-idea-remove]');
     if (ir) { removeIdea(Number(ir.dataset.ideaRemove)); return; }
     const tk = t.closest('[data-task]');
-    if (tk) {
-      const task = TASKS[tk.dataset.task];
-      if (task) navigator.clipboard.writeText(taskPrompt(task)).then(() => toast('Auftrag kopiert. Füg ihn bei deinem Coding-Agent ein.'), () => toast('Kopieren hat nicht geklappt.'));
-      return;
-    }
+    if (tk) { copyTask(tk.dataset.task); return; }
     const sw = t.closest('.switch button');
     if (sw) { setPref('style', sw.dataset.style); window.scrollTo(0, 0); return; }
     const fbBtn = t.closest('.fb button');
@@ -1112,6 +1280,8 @@
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('input', e => {
     if (e.target.id === 'idea-text') ideaDraft = e.target.value;
+    if (e.target.id === 'snooze-date') snoozeDate = e.target.value;
+    if (e.target.dataset && e.target.dataset.warningNote) warningDrafts[e.target.dataset.warningNote] = e.target.value;
     const field = { 'status-note': 'status_note', 'goal-text': 'goal', 'goal-due': 'goal_due' }[e.target.id];
     if (field && openId) (projectDrafts[openId] ||= {})[field] = e.target.value;
   });

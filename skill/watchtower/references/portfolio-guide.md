@@ -6,6 +6,8 @@ The brief is the top of the owner's morning page: one view across all projects. 
 
 `watchtower portfolio context` shows every project side by side (compact facts and card; `watchtower card show <id>` has the full card), the previous brief, all of the owner's reactions and `owner_last_opened` (when the owner last opened Watchtower). If that is older than the previous brief, the owner has not seen it: carry over its focus items that still matter instead of treating them as known. If it is newer, the owner has seen the brief: keep its items only while they are still true and still among the most important. The brief is where you see what nobody sees while inside one project. Card contents count as sources: cite them as the card's statement ("laut gusto-Karte …") and check in the facts or the repository what the brief depends on. A card marked `outdated` was written before the latest facts; trust the facts where they disagree. `changed_since_brief` lists the card fields that changed since the previous brief (empty: nothing the brief builds on; null: the project had no card then); start from those. Check the numbers, dates and states the brief names (uncommitted lines, unpushed commits, CI) against today's facts; card statements need no new reading of the repository unless the card is `outdated`.
 
+Tracked `tasks` show work already assigned and results awaiting owner review. Do not recommend assigning the same work again. Treat `review` as reported completion awaiting confirmation; only `done` is owner-confirmed. Respect each project's `warning_acknowledgements` as explicit owner instructions. Save with the `context_token` returned by the context; reread and reconcile on `version_conflict`.
+
 ## The fields
 
 `watchtower schema portfolio` prints the exact schema; only `greeting` is required. Project references use the ids from the context.
@@ -22,4 +24,4 @@ The brief is the top of the owner's morning page: one view across all projects. 
 
 ## Keeping items
 
-Items you keep from the previous brief keep their `id`; check each kept item's `why` and `evidence` against today's facts and cards, and correct or drop what is no longer true. Items rated `down` never come back; `later` items wait 14 days; focus items marked `done` are finished.
+Items you keep from the previous brief keep their `id`; check each kept item's `why` and `evidence` against today's facts and cards, and correct or drop what is no longer true. Items rated `down` never come back; `later` items wait until their `snoozed_until` date (legacy reactions: 14 days); focus items marked `done` are finished.

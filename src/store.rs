@@ -26,8 +26,19 @@ CREATE TABLE IF NOT EXISTS feedback(
   item_id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, value TEXT NOT NULL, at TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '', item TEXT);
 CREATE TABLE IF NOT EXISTS prefs(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS warning_acks(
+  project_id TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, basis TEXT NOT NULL,
+  at TEXT NOT NULL, PRIMARY KEY(project_id, kind));
 CREATE TABLE IF NOT EXISTS ideas(
   id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, added_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_runs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT,
+  initial TEXT NOT NULL, failures TEXT NOT NULL DEFAULT '{}', result TEXT, outcome TEXT);
+CREATE TABLE IF NOT EXISTS tasks(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL, source_key TEXT,
+  revision INTEGER NOT NULL DEFAULT 1, data TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_active_source ON tasks(source_key)
+  WHERE source_key IS NOT NULL AND status IN ('assigned', 'blocked', 'review');
 ";
 
 pub type Result<T> = rusqlite::Result<T>;
@@ -105,16 +116,44 @@ pub struct Feedback {
     pub note: String,
     /// The item as it read when the owner reacted, with its `kind`; missing for older reactions.
     pub item: Option<Value>,
+    pub snoozed_until: Option<String>,
 }
 
 pub struct Store {
     db: Mutex<Connection>,
 }
 
+pub enum GuardedWrite {
+    Saved(i64),
+    Conflict,
+    ItemConflict(Vec<String>),
+}
+
 fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
     db.busy_timeout(Duration::from_secs(15))?;
-    db.pragma_update(None, "journal_mode", "WAL")?;
+    // Concurrent first opens can both hold a read lock while switching to WAL.
+    // SQLite refuses that lock upgrade immediately, without using busy_timeout.
+    // Retry only that startup race, outside a transaction, with a short bounded backoff.
+    let started = std::time::Instant::now();
+    for attempt in 0..7 {
+        match db.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => break,
+            Err(error)
+                if attempt < 6
+                    && started.elapsed() < Duration::from_millis(500)
+                    && matches!(
+                        error.sqlite_error_code(),
+                        Some(
+                            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                    ) =>
+            {
+                std::thread::sleep(Duration::from_millis(5 << attempt));
+            }
+            Err(error) => return Err(error),
+        }
+    }
     Ok(db)
 }
 
@@ -141,7 +180,9 @@ fn project(row: &Row) -> Result<Project> {
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let db = open(path)?;
-        db.execute_batch(SCHEMA)?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(SCHEMA)?;
         // Columns added after the first release.
         for (table, column, decl) in [
             ("cards", "ci", "TEXT"),
@@ -150,12 +191,13 @@ impl Store {
             ("portfolio", "basis", "TEXT"),
             ("feedback", "note", "TEXT NOT NULL DEFAULT ''"),
             ("feedback", "item", "TEXT"),
+            ("feedback", "snoozed_until", "TEXT"),
             ("projects", "opened_at", "TEXT"),
             ("projects", "previous_opened_at", "TEXT"),
             ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
             ("projects", "goal_due", "TEXT"),
         ] {
-            let present: bool = db.query_row(
+            let present: bool = tx.query_row(
                 &format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
                 ),
@@ -163,9 +205,10 @@ impl Store {
                 |r| r.get(0),
             )?;
             if !present {
-                db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+                tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
         }
+        tx.commit()?;
         Ok(Store { db: Mutex::new(db) })
     }
 
@@ -239,6 +282,7 @@ impl Store {
                 "DELETE FROM projects WHERE id = ?1",
                 "DELETE FROM facts WHERE project_id = ?1",
                 "DELETE FROM cards WHERE project_id = ?1",
+                "DELETE FROM warning_acks WHERE project_id = ?1",
             ] {
                 db.execute(sql, [id])?;
             }
@@ -389,10 +433,10 @@ impl Store {
     pub fn set_feedback(&self, f: &Feedback) -> Result<()> {
         self.with(|db| {
             db.execute(
-                "INSERT INTO feedback(item_id, project_id, title, value, at, note, item) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO feedback(item_id, project_id, title, value, at, note, item, snoozed_until) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(item_id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title, value = excluded.value,
-                 at = excluded.at, note = excluded.note, item = excluded.item",
-                params![f.item_id, f.project_id, f.title, f.value, f.at, f.note, f.item.as_ref().map(Value::to_string)],
+                 at = excluded.at, note = excluded.note, item = excluded.item, snoozed_until = excluded.snoozed_until",
+                params![f.item_id, f.project_id, f.title, f.value, f.at, f.note, f.item.as_ref().map(Value::to_string), f.snoozed_until],
             )
             .map(drop)
         })
@@ -408,7 +452,7 @@ impl Store {
     /// All reactions, newest first.
     pub fn feedback(&self) -> Result<Vec<Feedback>> {
         self.with(|db| {
-            db.prepare("SELECT item_id, project_id, title, value, at, note, item FROM feedback ORDER BY at DESC")?
+            db.prepare("SELECT item_id, project_id, title, value, at, note, item, snoozed_until FROM feedback ORDER BY at DESC")?
                 .query_map([], |r| {
                     Ok(Feedback {
                         item_id: r.get(0)?,
@@ -418,9 +462,38 @@ impl Store {
                         at: r.get(4)?,
                         note: r.get(5)?,
                         item: r.get::<_, Option<String>>(6)?.map(json),
+                        snoozed_until: r.get(7)?,
                     })
                 })?
                 .collect()
+        })
+    }
+
+    pub fn warning_acknowledgements(&self, project: &str) -> Result<Value> {
+        self.with(|db| {
+            let entries: Vec<Value> = db.prepare("SELECT kind, note, basis FROM warning_acks WHERE project_id = ?1 ORDER BY kind")?
+                .query_map([project], |r| Ok(serde_json::json!({
+                    "key": r.get::<_, String>(0)?, "note": r.get::<_, String>(1)?,
+                    "basis": json(r.get(2)?),
+                })))?.collect::<Result<_>>()?;
+            Ok(Value::Array(entries))
+        })
+    }
+
+    pub fn set_warning_ack(
+        &self,
+        project: &str,
+        key: &str,
+        note: Option<&str>,
+        basis: &Value,
+        at: &str,
+    ) -> Result<()> {
+        self.with(|db| {
+            match note {
+                Some(note) => db.execute("INSERT INTO warning_acks(project_id,kind,note,basis,at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(project_id,kind) DO UPDATE SET note=excluded.note,basis=excluded.basis,at=excluded.at",
+                    params![project,key,note,basis.to_string(),at]),
+                None => db.execute("DELETE FROM warning_acks WHERE project_id=?1 AND kind=?2", params![project,key]),
+            }.map(drop)
         })
     }
 
@@ -477,9 +550,501 @@ impl Store {
     }
 }
 
+/// A tracked agent run keeps its starting point and final evidence independently of later edits.
+pub struct StoredAgentRun {
+    pub id: i64,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub initial: Value,
+    pub failures: Value,
+    pub result: Option<Value>,
+}
+
+fn agent_run(row: &Row) -> Result<StoredAgentRun> {
+    Ok(StoredAgentRun {
+        id: row.get("id")?,
+        started_at: row.get("started_at")?,
+        finished_at: row.get("finished_at")?,
+        initial: json(row.get("initial")?),
+        failures: json(row.get("failures")?),
+        result: row.get::<_, Option<String>>("result")?.map(json),
+    })
+}
+
+impl Store {
+    pub fn start_agent_run(&self, at: &str, initial: &Value) -> Result<i64> {
+        self.with(|db| {
+            db.execute(
+                "INSERT INTO agent_runs(started_at, initial) VALUES(?1, ?2)",
+                params![at, initial.to_string()],
+            )?;
+            Ok(db.last_insert_rowid())
+        })
+    }
+
+    pub fn agent_run(&self, id: i64) -> Result<Option<StoredAgentRun>> {
+        self.with(|db| {
+            db.query_row("SELECT * FROM agent_runs WHERE id = ?1", [id], agent_run)
+                .optional()
+        })
+    }
+
+    pub fn agent_runs(&self) -> Result<Vec<StoredAgentRun>> {
+        self.with(|db| {
+            db.prepare("SELECT * FROM agent_runs ORDER BY id DESC LIMIT 20")?
+                .query_map([], agent_run)?
+                .collect()
+        })
+    }
+
+    pub fn last_successful_agent_run(&self) -> Result<Option<StoredAgentRun>> {
+        self.with(|db| db.query_row("SELECT * FROM agent_runs WHERE outcome = 'complete' ORDER BY finished_at DESC, id DESC LIMIT 1", [], agent_run).optional())
+    }
+
+    pub fn fail_agent_run(&self, id: i64, scope: &str, failure: &Value) -> Result<bool> {
+        self.with(|db| {
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let mut failures = json(tx.query_row("SELECT failures FROM agent_runs WHERE id = ?1", [id], |row| row.get::<_, String>(0))?);
+            let version: i64 = if scope == "@portfolio" {
+                tx.query_row("SELECT COALESCE(MAX(id), 0) FROM portfolio", [], |row| row.get(0))?
+            } else {
+                tx.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1", [scope], |row| row.get(0))?
+            };
+            let mut failure = failure.clone();
+            failure["version"] = Value::from(version);
+            failures[scope] = failure;
+            let changed = tx.execute("UPDATE agent_runs SET failures = ?2 WHERE id = ?1 AND (outcome IS NULL OR outcome != 'complete')", params![id, failures.to_string()])?;
+            tx.commit()?;
+            Ok(changed > 0)
+        })
+    }
+
+    pub fn agent_run_token(&self, id: i64) -> Result<String> {
+        self.with(|db| {
+            let tx = db.unchecked_transaction()?;
+            let token = agent_run_token(&tx, id)?;
+            tx.commit()?;
+            Ok(token)
+        })
+    }
+
+    pub fn finish_agent_run(
+        &self,
+        id: i64,
+        at: &str,
+        result: &Value,
+        expected: &str,
+    ) -> Result<bool> {
+        self.with(|db| {
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            if agent_run_token(&tx, id)? != expected {
+                return Ok(false);
+            }
+            tx.execute("UPDATE agent_runs SET finished_at = ?2, result = ?3, outcome = ?4 WHERE id = ?1 AND (outcome IS NULL OR outcome != 'complete')", params![id, at, result.to_string(), result["state"].as_str()])?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+}
+
+/// Finish against the same project evidence and failures that were inspected.
+fn agent_run_token(db: &Connection, id: i64) -> Result<String> {
+    use sha1::{Digest, Sha1};
+    let run = db.query_row("SELECT * FROM agent_runs WHERE id = ?1", [id], agent_run)?;
+    let basis = serde_json::json!([
+        context_token(db, None)?,
+        run.initial,
+        run.failures,
+        run.result,
+        run.finished_at
+    ]);
+    Ok(format!(
+        "run1-{:x}",
+        Sha1::digest(basis.to_string().as_bytes())
+    ))
+}
+
+// Context tokens cover the values agents read, independent of wall-clock precision.
+fn token_rows(db: &Connection, sql: &str, scope: Option<&str>) -> Result<Value> {
+    let mut stmt = db.prepare(sql)?;
+    let columns = stmt.column_count();
+    let mut rows = stmt.query([scope])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let mut values = Vec::new();
+        for i in 0..columns {
+            values.push(match row.get_ref(i)? {
+                rusqlite::types::ValueRef::Null => Value::Null,
+                rusqlite::types::ValueRef::Integer(n) => Value::from(n),
+                rusqlite::types::ValueRef::Real(n) => Value::from(n),
+                rusqlite::types::ValueRef::Text(s) => {
+                    Value::from(String::from_utf8_lossy(s).into_owned())
+                }
+                rusqlite::types::ValueRef::Blob(s) => Value::from(format!("{s:?}")),
+            });
+        }
+        out.push(Value::Array(values));
+    }
+    Ok(Value::Array(out))
+}
+
+fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
+    use sha1::{Digest, Sha1};
+    let mut basis = serde_json::json!({"scope": scope});
+    basis["projects"] = token_rows(db,
+        "SELECT id,name,path,status,status_note,goal,goal_due,added_at FROM projects WHERE (?1 IS NULL AND status != 'archived') OR id = ?1 ORDER BY id", scope)?;
+    basis["cards"] = token_rows(db,
+        "SELECT c.project_id,c.id,c.data FROM cards c JOIN projects p ON p.id=c.project_id WHERE c.id=(SELECT MAX(id) FROM cards WHERE project_id=c.project_id) AND ((?1 IS NULL AND p.status != 'archived') OR p.id=?1) ORDER BY p.id", scope)?;
+    basis["facts"] = token_rows(db,
+        "SELECT f.project_id,f.fingerprint,f.data FROM facts f JOIN projects p ON p.id=f.project_id WHERE (?1 IS NULL AND p.status != 'archived') OR p.id=?1 ORDER BY p.id", scope)?;
+    basis["feedback"] = token_rows(db,
+        "SELECT item_id,project_id,value,note,item,at,snoozed_until FROM feedback WHERE ?1 IS NULL OR project_id=?1 OR value IN ('up','later','down') ORDER BY item_id", scope)?;
+    if scope.is_none() {
+        basis["portfolio"] = token_rows(
+            db,
+            "SELECT id,data FROM portfolio WHERE ?1 IS NULL ORDER BY id DESC LIMIT 1",
+            scope,
+        )?;
+        basis["ideas"] = token_rows(
+            db,
+            "SELECT id,text FROM ideas WHERE ?1 IS NULL ORDER BY id",
+            scope,
+        )?;
+        basis["visit"] = token_rows(
+            db,
+            "SELECT value FROM prefs WHERE key='last_visit' AND ?1 IS NULL",
+            scope,
+        )?;
+    }
+    // These owner-facing features are absent in databases from before their migration.
+    for (table, query) in [
+        ("tasks", "SELECT id,status,revision,data FROM tasks WHERE ?1 IS NULL OR EXISTS(SELECT 1 FROM json_each(data,'$.projects') WHERE value=?1) ORDER BY id"),
+        ("warning_acks", "SELECT project_id,kind,note,basis FROM warning_acks WHERE ?1 IS NULL OR project_id=?1 ORDER BY project_id,kind"),
+    ] {
+        let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)", [table], |r| r.get(0))?;
+        if exists { basis[table] = token_rows(db, query, scope)?; }
+    }
+    Ok(format!(
+        "ct1-{:x}",
+        Sha1::digest(basis.to_string().as_bytes())
+    ))
+}
+
+fn item_conflicts(
+    db: &Connection,
+    kind: crate::cards::Kind,
+    project: Option<&str>,
+    doc: &Value,
+) -> Result<Vec<String>> {
+    use crate::cards::Kind;
+    let mut owners: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    let mut add = |kind: Kind, project: Option<String>, doc: Value| {
+        for (list, _, item_kind) in kind.items() {
+            for item in doc[*list].as_array().into_iter().flatten() {
+                if let Some(id) = item["id"].as_str() {
+                    owners.push((
+                        id.to_owned(),
+                        project.clone(),
+                        Some((*item_kind).to_owned()),
+                    ));
+                }
+            }
+        }
+    };
+    let mut stmt = db.prepare("SELECT project_id,data FROM cards c WHERE id=(SELECT MAX(id) FROM cards WHERE project_id=c.project_id)")?;
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, json(r.get(1)?))))? {
+        let (project, data) = row?;
+        add(Kind::Card, Some(project), data);
+    }
+    if let Some(data) = db
+        .query_row(
+            "SELECT data FROM portfolio ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        add(Kind::Portfolio, None, json(data));
+    }
+    let mut stmt = db.prepare("SELECT item_id,project_id,item FROM feedback")?;
+    for row in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?.map(json),
+        ))
+    })? {
+        let (id, project, item) = row?;
+        let item_kind = item.as_ref().and_then(|i| i["kind"].as_str());
+        let scope = match item_kind {
+            Some("suggestion" | "question") | None => project,
+            Some(_) => None,
+        };
+        owners.push((id, scope, item_kind.map(str::to_owned)));
+    }
+    let mut conflicts = Vec::new();
+    for (list, _, item_kind) in kind.items() {
+        for (index, item) in doc[*list].as_array().into_iter().flatten().enumerate() {
+            let Some(id) = item["id"].as_str() else {
+                continue;
+            };
+            if owners.iter().any(|(other, scope, other_kind)| {
+                other == id
+                    && (scope.as_deref() != project
+                        || other_kind.as_deref().is_some_and(|k| k != *item_kind))
+            }) {
+                conflicts.push(format!(
+                    "{list}[{index}].id: '{id}' belongs to another card, brief or item kind"
+                ));
+            }
+        }
+    }
+    Ok(conflicts)
+}
+
+impl Store {
+    pub fn context_token(&self, project: Option<&str>) -> Result<String> {
+        self.with(|db| {
+            let tx = db.unchecked_transaction()?;
+            let token = context_token(&tx, project)?;
+            tx.commit()?;
+            Ok(token)
+        })
+    }
+
+    pub fn add_card_guarded(
+        &self,
+        id: &str,
+        at: &str,
+        basis: &CardBasis,
+        data: &Value,
+        expected: &str,
+    ) -> Result<GuardedWrite> {
+        self.with(|db| {
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            if context_token(&tx, Some(id))? != expected { return Ok(GuardedWrite::Conflict); }
+            let conflicts = item_conflicts(&tx, crate::cards::Kind::Card, Some(id), data)?;
+            if !conflicts.is_empty() { return Ok(GuardedWrite::ItemConflict(conflicts)); }
+            tx.execute("INSERT INTO cards(project_id,created_at,fingerprint,head,ci,basis,data,owner_basis) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![id,at,basis.fingerprint,basis.head,basis.ci,basis.parts.to_string(),data.to_string(),basis.owner.map(Value::to_string)])?;
+            let version = tx.query_row("SELECT COUNT(*) FROM cards WHERE project_id=?1", [id], |r| r.get(0))?;
+            tx.commit()?;
+            Ok(GuardedWrite::Saved(version))
+        })
+    }
+
+    pub fn add_portfolio_guarded(
+        &self,
+        at: &str,
+        data: &Value,
+        basis: &Value,
+        expected: &str,
+    ) -> Result<GuardedWrite> {
+        self.with(|db| {
+            let tx =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            if context_token(&tx, None)? != expected {
+                return Ok(GuardedWrite::Conflict);
+            }
+            let conflicts = item_conflicts(&tx, crate::cards::Kind::Portfolio, None, data)?;
+            if !conflicts.is_empty() {
+                return Ok(GuardedWrite::ItemConflict(conflicts));
+            }
+            tx.execute(
+                "INSERT INTO portfolio(created_at,data,basis) VALUES(?1,?2,?3)",
+                params![at, data.to_string(), basis.to_string()],
+            )?;
+            let version = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(GuardedWrite::Saved(version))
+        })
+    }
+}
+
 /// Notices writes from any connection, including other processes such as the CLI.
 pub struct ChangeWatch {
     db: Mutex<Connection>,
+}
+
+/// A consistent copy of the inputs used by the owner's unread-change digest.
+pub(crate) struct ChangesSnapshot {
+    pub current: Value,
+    pub baseline: Option<Value>,
+    pub token: String,
+}
+
+fn changes_source(db: &Connection) -> Result<Value> {
+    let mut statement = db.prepare(
+        "SELECT p.id, p.name, p.status, f.data, c.id, c.data, c.owner_basis
+         FROM projects p LEFT JOIN facts f ON f.project_id = p.id
+         LEFT JOIN cards c ON c.id = (SELECT MAX(id) FROM cards WHERE project_id = p.id)
+         ORDER BY p.id",
+    )?;
+    let projects: Vec<Value> = statement
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)?,
+                "status": row.get::<_, String>(2)?,
+                "facts": row.get::<_, Option<String>>(3)?.map(json),
+                "card_version": row.get::<_, Option<i64>>(4)?,
+                "card": row.get::<_, Option<String>>(5)?.map(json),
+                "owner_basis": row.get::<_, Option<String>>(6)?.map(json),
+            }))
+        })?
+        .collect::<Result<_>>()?;
+    let mut statement = db.prepare(
+        "SELECT item_id, project_id, title, value, note, item FROM feedback ORDER BY item_id",
+    )?;
+    let feedback: Vec<Value> = statement
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?, "project": row.get::<_, Option<String>>(1)?,
+                "title": row.get::<_, String>(2)?, "value": row.get::<_, String>(3)?,
+                "note": row.get::<_, String>(4)?,
+                "item": row.get::<_, Option<String>>(5)?.map(json),
+            }))
+        })?
+        .collect::<Result<_>>()?;
+    Ok(serde_json::json!({"projects": projects, "feedback": feedback}))
+}
+
+fn changes_token(snapshot: &Value) -> String {
+    use sha1::{Digest, Sha1};
+    format!("{:x}", Sha1::digest(snapshot.to_string().as_bytes()))
+}
+
+impl Store {
+    /// Reading or refreshing the window never moves an existing read baseline.
+    /// Only the first owner visit establishes one automatically.
+    pub(crate) fn changes_snapshot(&self, first_visit: bool, at: &str) -> Result<ChangesSnapshot> {
+        self.with(|db| {
+            let transaction = rusqlite::Transaction::new_unchecked(
+                db,
+                if first_visit {
+                    rusqlite::TransactionBehavior::Immediate
+                } else {
+                    rusqlite::TransactionBehavior::Deferred
+                },
+            )?;
+            let current = changes_source(&transaction)?;
+            let token = changes_token(&current);
+            let mut baseline = transaction
+                .query_row(
+                    "SELECT value FROM prefs WHERE key = 'changes_read'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .map(json);
+            if first_visit && baseline.is_none() {
+                let saved = serde_json::json!({"at": at, "snapshot": current});
+                transaction.execute(
+                    "INSERT INTO prefs(key, value) VALUES('changes_read', ?1)",
+                    [saved.to_string()],
+                )?;
+                baseline = Some(saved);
+            }
+            transaction.commit()?;
+            Ok(ChangesSnapshot {
+                current,
+                baseline,
+                token,
+            })
+        })
+    }
+
+    /// The comparison and acknowledgement share a write transaction, so another
+    /// process cannot sneak an unread card into the acknowledged baseline.
+    pub(crate) fn acknowledge_changes(
+        &self,
+        token: &str,
+        snapshot: &Value,
+        at: &str,
+    ) -> Result<bool> {
+        self.with(|db| {
+            let transaction =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let current = changes_source(&transaction)?;
+            if changes_token(&current) != token {
+                return Ok(false);
+            }
+            let baseline = serde_json::json!({"at": at, "snapshot": snapshot});
+            transaction.execute(
+                "INSERT INTO prefs(key, value) VALUES('changes_read', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [baseline.to_string()],
+            )?;
+            transaction.commit()?;
+            Ok(true)
+        })
+    }
+}
+
+fn tracked_task(row: &Row) -> Result<Value> {
+    let mut task = json(row.get("data")?);
+    task["id"] = serde_json::json!(row.get::<_, i64>("id")?);
+    task["status"] = serde_json::json!(row.get::<_, String>("status")?);
+    task["revision"] = serde_json::json!(row.get::<_, i64>("revision")?);
+    Ok(task)
+}
+
+impl Store {
+    pub fn tasks(&self) -> Result<Vec<Value>> {
+        self.with(|db| {
+            db.prepare("SELECT id, status, revision, data FROM tasks ORDER BY id DESC")?
+                .query_map([], tracked_task)?
+                .collect()
+        })
+    }
+
+    pub fn task(&self, id: i64) -> Result<Option<Value>> {
+        self.with(|db| {
+            db.query_row(
+                "SELECT id, status, revision, data FROM tasks WHERE id = ?1",
+                [id],
+                tracked_task,
+            )
+            .optional()
+        })
+    }
+
+    /// The partial unique index makes repeated assignment atomic across processes.
+    pub fn create_tracked_task(
+        &self,
+        source_key: Option<&str>,
+        data: &Value,
+    ) -> Result<(Value, bool)> {
+        self.with(|db| {
+            let tx = db.unchecked_transaction()?;
+            let created = tx.execute(
+                "INSERT INTO tasks(status, source_key, data) VALUES('assigned', ?1, ?2) ON CONFLICT DO NOTHING",
+                params![source_key, data.to_string()],
+            )? > 0;
+            let task = if created {
+                tx.query_row(
+                    "SELECT id, status, revision, data FROM tasks WHERE id = ?1",
+                    [tx.last_insert_rowid()], tracked_task,
+                )?
+            } else {
+                tx.query_row(
+                    "SELECT id, status, revision, data FROM tasks WHERE source_key = ?1 AND status IN ('assigned', 'blocked', 'review')",
+                    [source_key], tracked_task,
+                )?
+            };
+            tx.commit()?;
+            Ok((task, created))
+        })
+    }
+
+    /// A stale agent report must not overwrite a simultaneous owner decision.
+    pub fn replace_task(&self, id: i64, revision: i64, status: &str, data: &Value) -> Result<bool> {
+        self.with(|db| {
+            db.execute(
+                "UPDATE tasks SET status = ?1, revision = revision + 1, data = ?2 WHERE id = ?3 AND revision = ?4",
+                params![status, data.to_string(), id, revision],
+            ).map(|count| count > 0)
+        })
+    }
 }
 
 impl ChangeWatch {
