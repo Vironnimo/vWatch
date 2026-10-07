@@ -87,6 +87,76 @@ fn morning_run_cycle() {
 }
 
 #[test]
+fn stored_cards_and_briefs_keep_working_when_content_bases_are_added() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    drop(svc);
+
+    // Simulate the previous database schema with existing data, then reopen it.
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute_batch(
+        "ALTER TABLE cards DROP COLUMN owner_basis; ALTER TABLE portfolio DROP COLUMN basis;",
+    )
+    .unwrap();
+    drop(db);
+    let (svc, clock) = service(tmp.path());
+    assert!(svc
+        .store()
+        .latest_card("demo")
+        .unwrap()
+        .unwrap()
+        .owner_basis
+        .is_none());
+    assert!(svc
+        .store()
+        .latest_portfolio()
+        .unwrap()
+        .unwrap()
+        .basis
+        .is_none());
+    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["due"], false);
+    clock.advance(Duration::minutes(1));
+    svc.set_status("demo", "parked", Some("Später")).unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+    svc.put_card("demo", json!({"headline": "Neu"}), true, false)
+        .unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_changed"
+    );
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["due"], false);
+    assert!(svc
+        .store()
+        .latest_card("demo")
+        .unwrap()
+        .unwrap()
+        .owner_basis
+        .is_some());
+    assert!(svc
+        .store()
+        .latest_portfolio()
+        .unwrap()
+        .unwrap()
+        .basis
+        .is_some());
+    svc.set_goal("demo", "Fertig werden", None).unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+}
+
+#[test]
 fn reopening_a_project_after_a_while_shows_what_happened_since() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());
@@ -319,6 +389,7 @@ fn invalid_cards_are_refused_with_field_paths() {
                 head: None,
                 ci: None,
                 parts: &json!(null),
+                owner: None,
             },
             &old,
         )
@@ -373,7 +444,7 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     svc.put_portfolio(brief, false, false).unwrap();
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
     // a card change the brief does not build on leaves it current; one it builds on makes it due
-    clock.advance(Duration::minutes(5));
+    // Writes within one clock tick must still compare with the card the brief read.
     svc.put_card(
         "demo",
         json!({"handbook": {"architecture": "Ein Dienst."}}),
@@ -394,6 +465,23 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     );
     clock.advance(Duration::days(1));
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["reason"], "new_day");
+    // Removing or archiving a project invalidates a brief that still recommends it.
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    svc.set_status("demo", "archived", None).unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_changed"
+    );
+    svc.set_status("demo", "active", None).unwrap();
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    svc.remove_project("demo").unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_changed"
+    );
 }
 
 #[test]
@@ -512,7 +600,7 @@ fn visits_remember_the_previous_one() {
 #[test]
 fn status_and_registration_rules() {
     let tmp = tempfile::tempdir().unwrap();
-    let (svc, clock) = service(tmp.path());
+    let (svc, _) = service(tmp.path());
     let repo = demo_repo(tmp.path());
     let other = common::make_repo(tmp.path(), "Other App", &["2026-09-20T10:00:00"]);
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
@@ -582,7 +670,6 @@ fn status_and_registration_rules() {
         svc.put_card("other-app", card(), false, false).unwrap()["version"],
         1
     );
-    clock.advance(Duration::minutes(1));
     svc.set_status("demo", "parked", Some("wartet auf Key"))
         .unwrap();
     let due = svc.due(14, true).unwrap();
@@ -590,9 +677,26 @@ fn status_and_registration_rules() {
         .as_array()
         .unwrap()
         .contains(&json!({"id": "demo", "name": "demo", "reason": "status_changed"})));
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["card_outdated"],
+        true
+    );
+    assert_eq!(
+        svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"],
+        true
+    );
     // a goal reaches the agents and makes the card due like a status change
     svc.put_card("demo", card(), true, false).unwrap();
-    clock.advance(Duration::minutes(1));
+    svc.set_status("demo", "parked", Some("wartet auf Key"))
+        .unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
+    svc.set_status("demo", "parked", Some("wartet auf Entscheidung"))
+        .unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+    svc.put_card("demo", card(), true, false).unwrap();
     assert_eq!(
         svc.set_goal("demo", "v1.0 veröffentlichen", Some("15.12."))
             .unwrap_err()
@@ -609,6 +713,10 @@ fn status_and_registration_rules() {
         svc.context("demo").unwrap()["project"]["goal_due"],
         "2026-12-15"
     );
+    svc.put_card("demo", card(), true, false).unwrap();
+    svc.set_goal("demo", "v1.0 veröffentlichen", Some("2026-12-15"))
+        .unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
     svc.set_status("demo", "archived", None).unwrap();
     let due = svc.due(14, true).unwrap();
     assert!(due["projects"]
@@ -618,7 +726,7 @@ fn status_and_registration_rules() {
         .all(|p| p["id"] != "demo"));
     assert_eq!(
         svc.store().project("demo").unwrap().unwrap().status_note,
-        "wartet auf Key"
+        "wartet auf Entscheidung"
     );
 }
 
@@ -700,8 +808,29 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
     assert!(reasons(&svc).is_empty());
     *ci.lock().unwrap() = "red";
     assert_eq!(reasons(&svc), ["ci_changed"]);
+    assert_eq!(
+        svc.store().facts("demo").unwrap().unwrap().fingerprint,
+        svc.store()
+            .latest_card("demo")
+            .unwrap()
+            .unwrap()
+            .fingerprint,
+        "CI changes need not change the repository fingerprint"
+    );
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["card_outdated"],
+        true
+    );
+    assert_eq!(
+        svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"],
+        true
+    );
     svc.put_card("demo", card(), false, false).unwrap();
     assert!(reasons(&svc).is_empty());
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["card_outdated"],
+        false
+    );
     // a card written while CI was still running is due once it settles red, not green
     *ci.lock().unwrap() = "running";
     assert!(reasons(&svc).is_empty());
@@ -715,7 +844,7 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
 #[test]
 fn owner_reactions_reach_agents_with_what_they_were_about() {
     let tmp = tempfile::tempdir().unwrap();
-    let (svc, clock) = service(tmp.path());
+    let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.add_project(
@@ -784,7 +913,6 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
             .code,
         "unknown_item"
     );
-    clock.advance(Duration::minutes(1));
     svc.set_feedback(&qid, Some("answered"), Some("Ja, unterwegs ohne Netz"))
         .unwrap();
     assert_eq!(
@@ -792,7 +920,16 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
         json!([{"id": "demo", "name": "demo", "reason": "answered"}])
     );
     assert_eq!(
-        svc.context("demo").unwrap()["feedback"][0]["note"],
+        svc.state(false).unwrap()["projects"][0]["card_outdated"],
+        true
+    );
+    assert_eq!(
+        svc.context("demo").unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == qid)
+            .unwrap()["note"],
         "Ja, unterwegs ohne Netz"
     );
     assert_eq!(
@@ -801,6 +938,23 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
             .unwrap()
             .len(),
         1
+    );
+    // An unchanged reply stays handled; withdrawing or editing it needs a new card.
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    svc.set_feedback(&qid, Some("answered"), Some("Ja, unterwegs ohne Netz"))
+        .unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
+    svc.set_feedback(&qid, None, None).unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "answered"
+    );
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    svc.set_feedback(&qid, Some("answered"), Some("Doch nur online"))
+        .unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "answered"
     );
 
     // a focus item can be marked done for the next brief
@@ -824,6 +978,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
         head: None,
         ci: None,
         parts: &json!(null),
+        owner: None,
     };
     svc.store()
         .add_card(

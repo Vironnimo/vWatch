@@ -13,7 +13,9 @@ use serde_json::{json, Map, Value};
 
 use crate::cards::{self, Kind};
 use crate::facts;
-use crate::store::{CardBasis, Feedback, Idea, Project, Store};
+use crate::store::{
+    CardBasis, Feedback, Idea, Project, Store, StoredCard, StoredFacts, StoredPortfolio,
+};
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
@@ -368,6 +370,52 @@ fn settled_ci(facts: &Value) -> Option<&str> {
         .filter(|s| matches!(*s, "green" | "red"))
 }
 
+fn ci_changed(card: &StoredCard, facts: &Value) -> bool {
+    settled_ci(facts).is_some_and(|now| match card.ci.as_deref() {
+        Some(then) => then != now,
+        None => now == "red",
+    })
+}
+
+fn owner_changes(card: &StoredCard, project: &Project, reactions: &[Feedback]) -> (bool, bool) {
+    match &card.owner_basis {
+        Some(before) => {
+            let owner = owner_basis(project, reactions);
+            (
+                before["questions"] != owner["questions"],
+                before["project"] != owner["project"],
+            )
+        }
+        None => (
+            reactions.iter().any(|f| {
+                f.project_id.as_deref() == Some(&project.id)
+                    && kind_of(f) == "question"
+                    && f.at > card.created_at
+            }),
+            project
+                .status_changed_at
+                .as_ref()
+                .is_some_and(|at| *at > card.created_at),
+        ),
+    }
+}
+
+fn card_outdated(
+    card: Option<&StoredCard>,
+    facts: Option<&StoredFacts>,
+    project: &Project,
+    reactions: &[Feedback],
+) -> bool {
+    card.is_some_and(|card| {
+        let (answered, status_changed) = owner_changes(card, project, reactions);
+        answered
+            || status_changed
+            || facts.is_some_and(|facts| {
+                facts.fingerprint != card.fingerprint || ci_changed(card, &facts.data)
+            })
+    })
+}
+
 fn resolve(path: &str) -> PathBuf {
     let expanded = match path.strip_prefix('~') {
         Some(rest) => {
@@ -391,6 +439,19 @@ fn extend(mut base: Value, extra: Value) -> Value {
 
 fn project_json(p: &Project) -> Value {
     serde_json::to_value(p).unwrap_or(Value::Null)
+}
+
+/// Content, rather than timestamps, keeps owner edits within one clock tick visible.
+fn owner_basis(p: &Project, reactions: &[Feedback]) -> Value {
+    let questions: Map<String, Value> = reactions
+        .iter()
+        .filter(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question")
+        .map(|f| (f.item_id.clone(), json!({"value": f.value, "note": f.note})))
+        .collect();
+    json!({
+        "project": pick(&project_json(p), &["status", "status_note", "goal", "goal_due"]),
+        "questions": questions,
+    })
 }
 
 fn pick(v: &Value, keys: &[&str]) -> Value {
@@ -802,7 +863,10 @@ impl Watchtower {
         let now = (self.clock)();
         let (mut projects, mut problems, mut up_to_date) = (Vec::new(), Vec::new(), Vec::new());
         let brief = self.store.latest_portfolio()?;
-        let mut cards_changed = false;
+        let mut cards_changed = match brief.as_ref().and_then(|p| p.basis.as_ref()) {
+            Some(basis) => *basis != self.portfolio_basis()?,
+            None => false,
+        };
         let reactions = self.store.feedback()?;
         for p in self.store.projects()? {
             if p.status == "archived" {
@@ -811,11 +875,17 @@ impl Watchtower {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
             if let (Some(pf), Some(c)) = (&brief, &card) {
-                cards_changed = cards_changed
-                    || self
-                        .brief_changes(&p.id, &c.data, &pf.created_at)?
-                        .is_none_or(|f| !f.is_empty());
+                if pf.basis.is_none() {
+                    cards_changed = cards_changed
+                        || self
+                            .brief_changes(&p.id, &c.data, pf)?
+                            .is_none_or(|f| !f.is_empty());
+                }
             }
+            let (answered, status_changed) = card
+                .as_ref()
+                .map(|c| owner_changes(c, &p, &reactions))
+                .unwrap_or_default();
             if stored
                 .as_ref()
                 .is_some_and(|s| s.data["error"] == "path_missing")
@@ -833,33 +903,11 @@ impl Watchtower {
                     Some("changed")
                 }
                 // a card written while CI was unsettled is due once CI turns red
-                Some(c)
-                    if stored
-                        .as_ref()
-                        .and_then(|s| settled_ci(&s.data))
-                        .is_some_and(|now| match c.ci.as_deref() {
-                            Some(then) => then != now,
-                            None => now == "red",
-                        }) =>
-                {
+                Some(c) if stored.as_ref().is_some_and(|s| ci_changed(c, &s.data)) => {
                     Some("ci_changed")
                 }
-                Some(c)
-                    if reactions.iter().any(|f| {
-                        f.project_id.as_deref() == Some(&p.id)
-                            && kind_of(f) == "question"
-                            && f.at > c.created_at
-                    }) =>
-                {
-                    Some("answered")
-                }
-                Some(c)
-                    if p.status_changed_at
-                        .as_ref()
-                        .is_some_and(|at| *at > c.created_at) =>
-                {
-                    Some("status_changed")
-                }
+                Some(_) if answered => Some("answered"),
+                Some(_) if status_changed => Some("status_changed"),
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
                 Some(_) => None,
             };
@@ -987,7 +1035,7 @@ impl Watchtower {
 
     /// Validates and saves a card; with `dry_run` only validates and reports what would be saved.
     pub fn put_card(&self, id: &str, payload: Value, merge: bool, dry_run: bool) -> Result<Value> {
-        self.project(id)?;
+        let project = self.project(id)?;
         let previous = self.store.latest_card(id)?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|c| &c.data), sent.as_deref());
@@ -1038,11 +1086,13 @@ impl Watchtower {
         }
         let stored = self.stored_facts(id)?;
         let parts = facts::basis(&stored.data);
+        let owner = owner_basis(&project, &self.store.feedback()?);
         let basis = CardBasis {
             fingerprint: &stored.fingerprint,
             head: stored.data["head"].as_str(),
             ci: settled_ci(&stored.data),
             parts: &parts,
+            owner: Some(&owner),
         };
         let version = self.store.add_card(id, &self.now(), &basis, &clean)?;
         Ok(
@@ -1064,6 +1114,7 @@ impl Watchtower {
     pub fn portfolio_context(&self) -> Result<Value> {
         let mut rows = Vec::new();
         let previous = self.store.latest_portfolio()?;
+        let reactions = self.store.feedback()?;
         // changes and milestones from the start of the review week on, the material for `week_review`
         let week_from = self.review_week().1.to_string();
         for p in self.store.projects()? {
@@ -1073,11 +1124,10 @@ impl Watchtower {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
             let changed = match (&previous, &card) {
-                (Some(pf), Some(c)) => json!(self.brief_changes(&p.id, &c.data, &pf.created_at)?),
+                (Some(pf), Some(c)) => json!(self.brief_changes(&p.id, &c.data, pf)?),
                 _ => Value::Null,
             };
-            let card_outdated =
-                matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            let card_outdated = card_outdated(card.as_ref(), stored.as_ref(), &p, &reactions);
             let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
             let card_json = card.map(|card| {
                 let c = &card.data;
@@ -1111,7 +1161,6 @@ impl Watchtower {
                 "card": card_json,
             }));
         }
-        let reactions = self.store.feedback()?;
         let unchecked = self.unchecked_ideas(previous.as_ref().map(|p| &p.data))?;
         let (week, from, to) = self.review_week();
         let reviewed = previous
@@ -1212,7 +1261,9 @@ impl Watchtower {
                 json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}),
             );
         }
-        let version = self.store.add_portfolio(&self.now(), &clean)?;
+        let version = self
+            .store
+            .add_portfolio(&self.now(), &clean, &self.portfolio_basis()?)?;
         Ok(
             json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
         )
@@ -1497,15 +1548,44 @@ impl Watchtower {
         &self,
         id: &str,
         card: &Value,
-        brief_at: &str,
+        brief: &StoredPortfolio,
     ) -> Result<Option<Vec<&'static str>>> {
-        Ok(self.store.card_at(id, brief_at)?.map(|then| {
+        let then = match &brief.basis {
+            Some(basis) => basis
+                .get(id)
+                .and_then(|p| p.get("card"))
+                .filter(|c| !c.is_null())
+                .cloned(),
+            None => self.store.card_at(id, &brief.created_at)?,
+        };
+        Ok(then.map(|then| {
             BRIEF_FIELDS
                 .iter()
                 .copied()
                 .filter(|f| then.get(*f) != card.get(*f))
                 .collect()
         }))
+    }
+
+    /// What the brief builds on, including removals and owner changes without a new card.
+    fn portfolio_basis(&self) -> Result<Value> {
+        let mut basis = Map::new();
+        for p in self
+            .store
+            .projects()?
+            .into_iter()
+            .filter(|p| p.status != "archived")
+        {
+            let card = self
+                .store
+                .latest_card(&p.id)?
+                .map(|c| pick(&c.data, BRIEF_FIELDS));
+            basis.insert(p.id.clone(), json!({
+                "project": pick(&project_json(&p), &["name", "status", "status_note", "goal", "goal_due"]),
+                "card": card,
+            }));
+        }
+        Ok(Value::Object(basis))
     }
 
     // ---------- the window ----------
@@ -1579,11 +1659,11 @@ impl Watchtower {
             self.store.set_pref("last_visit", &json!(stamp(now)))?;
         }
         let mut projects = Vec::new();
+        let reactions = self.store.feedback()?;
         for p in self.store.projects()? {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
-            let outdated =
-                matches!((&card, &stored), (Some(c), Some(s)) if c.fingerprint != s.fingerprint);
+            let outdated = card_outdated(card.as_ref(), stored.as_ref(), &p, &reactions);
             // the headline of every card version, newest first: the project's story in one line per update
             let history: Vec<Value> = self
                 .store
@@ -1617,9 +1697,7 @@ impl Watchtower {
             ));
         }
         let portfolio = self.store.latest_portfolio()?;
-        let feedback: Map<String, Value> = self
-            .store
-            .feedback()?
+        let feedback: Map<String, Value> = reactions
             .into_iter()
             .map(|f| {
                 (

@@ -66,6 +66,8 @@ pub struct StoredCard {
     pub ci: Option<String>,
     /// The facts basis the card was written against; missing for older cards.
     pub basis: Option<Value>,
+    /// The owner's instructions and replies read by this card; absent on older cards.
+    pub owner_basis: Option<Value>,
     pub data: Value,
 }
 
@@ -75,6 +77,7 @@ pub struct CardBasis<'a> {
     pub head: Option<&'a str>,
     pub ci: Option<&'a str>,
     pub parts: &'a Value,
+    pub owner: Option<&'a Value>,
 }
 
 /// An idea the owner parked for agents to assess.
@@ -88,6 +91,8 @@ pub struct StoredPortfolio {
     pub version: i64,
     pub created_at: String,
     pub data: Value,
+    /// Project state and brief-relevant card content read by this brief.
+    pub basis: Option<Value>,
 }
 
 /// The owner's reaction to an item an agent wrote: a rating or a reply to a question.
@@ -141,6 +146,8 @@ impl Store {
         for (table, column, decl) in [
             ("cards", "ci", "TEXT"),
             ("cards", "basis", "TEXT"),
+            ("cards", "owner_basis", "TEXT"),
+            ("portfolio", "basis", "TEXT"),
             ("feedback", "note", "TEXT NOT NULL DEFAULT ''"),
             ("feedback", "item", "TEXT"),
             ("projects", "opened_at", "TEXT"),
@@ -273,8 +280,8 @@ impl Store {
     pub fn add_card(&self, id: &str, at: &str, basis: &CardBasis, data: &Value) -> Result<i64> {
         self.with(|db| {
             db.execute(
-                "INSERT INTO cards(project_id, created_at, fingerprint, head, ci, basis, data) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![id, at, basis.fingerprint, basis.head, basis.ci, basis.parts.to_string(), data.to_string()],
+                "INSERT INTO cards(project_id, created_at, fingerprint, head, ci, basis, data, owner_basis) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![id, at, basis.fingerprint, basis.head, basis.ci, basis.parts.to_string(), data.to_string(), basis.owner.map(Value::to_string)],
             )?;
             db.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1", [id], |r| r.get(0))
         })
@@ -282,7 +289,7 @@ impl Store {
 
     pub fn latest_card(&self, id: &str) -> Result<Option<StoredCard>> {
         self.with(|db| {
-            db.query_row("SELECT (SELECT COUNT(*) FROM cards WHERE project_id = ?1), created_at, fingerprint, head, ci, basis, data FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
+            db.query_row("SELECT (SELECT COUNT(*) FROM cards WHERE project_id = ?1), created_at, fingerprint, head, ci, basis, data, owner_basis FROM cards WHERE project_id = ?1 ORDER BY id DESC LIMIT 1", [id], |r| {
                 Ok(StoredCard {
                     version: r.get(0)?,
                     created_at: r.get(1)?,
@@ -291,6 +298,7 @@ impl Store {
                     ci: r.get(4)?,
                     basis: r.get::<_, Option<String>>(5)?.map(json),
                     data: json(r.get(6)?),
+                    owner_basis: r.get::<_, Option<String>>(7)?.map(json),
                 })
             })
             .optional()
@@ -349,11 +357,11 @@ impl Store {
     }
 
     // portfolio
-    pub fn add_portfolio(&self, at: &str, data: &Value) -> Result<i64> {
+    pub fn add_portfolio(&self, at: &str, data: &Value, basis: &Value) -> Result<i64> {
         self.with(|db| {
             db.execute(
-                "INSERT INTO portfolio(created_at, data) VALUES(?1, ?2)",
-                params![at, data.to_string()],
+                "INSERT INTO portfolio(created_at, data, basis) VALUES(?1, ?2, ?3)",
+                params![at, data.to_string(), basis.to_string()],
             )?;
             Ok(db.last_insert_rowid())
         })
@@ -362,13 +370,14 @@ impl Store {
     pub fn latest_portfolio(&self) -> Result<Option<StoredPortfolio>> {
         self.with(|db| {
             db.query_row(
-                "SELECT id, created_at, data FROM portfolio ORDER BY id DESC LIMIT 1",
+                "SELECT id, created_at, data, basis FROM portfolio ORDER BY id DESC LIMIT 1",
                 [],
                 |r| {
                     Ok(StoredPortfolio {
                         version: r.get(0)?,
                         created_at: r.get(1)?,
                         data: json(r.get(2)?),
+                        basis: r.get::<_, Option<String>>(3)?.map(json),
                     })
                 },
             )
