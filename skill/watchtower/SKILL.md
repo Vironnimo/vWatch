@@ -16,7 +16,7 @@ Watchtower holds two kinds of data:
 
 Run `watchtower <command>`. If `watchtower` is not found, call the program by its full path: `%LOCALAPPDATA%\Programs\Watchtower\Watchtower.exe` (bash: `"$LOCALAPPDATA/Programs/Watchtower/Watchtower.exe"`). If that file does not exist either, stop and tell the owner that Watchtower is not installed or lives elsewhere; turning on "Für Agents aufrufbar" in Watchtower's settings makes `watchtower` available by name.
 
-Every command prints one JSON object. `"ok": true` means success. `"ok": false` comes with `error.code`, `error.message` and usually `error.hint`: follow the hint and try again. Never read or write Watchtower's database or files directly. `watchtower status` shows the version, the data folder and how many projects have a card (it also refreshes the Skill files next to the program).
+The CLI runs independently of the window; wait for its process to finish. Commands return one JSON object and exit 0 on `"ok": true`, or exit 1 on `"ok": false` with `error.code`, `error.message` and usually `error.hint`. Wrong arguments exit 2 with usage on stderr. Follow error hints. Never read or write Watchtower's database or files directly. `watchtower status` shows the version, data folder and card count and refreshes the Skill files next to the program.
 
 The full command list with JSON shapes is in `references/cli.md`. Read only the section you need.
 

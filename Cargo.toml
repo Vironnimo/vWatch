@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2021"
 description = "Morning overview of all your agent-built software projects"
 publish = false
+default-run = "Watchtower-UI"
 
 [lib]
 name = "watchtower"
@@ -13,18 +14,24 @@ path = "src/lib.rs"
 name = "Watchtower"
 path = "src/main.rs"
 
+[[bin]]
+name = "Watchtower-UI"
+path = "src/bin/watchtower-ui.rs"
+required-features = ["desktop"]
+
 [features]
-default = ["custom-protocol"]
+default = ["desktop", "custom-protocol"]
+desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-single-instance", "dep:tauri-build"]
 # Serve the embedded ui/ folder; without it Tauri expects a dev server.
-custom-protocol = ["tauri/custom-protocol"]
+custom-protocol = ["tauri?/custom-protocol"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
-tauri-plugin-single-instance = "2"
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
@@ -36,9 +43,6 @@ sha1 = "0.10"
 winreg = "0.55"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
-  "Win32_Security",
-  "Win32_Storage_FileSystem",
-  "Win32_System_Console",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

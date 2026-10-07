@@ -1,6 +1,6 @@
 # Watchtower CLI reference
 
-Every command prints one JSON object on stdout; many include `next`, a hint for the usual next command. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. When `watchtower` is not found, call `%LOCALAPPDATA%\Programs\Watchtower\Watchtower.exe` with the same arguments.
+`watchtower` is a console program independent of the window. Wait for process completion; stdout is complete when it exits. Commands print one JSON object on stdout; many include `next`, a hint for the usual next command. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Missing or wrong arguments print usage on stderr with exit code 2; `--help` and `--version` print text and exit 0. When `watchtower` is not found, call `%LOCALAPPDATA%\Programs\Watchtower\Watchtower.exe` with the same arguments.
 
 JSON files and stdin accept UTF-8 (optional BOM) or BOM-marked UTF-16. Invalid text encoding fails as `invalid_json` before saving.
 
@@ -73,4 +73,4 @@ Values: `up` (the owner likes it), `later` (hidden until `snoozed_until`; legacy
 |---|---|
 | `watchtower status` | Also writes the Skill that ships with this exe next to it. Returns `version`, `exe`, `data_dir`, `database`, `skill_dir`, `projects` (count), `with_card` (count) and a `hint` when no project is registered yet. |
 
-The Watchtower window itself is opened by the owner; there is no command to start or stop it. It shows new cards and facts within a few seconds of a command writing them.
+The owner opens `Watchtower-UI.exe` or the Watchtower Start menu entry. There is no CLI command to start or stop the window, and CLI commands work while it is closed. The window shows new cards and facts within a few seconds of a command writing them.

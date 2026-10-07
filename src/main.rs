@@ -1,11 +1,5 @@
-// One exe for everything: without arguments it opens the window, with arguments it is the CLI.
-#![windows_subsystem = "windows"]
+//! The console entry point. Shells wait for the process and inherit its standard streams.
 
 fn main() {
-    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    if args.len() > 1 {
-        watchtower::system::attach_console();
-        std::process::exit(watchtower::cli::main(args));
-    }
-    watchtower::app::run();
+    std::process::exit(watchtower::cli::main(std::env::args_os().collect()));
 }

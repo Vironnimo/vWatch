@@ -4,6 +4,7 @@
 //! through the CLI (`cli`), and the window (`app`) shows both. `service` owns all
 //! behavior; `store` persists it in one SQLite file.
 
+#[cfg(feature = "desktop")]
 pub mod app;
 pub mod cards;
 pub mod cli;

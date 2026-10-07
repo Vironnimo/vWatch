@@ -1,6 +1,6 @@
 //! Where Watchtower lives on disk and how it plugs into Windows.
 //!
-//! Watchtower is one folder: the exe, `data\` with the database and `skill\watchtower\`
+//! Watchtower is one folder: the executables, `data\` with the database and `skill\watchtower\`
 //! with the Skill for agents. `WATCHTOWER_HOME` moves the data folder elsewhere.
 
 use std::path::{Path, PathBuf};
@@ -33,6 +33,10 @@ pub fn app_dir() -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn gui_exe_path() -> PathBuf {
+    app_dir().join(format!("Watchtower-UI{}", std::env::consts::EXE_SUFFIX))
 }
 
 pub fn data_dir() -> PathBuf {
@@ -174,57 +178,7 @@ mod win {
             );
         }
     }
-
-    /// Give a GUI-subsystem exe a working stdout/stderr when it runs as a CLI.
-    /// Redirected handles (pipes, files) are kept; otherwise the parent's console is used.
-    pub fn attach_console() {
-        use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
-        use windows_sys::Win32::Storage::FileSystem::{
-            CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-        };
-        use windows_sys::Win32::System::Console::{
-            AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
-            STD_OUTPUT_HANDLE,
-        };
-        unsafe {
-            let missing = |id| {
-                let h = GetStdHandle(id);
-                h.is_null() || h == INVALID_HANDLE_VALUE
-            };
-            if !missing(STD_OUTPUT_HANDLE) && !missing(STD_ERROR_HANDLE) {
-                return;
-            }
-            if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-                return;
-            }
-            let conout: Vec<u16> = "CONOUT$".encode_utf16().chain([0]).collect();
-            for id in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-                if missing(id) {
-                    let h = CreateFileW(
-                        conout.as_ptr(),
-                        GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        std::ptr::null(),
-                        OPEN_EXISTING,
-                        0,
-                        std::ptr::null_mut(),
-                    );
-                    if h != INVALID_HANDLE_VALUE {
-                        SetStdHandle(id, h);
-                    }
-                }
-            }
-        }
-    }
 }
-
-#[cfg(windows)]
-pub fn attach_console() {
-    win::attach_console();
-}
-
-#[cfg(not(windows))]
-pub fn attach_console() {}
 
 pub fn autostart_enabled() -> bool {
     #[cfg(windows)]
@@ -236,7 +190,7 @@ pub fn autostart_enabled() -> bool {
 /// Open Watchtower when the owner signs in to Windows.
 pub fn set_autostart(on: bool) -> std::io::Result<()> {
     #[cfg(windows)]
-    return win::set_autostart(on, &exe_path());
+    return win::set_autostart(on, &gui_exe_path());
     #[cfg(not(windows))]
     {
         let _ = on;

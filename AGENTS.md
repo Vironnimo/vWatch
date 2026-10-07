@@ -6,7 +6,7 @@ Guidance for every coding agent working on Watchtower. Read it completely before
 
 The owner builds about eight software projects at once, mostly through coding agents that work day and night. Without help they lose track: which project moved, what an agent left unfinished, which work exists only on this disk, what waits for their decision, and how to get back into a project they have not touched for weeks.
 
-Watchtower answers that in a few minutes each morning. It is a local Windows app whose single exe is both the window the owner reads and a JSON CLI that agents write through. It serves these situations:
+Watchtower answers that in a few minutes each morning. It is a local Windows app with a window the owner reads and a native console CLI that agents write through. Both use the same service and database. It serves these situations:
 
 - **Morning overview:** what changed overnight, what is at risk, what to do first today.
 - **Re-entry:** coming back to a project after days or weeks: what it is, how to start and use it, where things are, what happened since the owner last looked.
@@ -42,16 +42,16 @@ The owner can separately assign a copied task; agent reports (`tasks report`) aw
 
 ## Layout
 
-- `src/main.rs` decides: no arguments → window (`app.rs`), arguments → CLI (`cli.rs`). The exe uses the Windows GUI subsystem; `system::attach_console` gives the CLI its stdout and stderr.
+- `src/main.rs` starts the console-only `Watchtower.exe` CLI (`cli.rs`); `src/bin/watchtower-ui.rs` starts the GUI-only `Watchtower-UI.exe` window (`app.rs`). The console process owns stdin, stdout, stderr and its exit status; never route CLI commands through a GUI process or attach a console after startup. The optional `desktop` feature contains the Tauri adapter and dependencies.
 - `src/service.rs` (`Watchtower`) owns all behavior: registration, facts refresh, due detection, context, card and portfolio writes (with merge and dry run), feedback, visits, goals, prefs and the window state. `cli.rs` and the Tauri commands in `app.rs` are thin adapters over it; put new behavior here, not in the adapters.
 - `src/facts.rs` measures one repository (`collect`) and computes the fingerprint (`fingerprint` over `basis()`; new informational facts fields stay out of the basis so they do not make cards due). Disk space is measured once a day by `space`, carried over in `service.rs`.
 - `src/cards.rs` defines the agent-written documents (card, portfolio brief) as schema data: field types, word limits, defaults. It validates writes, merges, reports fields a card lacks (`missing_fields` → due reason `new_fields`), and `watchtower schema` prints the same definition.
 - `src/store.rs` is the SQLite persistence (WAL). Schema changes go through the migration list; existing databases must keep working.
-- `src/system.rs` owns the folder layout (exe folder, `data\`, `skill\watchtower\`), exports the embedded Skill, and the Windows integration (autostart Run key, user PATH).
+- `src/system.rs` owns the folder layout (both executables, `data\`, `skill\watchtower\`), exports the embedded Skill, and the Windows integration (autostart Run key targeting the window, user PATH targeting the folder).
 - `ui/` is the vanilla JS page in the window (`index.html`, `app.js`, `app.css`, no build step). It calls `app.rs` through `window.__TAURI__.core.invoke`. Three styles share one right-hand drawer with each project's full record: "Übergabe" (handover, read top to bottom), "Leitstand" (card grid with a side column) and "Handbuch" (reference sheets). Also: search (Ctrl+K), the decision round (all open questions one after another), "Auftrag kopieren" (a ready-to-paste task for a coding agent), the idea parking lot, the week review, the overnight view and the space overview.
 - `skill/watchtower/` is the Skill: `SKILL.md` (the workflow), `references/card-guide.md` (how to study a project and fill each card field), `references/portfolio-guide.md` (the brief), `references/cli.md` (every command and JSON field). It is embedded with `include_str!` and written next to the exe on start and by `watchtower status`.
-- `tests/`: `service.rs` (behavior contracts through the service), `cli.rs` (CLI JSON), `facts.rs` (git measurements on temporary repositories); shared helpers with a fixed clock in `tests/common/mod.rs`.
-- `scripts/install.ps1` builds the release exe and installs it to `%LOCALAPPDATA%\Programs\Watchtower`.
+- `tests/`: `service.rs` (behavior contracts through the service), `cli.rs` (CLI JSON), `process.rs` (real executable streams, exit codes and shell completion), `facts.rs` (git measurements on temporary repositories); shared helpers with a fixed clock in `tests/common/mod.rs`.
+- `scripts/install.ps1` builds both release executables and installs them to `%LOCALAPPDATA%\Programs\Watchtower`, preserving data and the owner's autostart/PATH choices.
 
 ## Changing contracts
 
@@ -74,11 +74,12 @@ The CLI's JSON output, error codes, due and brief reasons, and the card and port
 cargo test                      # all tests, a few seconds
 cargo clippy --all-targets      # must stay free of warnings
 cargo run                       # the window from source
-cargo run -- due --no-refresh   # the CLI from source
+cargo run --bin Watchtower -- due --no-refresh # the CLI from source
+cargo test --no-default-features # the core and CLI without desktop dependencies
 ```
 
 - Set `WATCHTOWER_HOME` to a scratch folder when running from source, so test data stays out of the installed app. Copy the installed `data\watchtower.db` there to try changes on real data.
-- Install with `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`. It closes the running window; start it again afterwards. Do not install while an agent is using the installed exe.
+- Install with `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`. It closes the running window; start it again afterwards. Do not install while an agent is using the installed CLI.
 - Tests guard contracts (service behavior, CLI JSON, facts), not individual changes. Extend the test that owns a behavior before adding a new one. Keep them fast and deterministic with the fixed clock and temporary repositories.
 - Verify UI changes in the running window. Do not change the owner's preferences (style, hidden sections) or leave ratings, replies or ticks behind while testing; `watchtower feedback` must show no test entries afterwards.
 - Never toggle the owner's autostart or PATH setting; those are the owner's choices in the settings.

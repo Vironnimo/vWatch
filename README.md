@@ -13,19 +13,22 @@ The morning view distinguishes fresh git measurements from a completed agent run
 
 Copy a task and separately mark it assigned when you hand it to an agent. Watchtower keeps its completion criterion and reported result even when the original suggestion changes; you confirm the result or reopen the task. Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact remains visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
 
-## One folder, one program
+## One folder, two entry points
 
 ```
 %LOCALAPPDATA%\Programs\Watchtower\
-  Watchtower.exe        the window (double-click) and the CLI (with arguments)
+  Watchtower.exe        the console CLI for agents
+  Watchtower-UI.exe     the window for the owner
   data\                 database and window cache
   skill\watchtower\     the Skill for agents, written by Watchtower on start
 ```
 
-- Double-click `Watchtower.exe` (or the Start menu entry "Watchtower") opens the window. On first start you pick your projects folder and tick the repositories to watch.
+- Double-click `Watchtower-UI.exe` (or the Start menu entry "Watchtower") opens the window. On first start you pick your projects folder and tick the repositories to watch.
 - The gear opens the settings: add or remove projects, "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `watchtower`), and the command that installs the Skill in vBot.
-- `Watchtower.exe <command>` is the CLI: every command prints one JSON object. The window picks up whatever an agent writes within a few seconds.
+- `watchtower <command>` is a native console program: it completes its work and JSON output before returning an exit code. It runs independently of the window, with ordinary stdin, stdout and stderr; no GUI automation or polling for late output is involved. No arguments show CLI usage. The window picks up agent writes within a few seconds.
 - `WATCHTOWER_HOME` moves the data folder elsewhere.
+
+Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin Watchtower`.
 
 Requires git on the PATH (`gh` optional, for CI state) and the WebView2 runtime that ships with Windows 11.
 
@@ -35,7 +38,7 @@ Requires git on the PATH (`gh` optional, for CI state) and the WebView2 runtime 
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-Builds the release exe (needs Rust), copies it to `%LOCALAPPDATA%\Programs\Watchtower` and creates the Start menu entry. Reinstalling keeps `data\` and the settings.
+Builds both release executables (needs Rust), copies them to `%LOCALAPPDATA%\Programs\Watchtower` and creates the Start menu entry for the window. Reinstalling keeps `data\` and the settings. An existing Watchtower autostart entry is redirected to the window executable without changing whether autostart is enabled. Installation refuses to replace a CLI executable while an agent is using it.
 
 ## Agents
 
@@ -58,6 +61,8 @@ cargo test
 cargo clippy --all-targets
 node --test tests/ui.cjs
 cargo build --release
+cargo test --no-default-features
+cargo run --bin Watchtower -- due --no-refresh
 ```
 
 Run the window from source with `cargo run`; set `WATCHTOWER_HOME` to a scratch folder to keep test data out of the installed app.
