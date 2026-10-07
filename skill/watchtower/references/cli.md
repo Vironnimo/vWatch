@@ -19,7 +19,7 @@ JSON files and stdin accept UTF-8 (optional BOM) or BOM-marked UTF-16. Invalid t
 | `watchtower portfolio show` | The current brief. |
 | `watchtower schema card` / `watchtower schema portfolio` | The JSON schema of a document. |
 
-Items the owner reacts to get an `id` when saved: card `suggestions` and `waiting_on_you`; portfolio `focus`, `patterns`, `synergies`, `new_apps`, `park_or_revive`. Send that `id` again to keep an item's identity and the owner's reaction to it.
+Items the owner reacts to get an `id` when saved: card `suggestions` and `waiting_on_you`; portfolio `focus`, `patterns`, `synergies`, `new_apps`, `park_or_revive`. Send that `id` again only for the same item in the same card or brief. IDs belonging to another document or item kind are refused, including IDs kept in feedback after the item disappeared. Omit `id` for a new item.
 
 ## Feedback
 

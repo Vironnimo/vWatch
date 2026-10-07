@@ -997,6 +997,7 @@ impl Watchtower {
             WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
+        self.validate_item_ids(Kind::Card, Some(id), &clean)?;
         let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
         // fields the previous card lacked and this save did not send end up empty; say so
         let lacking = previous
@@ -1143,6 +1144,7 @@ impl Watchtower {
             WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
                 .hint("Fix the listed fields and send it again. `watchtower schema portfolio` prints the full schema.")
         })?;
+        self.validate_item_ids(Kind::Portfolio, None, &clean)?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
         let items = |key: &str| clean[key].as_array().cloned().unwrap_or_default();
         let mut refs: Vec<String> = Vec::new();
@@ -1379,6 +1381,75 @@ impl Watchtower {
                 .map(feedback_json)
                 .collect(),
         ))
+    }
+
+    /// Feedback is keyed globally by item id, so an id must remain in its original
+    /// document and item kind even after a rated item leaves the current card.
+    fn validate_item_ids(&self, kind: Kind, project: Option<&str>, doc: &Value) -> Result<()> {
+        let mut owners = Vec::new();
+        for p in self.store.projects()? {
+            if let Some(card) = self.store.latest_card(&p.id)? {
+                for item in item_ids(Kind::Card, &card.data) {
+                    if let Some(id) = item["id"].as_str() {
+                        owners.push((
+                            id.to_owned(),
+                            Some(p.id.clone()),
+                            item["kind"].as_str().map(str::to_owned),
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(brief) = self.store.latest_portfolio()? {
+            for item in item_ids(Kind::Portfolio, &brief.data) {
+                if let Some(id) = item["id"].as_str() {
+                    owners.push((
+                        id.to_owned(),
+                        None,
+                        item["kind"].as_str().map(str::to_owned),
+                    ));
+                }
+            }
+        }
+        for feedback in self.store.feedback()? {
+            let item_kind = feedback
+                .item
+                .as_ref()
+                .and_then(|item| item["kind"].as_str());
+            let scope = match item_kind {
+                Some("suggestion" | "question") | None => feedback.project_id,
+                Some(_) => None,
+            };
+            owners.push((feedback.item_id, scope, item_kind.map(str::to_owned)));
+        }
+        let mut conflicts = Vec::new();
+        for (list, _, item_kind) in kind.items() {
+            for (index, item) in doc[*list].as_array().into_iter().flatten().enumerate() {
+                let Some(id) = item["id"].as_str() else {
+                    continue;
+                };
+                if owners.iter().any(|(other_id, other_project, other_kind)| {
+                    other_id == id
+                        && (other_project.as_deref() != project
+                            || other_kind
+                                .as_deref()
+                                .is_some_and(|other_kind| other_kind != *item_kind))
+                }) {
+                    conflicts.push(format!(
+                        "{list}[{index}].id: '{id}' belongs to another card, brief or item kind"
+                    ));
+                }
+            }
+        }
+        if !conflicts.is_empty() {
+            let (code, name) = match kind {
+                Kind::Card => ("invalid_card", "card"),
+                Kind::Portfolio => ("invalid_portfolio", "brief"),
+            };
+            return Err(WatchtowerError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
+                .hint("Keep an existing id only for the same item in the same project card or brief. Omit id for a new item."));
+        }
+        Ok(())
     }
 
     pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {

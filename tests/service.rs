@@ -174,6 +174,75 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
 }
 
 #[test]
+fn item_ids_cannot_transfer_reactions_between_documents() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    let first = demo_repo(tmp.path());
+    let second = common::make_repo(tmp.path(), "second", &["2026-09-29T10:00:00"]);
+    svc.add_project(first.to_str().unwrap(), None, None)
+        .unwrap();
+    svc.add_project(second.to_str().unwrap(), None, None)
+        .unwrap();
+    let mut original = card();
+    original["suggestions"][0]["id"] = json!("shared-item");
+    svc.put_card("demo", original.clone(), false, false)
+        .unwrap();
+    svc.set_feedback("shared-item", Some("down"), Some("Passt nicht"))
+        .unwrap();
+
+    // Reusing an id in its own card preserves the owner's rating.
+    svc.put_card("demo", original.clone(), false, false)
+        .unwrap();
+    for dry_run in [true, false] {
+        let err = svc
+            .put_card("second", original.clone(), false, dry_run)
+            .unwrap_err();
+        assert_eq!(err.code, "invalid_card");
+        assert!(err.message.contains("suggestions[0].id"), "{err:?}");
+    }
+    assert_eq!(svc.card("second").unwrap_err().code, "no_card");
+
+    let brief = json!({"greeting": "Moin", "new_apps": [{
+        "id": "shared-item", "title": "Andere Idee", "pitch": "Ein Werkzeug", "because": "Hilft", "effort": "S"
+    }]});
+    assert_eq!(
+        svc.put_portfolio(brief, false, false).unwrap_err().code,
+        "invalid_portfolio"
+    );
+
+    // Dropping a rejected item must not free its id to acquire a different meaning elsewhere.
+    svc.put_card("demo", json!({"suggestions": []}), true, false)
+        .unwrap();
+    assert_eq!(
+        svc.put_card("second", original, false, false)
+            .unwrap_err()
+            .code,
+        "invalid_card"
+    );
+    let reactions = svc.feedback(None).unwrap();
+    assert_eq!(reactions[0]["project"], "demo");
+    assert_eq!(reactions[0]["value"], "down");
+
+    // A focus item's project is its subject; the portfolio still owns its identity.
+    let brief = json!({"greeting": "Moin", "focus": [{
+        "id": "focus-owned", "project": "demo", "title": "Prüfen", "why": "Hilft", "effort": "1h"
+    }]});
+    svc.put_portfolio(brief.clone(), false, false).unwrap();
+    svc.set_feedback("focus-owned", Some("done"), None).unwrap();
+    svc.put_portfolio(brief, false, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let mut different_item = card();
+    different_item["suggestions"][0]["id"] = json!("focus-owned");
+    assert_eq!(
+        svc.put_card("demo", different_item, false, false)
+            .unwrap_err()
+            .code,
+        "invalid_card"
+    );
+}
+
+#[test]
 fn invalid_cards_are_refused_with_field_paths() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
