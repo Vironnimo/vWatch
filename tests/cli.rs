@@ -75,6 +75,45 @@ fn cli_prints_json_for_success_and_expected_failure() {
         "Grüße"
     );
 
+    // Malformed text must never be saved after silent character replacement or truncation.
+    let version = run(&home, &["card", "show", "demo"]).1["version"].clone();
+    let mut truncated_utf16: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(r#"{"headline":"Changed"}"#.encode_utf16().flat_map(u16::to_le_bytes))
+        .collect();
+    truncated_utf16.push(0);
+    let mut invalid_utf16 = vec![0xFF, 0xFE];
+    invalid_utf16.extend(r#"{"headline":""#.encode_utf16().flat_map(u16::to_le_bytes));
+    invalid_utf16.extend(0xD800u16.to_le_bytes());
+    invalid_utf16.extend("\"}".encode_utf16().flat_map(u16::to_le_bytes));
+    for bytes in [
+        b"{\"headline\":\"Bad \xff text\"}".to_vec(),
+        truncated_utf16,
+        invalid_utf16,
+    ] {
+        std::fs::write(&patch, &bytes).unwrap();
+        let (code, out) = run(
+            &home,
+            &[
+                "card",
+                "put",
+                "demo",
+                "--file",
+                patch.to_str().unwrap(),
+                "--merge",
+            ],
+        );
+        assert_eq!(
+            (code, out["error"]["code"].as_str()),
+            (1, Some("invalid_json"))
+        );
+        assert_eq!(run(&home, &["card", "show", "demo"]).1["version"], version);
+        assert_eq!(
+            run(&home, &["card", "show", "demo"]).1["card"]["headline"],
+            "Grüße"
+        );
+    }
+
     let (code, out) = run(&home, &["context", "nope"]);
     assert_eq!(code, 1);
     let expected = json!({"ok": false, "error": {"code": "project_not_found", "message": "No project with id 'nope'.", "hint": "Known project ids: demo."}});

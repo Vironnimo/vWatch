@@ -193,8 +193,15 @@ enum SchemaKind {
 }
 
 /// Decode a document: UTF-8 with or without BOM, or UTF-16 with BOM (Windows PowerShell's default).
-fn decode(bytes: &[u8]) -> String {
+fn decode(bytes: &[u8], origin: &str) -> Result<String> {
+    let invalid_encoding = || {
+        WatchtowerError::new("invalid_json", format!("{origin} has invalid text encoding."))
+            .hint("Save the complete JSON document as UTF-8, or UTF-16 with a byte-order mark, and retry.")
+    };
     let utf16 = |be: bool| {
+        if !(bytes.len() - 2).is_multiple_of(2) {
+            return Err(invalid_encoding());
+        }
         let units: Vec<u16> = bytes[2..]
             .chunks_exact(2)
             .map(|c| {
@@ -205,13 +212,17 @@ fn decode(bytes: &[u8]) -> String {
                 }
             })
             .collect();
-        String::from_utf16_lossy(&units)
+        String::from_utf16(&units).map_err(|_| invalid_encoding())
     };
     match bytes {
         [0xFF, 0xFE, ..] => utf16(false),
         [0xFE, 0xFF, ..] => utf16(true),
-        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
-        _ => String::from_utf8_lossy(bytes).into_owned(),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => std::str::from_utf8(rest)
+            .map(str::to_owned)
+            .map_err(|_| invalid_encoding()),
+        _ => std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| invalid_encoding()),
     }
 }
 
@@ -223,13 +234,13 @@ fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
             stdin.read_to_end(&mut buf).map_err(|e| {
                 WatchtowerError::new("file_unreadable", format!("Cannot read stdin: {e}."))
             })?;
-            (decode(&buf), "stdin".to_owned())
+            (decode(&buf, "stdin")?, "stdin".to_owned())
         }
         (None, Some(file)) => {
             let bytes = std::fs::read(file).map_err(|e| {
                 WatchtowerError::new("file_unreadable", format!("Cannot read {file}: {e}."))
             })?;
-            (decode(&bytes), file.to_owned())
+            (decode(&bytes, file)?, file.to_owned())
         }
         (None, None) => {
             return Err(

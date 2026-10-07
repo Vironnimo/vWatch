@@ -2,6 +2,8 @@
 
 Every command prints one JSON object on stdout; many include `next`, a hint for the usual next command. Success: `{"ok": true, ...}`, exit code 0. Expected failure: `{"ok": false, "error": {"code", "message", "hint"}}`, exit code 1. Wrong arguments print usage on stderr with exit code 2. When `watchtower` is not found, call `%LOCALAPPDATA%\Programs\Watchtower\Watchtower.exe` with the same arguments.
 
+JSON files and stdin accept UTF-8 (optional BOM) or BOM-marked UTF-16. Invalid text encoding fails as `invalid_json` before saving.
+
 ## Daily run
 
 | Command | Returns |
