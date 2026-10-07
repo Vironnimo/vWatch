@@ -161,6 +161,19 @@ async fn rename_project(app: State<'_, AppState>, id: String, name: String) -> R
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn update_project(
+    app: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    path: Option<String>,
+) -> Reply {
+    work(&app, move |s| {
+        s.update_project(&id, name.as_deref(), path.as_deref())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn remove_project(app: State<'_, AppState>, id: String) -> Reply {
     work(&app, move |s| s.remove_project(&id)).await
 }
@@ -304,6 +317,7 @@ pub fn run() {
             remove_idea,
             set_goal,
             rename_project,
+            update_project,
             remove_project,
             discover,
             add_projects,

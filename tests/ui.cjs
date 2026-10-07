@@ -13,7 +13,8 @@ const expose = `globalThis.ui = {
   note: id => { noteFor = id; },
   answer: id => { answering = id; },
   render, blockIdeas, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus,
-  openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead
+  openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead,
+  openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit
 };`;
 
 function fixture() {
@@ -41,14 +42,15 @@ async function app(invoke = () => ({})) {
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
       innerHTML: '', value: '', textContent: '', hidden: false, scrollTop: 0,
-      focus() { document.activeElement = this; }, select() {}, setSelectionRange() {},
+      focus() { document.activeElement = this; }, select() {},
+      setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
       addEventListener() {}, setAttribute() {},
       querySelector: child => node(`${selector} ${child}`), querySelectorAll: () => [],
     });
     return nodes.get(selector);
   };
   document = {
-    querySelector: node, querySelectorAll: () => [], activeElement: null,
+    querySelector: node, querySelectorAll: selector => nodes.has(selector) ? [nodes.get(selector)] : [], activeElement: null,
     addEventListener(type, handler) {
       const list = events.get(type) || [];
       list.push(handler); events.set(type, list);
@@ -67,7 +69,7 @@ async function app(invoke = () => ({})) {
   });
   vm.runInContext(source.replace('load(true).then(refreshFacts);', expose), context);
   await context.ui.load(false);
-  return { ui: context.ui, state, node, calls, copied, dispatch: (type, event) => {
+  return { ui: context.ui, state, node, calls, copied, document, dispatch: (type, event) => {
     for (const handler of events.get(type) || []) handler(event);
   } };
 }
@@ -172,6 +174,125 @@ test('refresh preserves unsent idea and project text', async () => {
   assert.match(a.node('#view').innerHTML, /value="A useful new app"/);
   assert.match(a.node('#drawer-root').innerHTML, /value="Ship next month"/);
   assert.match(a.node('#drawer-root').innerHTML, /value="Only fix bugs"/);
+});
+
+function editProjectField(a, field, value) {
+  a.dispatch('input', { target: { value, id: `project-${field}-sample`,
+    dataset: { projectEditField: field, project: 'sample' }, matches: () => false } });
+}
+
+test('editing a name and folder saves once under the existing project id', async () => {
+  const pending = deferred();
+  const a = await app(async (command, args, state) => {
+    if (command === 'update_project') {
+      await pending.promise;
+      Object.assign(state.projects[0], args);
+      return state.projects[0];
+    }
+    return {};
+  });
+  await a.ui.openPanel();
+  assert.match(a.node('#panel-root').innerHTML, /data-project-edit="sample"/);
+  a.ui.editProject('sample');
+  editProjectField(a, 'name', 'Renamed');
+  editProjectField(a, 'path', 'C:/renamed');
+  const saving = a.ui.saveProjectEdit('sample');
+  await a.ui.saveProjectEdit('sample');
+  a.ui.cancelProjectEdit('sample');
+  assert.match(a.node('#panel-root').innerHTML, /Speichert …/);
+  assert.match(a.node('#panel-root').innerHTML, /data-project-save="sample" disabled/);
+  pending.resolve();
+  await saving;
+  const saves = a.calls.filter(c => c.command === 'update_project');
+  assert.equal(saves.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(saves[0].args)), { id: 'sample', name: 'Renamed', path: 'C:/renamed' });
+  assert.equal(a.state.projects[0].card.headline, 'Ready');
+  assert.match(a.node('#panel-root').innerHTML, /<b>Renamed<\/b>/);
+  assert.doesNotMatch(a.node('#panel-root').innerHTML, /data-project-save=/);
+  assert.equal(a.calls.filter(c => ['add_projects', 'remove_project'].includes(c.command)).length, 0);
+});
+
+test('project edits retain drafts, focus and cursor across refresh and panel reopening', async () => {
+  const a = await app();
+  await a.ui.openPanel();
+  a.ui.editProject('sample');
+  editProjectField(a, 'name', 'My renamed project');
+  editProjectField(a, 'path', 'C:/moved');
+  // The old input is replaced by render; focus and selection go to the new node.
+  a.document.activeElement = { tagName: 'INPUT', id: 'project-name-sample', selectionStart: 3, selectionEnd: 10 };
+  await a.ui.load(false);
+  assert.equal(a.document.activeElement, a.node('#project-name-sample'));
+  assert.equal(a.node('#project-name-sample').selectionStart, 3);
+  assert.equal(a.node('#project-name-sample').selectionEnd, 10);
+  assert.match(a.node('#panel-root').innerHTML, /value="My renamed project"/);
+  assert.match(a.node('#panel-root').innerHTML, /value="C:\/moved"/);
+  a.ui.closePanel();
+  await a.ui.openPanel();
+  assert.match(a.node('#panel-root').innerHTML, /value="My renamed project"/);
+  a.ui.cancelProjectEdit('sample');
+  a.ui.editProject('sample');
+  assert.match(a.node('#panel-root').innerHTML, /value="Sample"/);
+  assert.equal(a.calls.filter(c => c.command === 'update_project').length, 0);
+});
+
+test('failed project edits retain both fields and can be retried without sending unchanged fields', async () => {
+  let attempts = 0;
+  const a = await app((command, args, state) => {
+    if (command === 'update_project') {
+      if (++attempts === 1) throw { message: 'Folder is already registered' };
+      Object.assign(state.projects[0], args);
+    }
+    return {};
+  });
+  await a.ui.openPanel();
+  a.ui.editProject('sample');
+  editProjectField(a, 'name', 'Renamed');
+  editProjectField(a, 'path', 'C:/other');
+  await a.ui.saveProjectEdit('sample');
+  assert.match(a.node('#panel-root').innerHTML, /role="alert">Nicht gespeichert: Folder is already registered/);
+  assert.match(a.node('#panel-root').innerHTML, /value="Renamed"/);
+  assert.match(a.node('#panel-root').innerHTML, /value="C:\/other"/);
+  assert.doesNotMatch(a.node('#panel-root').innerHTML, /data-project-save="sample" disabled/);
+  editProjectField(a, 'path', 'C:/sample');
+  await a.ui.saveProjectEdit('sample');
+  assert.deepEqual(JSON.parse(JSON.stringify(a.calls.filter(c => c.command === 'update_project')[1].args)), { id: 'sample', name: 'Renamed' });
+});
+
+test('folder selection keeps the name and only changes the draft after a choice', async () => {
+  const pending = deferred();
+  let picks = 0;
+  const a = await app(command => command === 'pick_folder' ? (++picks === 1 ? pending.promise : 'C:/new-place') : {});
+  await a.ui.openPanel();
+  a.ui.editProject('sample');
+  editProjectField(a, 'name', 'My name');
+  const picking = a.ui.pickProjectFolder('sample');
+  await a.ui.pickProjectFolder('sample');
+  await a.ui.saveProjectEdit('sample');
+  assert.equal(picks, 1);
+  pending.resolve(null);
+  await picking;
+  assert.match(a.node('#panel-root').innerHTML, /value="C:\/sample"/);
+  await a.ui.pickProjectFolder('sample');
+  assert.match(a.node('#panel-root').innerHTML, /value="C:\/new-place"/);
+  assert.match(a.node('#panel-root').innerHTML, /value="My name"/);
+  assert.equal(a.calls.filter(c => c.command === 'update_project').length, 0);
+});
+
+test('a saved project with failed fact collection is reported as saved', async () => {
+  const a = await app((command, args, state) => {
+    if (command === 'update_project') {
+      Object.assign(state.projects[0], args);
+      return { project: state.projects[0], changed: true, facts_refresh: { ok: false, error: { message: 'Git unavailable' } } };
+    }
+    return {};
+  });
+  await a.ui.openPanel();
+  a.ui.editProject('sample');
+  editProjectField(a, 'path', 'C:/moved');
+  await a.ui.saveProjectEdit('sample');
+  assert.match(a.node('#toast').innerHTML, /Projekt geändert. Fakten konnten noch nicht neu gemessen werden/);
+  assert.doesNotMatch(a.node('#panel-root').innerHTML, /data-project-save=/);
+  assert.match(a.node('#panel-root').innerHTML, /C:\/moved/);
 });
 
 test('a copied task labels today as export date instead of evidence date', async () => {

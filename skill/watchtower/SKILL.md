@@ -1,6 +1,6 @@
 ---
 name: watchtower
-description: Operate Watchtower, the owner's morning overview of all their software projects. Use for the daily Watchtower run (find which projects need a new card, study those repositories, write project cards and the cross-project brief), for adding, removing or re-statusing watched projects, and for answering questions from the stored cards, facts and ratings.
+description: Operate Watchtower, the owner's morning overview of all their software projects. Use for the daily run (study due repositories, write project cards and the cross-project brief), for managing watched projects including renamed or moved folders, and for questions from stored cards, facts and ratings.
 ---
 
 # Watchtower
@@ -24,6 +24,7 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 
 - **The daily run** (a scheduled task, or the owner asks you to update Watchtower): follow "Daily run" below.
 - **Add projects:** the owner usually adds projects in the Watchtower window. When the owner asks you to, `watchtower projects discover <folder>` lists git repositories there that are not watched yet and `watchtower projects add <path>` registers one. Add only the projects the owner named or confirmed.
+- **Rename or reconnect a moved project:** find its existing ID with `watchtower projects list`, then run `watchtower projects update <id> --name "New name" --path "C:/projects/new-folder"` with either or both options. This changes Watchtower's record, preserves the ID and all history, and never moves a folder. Do not remove and re-add: removal deletes cards. A missing folder alone does not establish which replacement the owner intends.
 - **The owner changes a project's intent** ("park needle-net", "gusto is done"): `watchtower projects status <id> <active|parked|done|archived> --note "<reason>"`. A goal ("v1.0 by mid-December"): `watchtower projects goal <id> "<goal>" --due YYYY-MM-DD`.
 - **The owner wants an idea checked** ("park this idea: …"): `watchtower ideas add "<idea>"`. The next portfolio brief assesses it.
 - **The owner asks for a card of a project that is not due:** run `watchtower context <id>`, check the previous card against the repository as the card guide describes, and save with `watchtower card put <id> --context-token <context_token> --merge --file <path>`.
@@ -33,7 +34,7 @@ The full command list with JSON shapes is in `references/cli.md`. Read only the 
 ## Daily run
 
 1. Run `watchtower runs start`. Keep `run_id` as your run id. It refreshes the facts and returns run progress plus `due`:
-   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work including extra worktrees, or edited docs since the last card; `changes` names what differs, null for cards written before Watchtower recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered, revised or withdrew a reply to a card question), `status_changed` (the owner changed its intent, note or goal), `new_fields` (the card predates fields Watchtower added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks (`handbook.installed`, `suggestions[].done_when`): fill them in the card you write.
+   - `projects`: each project that needs a new card, with a `reason`: `no_card`, `changed` (new commits, also in worktrees and unmerged branches, uncommitted work including extra worktrees, or edited docs since the last card; `changes` names what differs, null for cards written before Watchtower recorded it), `ci_changed` (CI turned red or green since the last card), `answered` (the owner answered, revised or withdrew a reply to a card question), `status_changed` (the owner changed its name, folder, intent, note or goal), `new_fields` (the card predates fields Watchtower added since) or `stale` (the card is old). Any entry may carry `new_fields`, the fields its card lacks (`handbook.installed`, `suggestions[].done_when`): fill them in the card you write.
    - `problems`: projects whose folder is gone. Mention them in your report; do not write cards for them.
    - `portfolio.due`: whether the cross-project brief needs rewriting.
    If nothing is due, still close the run with `watchtower runs finish <run-id>`, then report its result. `watchtower due` remains available for an untracked check.

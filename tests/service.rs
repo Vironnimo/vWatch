@@ -731,6 +731,225 @@ fn status_and_registration_rules() {
 }
 
 #[test]
+fn project_updates_keep_identity_history_and_owner_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    svc.set_goal("demo", "Version veröffentlichen", Some("2026-12-01"))
+        .unwrap();
+    svc.set_status("demo", "parked", Some("Erst nach dem Urlaub"))
+        .unwrap();
+    svc.open_project("demo").unwrap();
+    svc.put_card(
+        "demo",
+        card_with(json!({"waiting_on_you": [{"id": "q-rename", "title": "Offline?"}]})),
+        false,
+        false,
+    )
+    .unwrap();
+    svc.set_feedback("q-rename", Some("answered"), Some("Ja"))
+        .unwrap();
+    svc.set_warning_ack("demo", "no_remote", Some("Absichtlich lokal"))
+        .unwrap();
+    svc.create_task(json!({"projects": ["demo"], "source_id": "sg-kept", "title": "Export bauen"}))
+        .unwrap();
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let run_id = svc.run_start(false).unwrap()["run"]["id"].as_i64().unwrap();
+    let before = svc.list_projects().unwrap()[0].clone();
+    let history = svc.store().card_history("demo").unwrap();
+    let feedback = svc.feedback(None).unwrap();
+    let tasks = svc.tasks(None).unwrap();
+    let acks = svc.store().warning_acknowledgements("demo").unwrap();
+    let run_initial = svc.store().agent_run(run_id).unwrap().unwrap().initial;
+    let old_card_token = svc.context("demo").unwrap()["context_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let old_brief_token = svc.portfolio_context().unwrap()["context_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let facts_before = svc.facts("demo").unwrap();
+
+    let renamed = svc
+        .update_project("demo", Some("  vUtility  "), None)
+        .unwrap();
+    assert_eq!(renamed["project"]["id"], "demo");
+    assert_eq!(renamed["project"]["name"], "vUtility");
+    assert_eq!(renamed["changed"], true);
+    assert!(renamed["project"].get("identity_revision").is_none());
+    assert_eq!(svc.facts("demo").unwrap(), facts_before);
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_changed"
+    );
+    assert_eq!(
+        svc.put_card_guarded("demo", json!({}), true, false, Some(&old_card_token))
+            .unwrap_err()
+            .code,
+        "version_conflict"
+    );
+    assert_eq!(
+        svc.put_portfolio_guarded(json!({}), true, false, Some(&old_brief_token))
+            .unwrap_err()
+            .code,
+        "version_conflict"
+    );
+
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
+    let token = svc.context("demo").unwrap()["context_token"].clone();
+    assert_eq!(
+        svc.update_project("demo", Some("vUtility"), Some(repo.to_str().unwrap()))
+            .unwrap()["changed"],
+        false
+    );
+    assert_eq!(svc.context("demo").unwrap()["context_token"], token);
+    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["due"], false);
+
+    let moved = tmp.path().join("vUtility");
+    std::fs::rename(&repo, &moved).unwrap();
+    // Same-day disk figures must be measured again at the new location.
+    let mut old_facts = svc.store().facts("demo").unwrap().unwrap();
+    old_facts.data["space"]["total_bytes"] = json!(99999);
+    svc.store()
+        .save_facts("demo", &svc.now(), &old_facts.fingerprint, &old_facts.data)
+        .unwrap();
+    let old_project = svc.store().project("demo").unwrap().unwrap();
+    let relinked = svc
+        .update_project("demo", None, Some(moved.to_str().unwrap()))
+        .unwrap();
+    assert_eq!(relinked["project"]["id"], "demo");
+    assert_eq!(relinked["facts_refresh"]["ok"], true);
+    assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 0);
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_changed"
+    );
+    // A refresh that captured the previous project cannot resurrect its facts.
+    assert!(!svc
+        .store()
+        .save_project_facts(
+            &old_project,
+            &svc.now(),
+            &old_facts.fingerprint,
+            &old_facts.data
+        )
+        .unwrap());
+    assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 0);
+    let after = svc.list_projects().unwrap()[0].clone();
+    for field in [
+        "id",
+        "status",
+        "status_note",
+        "status_changed_at",
+        "added_at",
+        "opened_at",
+        "previous_opened_at",
+        "goal",
+        "goal_due",
+    ] {
+        assert_eq!(after[field], before[field], "{field}");
+    }
+    assert_eq!(&svc.store().card_history("demo").unwrap()[..2], &history);
+    assert_eq!(svc.feedback(None).unwrap(), feedback);
+    assert_eq!(svc.tasks(None).unwrap(), tasks);
+    assert_eq!(svc.store().warning_acknowledgements("demo").unwrap(), acks);
+    assert_eq!(
+        svc.store().agent_run(run_id).unwrap().unwrap().initial,
+        run_initial
+    );
+    assert_eq!(
+        svc.rename_project("demo", "Final Name").unwrap()["id"],
+        "demo"
+    );
+}
+
+#[test]
+fn project_update_validation_is_atomic_and_old_databases_stay_current() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    let other = common::make_repo(tmp.path(), "other", &["2026-09-29T10:00:00"]);
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    svc.add_project(other.to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_card("other", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    drop(svc);
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute_batch("ALTER TABLE projects DROP COLUMN identity_revision;")
+        .unwrap();
+    drop(db);
+    let (svc, _) = service(tmp.path());
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
+    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["due"], false);
+    let before = svc.list_projects().unwrap();
+    let token = svc.context("demo").unwrap()["context_token"].clone();
+    let missing = tmp.path().join("missing");
+    for (name, path, error) in [
+        (None, None, "invalid_update"),
+        (Some("  "), None, "invalid_name"),
+        (Some("Changed"), Some("  "), "invalid_path"),
+        (
+            Some("Changed"),
+            Some(missing.to_str().unwrap()),
+            "path_missing",
+        ),
+        (
+            Some("Changed"),
+            Some(other.to_str().unwrap()),
+            "already_registered",
+        ),
+    ] {
+        let rejected = svc.update_project("demo", name, path).unwrap_err();
+        assert_eq!(rejected.code, error);
+        assert!(rejected.hint.is_some());
+        assert_eq!(svc.list_projects().unwrap(), before);
+        assert_eq!(svc.context("demo").unwrap()["context_token"], token);
+    }
+    // Older cards with no owner basis also become due after a same-clock rename.
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute(
+        "UPDATE cards SET owner_basis = NULL WHERE project_id = 'demo'",
+        [],
+    )
+    .unwrap();
+    svc.rename_project("demo", "Renamed").unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["projects"][0]["reason"],
+        "status_changed"
+    );
+    svc.put_card("demo", json!({}), true, false).unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
+    // A valid existing non-git folder remains supported, with explicit measurement failure.
+    let plain = tmp.path().join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    let updated = svc
+        .update_project("demo", None, Some(plain.to_str().unwrap()))
+        .unwrap();
+    assert_eq!(updated["changed"], true);
+    assert_eq!(updated["facts_refresh"]["ok"], false);
+    assert_eq!(updated["facts_refresh"]["error"], "not_a_git_repository");
+    assert_eq!(svc.card("demo").unwrap()["version"], 2);
+}
+
+#[test]
 fn owner_choices_show_up_in_the_window_state() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

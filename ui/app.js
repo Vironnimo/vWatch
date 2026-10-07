@@ -31,6 +31,7 @@
   let since = null;       // { id, data, dismissed }: what happened since the owner last opened that project
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
+  const projectEdits = {}; // unsaved names and folder paths in settings
   let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
   let confirmRemove = null;
   let round = null;       // decision round: { queue: question ids, i, stats, busy }
@@ -908,12 +909,27 @@
   }
   const copyLine = (text, label) => `<div class="copyline"><code class="mono">${esc(text)}</code><button class="btn" type="button" data-copy="${esc(text)}" aria-label="${esc(label)} kopieren">Kopieren</button></div>`;
 
+  function projectEditor(p) {
+    const edit = projectEdits[p.id];
+    if (!edit) return '';
+    const disabled = edit.busy ? ' disabled' : '';
+    return `<div class="project-editor" aria-busy="${!!edit.busy}">
+      <label for="project-name-${esc(p.id)}">Name in Watchtower</label>
+      <input type="text" id="project-name-${esc(p.id)}" data-project-edit-field="name" data-project="${esc(p.id)}" value="${esc(edit.name)}"${disabled}>
+      <label for="project-path-${esc(p.id)}">Projektordner</label>
+      <div class="inrow"><input type="text" class="mono" id="project-path-${esc(p.id)}" data-project-edit-field="path" data-project="${esc(p.id)}" value="${esc(edit.path)}"${disabled}><button class="btn" type="button" data-project-folder="${esc(p.id)}"${disabled}>Ordner wählen …</button></div>
+      <p class="d">Karten, Antworten und Verlauf bleiben erhalten. Wenn du den Ordner bereits verschoben oder umbenannt hast, wähle seinen neuen Ort. Watchtower verschiebt keine Dateien.</p>
+      ${edit.error ? `<p class="project-edit-error bad-t" role="alert">${esc(edit.error)}</p>` : ''}
+      <div class="actions"><button class="btn primary" type="button" data-project-save="${esc(p.id)}"${disabled}>${edit.busy === 'save' ? 'Speichert …' : 'Speichern'}</button><button class="btn" type="button" data-project-cancel="${esc(p.id)}"${disabled}>Abbrechen</button></div>
+    </div>`;
+  }
+
   function panelHtml() {
     const st = settings || {};
     const projects = S.projects.map(p => `<div class="prow"><div class="pmain"><div class="pname-s">${dot(p.id)}<b>${esc(p.name)}</b>${p.status !== 'active' ? `<span class="tag">${esc(STATUS[p.status])}</span>` : ''}</div><div class="d mono">${esc(p.path)}</div></div>
-      ${confirmRemove === p.id
+      ${projectEdits[p.id] ? '' : confirmRemove === p.id
         ? `<div class="confirm"><span>Karten und Verlauf werden gelöscht.</span><button class="btn danger" type="button" data-remove="${esc(p.id)}">Entfernen</button><button class="btn" type="button" data-remove-cancel>Behalten</button></div>`
-        : `<button class="linkish" type="button" data-remove-ask="${esc(p.id)}">entfernen</button>`}</div>`).join('');
+        : `<div class="project-actions"><button class="btn" type="button" data-project-edit="${esc(p.id)}">Bearbeiten</button><button class="linkish" type="button" data-remove-ask="${esc(p.id)}">entfernen</button></div>`}${projectEditor(p)}</div>`).join('');
     return `<div class="scrim" data-close-panel></div><aside class="drawer panel" role="dialog" aria-modal="true" aria-label="Einstellungen">
       <button class="close" data-close-panel type="button">Schließen</button>
       <h2 class="pname">Einstellungen</h2>
@@ -936,8 +952,10 @@
     if (!panelOpen) { root.innerHTML = ''; return; }
     const prev = root.querySelector('.drawer');
     const top = keepScroll && prev ? prev.scrollTop : 0;
+    const focused = inputFocus();
     root.innerHTML = panelHtml();
     root.querySelector('.drawer').scrollTop = top;
+    restoreInputFocus(focused);
   }
   async function openPanel() {
     closeDrawer();
@@ -1149,6 +1167,57 @@
       renderPanel(true);
     } catch (e) { toast('Nicht geändert: ' + errText(e)); }
   }
+  function editProject(id) {
+    const p = byId(id);
+    if (!p) return;
+    projectEdits[id] ||= { name: p.name, path: p.path, originalName: p.name, originalPath: p.path, busy: null, error: null };
+    confirmRemove = null;
+    renderPanel(true);
+    $(`#project-name-${CSS.escape(id)}`).focus();
+  }
+  function cancelProjectEdit(id) {
+    if (!projectEdits[id] || projectEdits[id].busy) return;
+    delete projectEdits[id];
+    renderPanel(true);
+  }
+  async function pickProjectFolder(id) {
+    const edit = projectEdits[id];
+    if (!edit || edit.busy) return;
+    edit.busy = 'pick'; edit.error = null;
+    renderPanel(true);
+    try {
+      const path = await call('pick_folder');
+      if (path) edit.path = path;
+    } catch (e) { edit.error = `Ordner konnte nicht gewählt werden: ${errText(e)}`; }
+    finally { edit.busy = null; renderPanel(true); }
+  }
+  async function saveProjectEdit(id) {
+    const edit = projectEdits[id];
+    if (!edit || edit.busy) return;
+    const name = edit.name.trim(), path = edit.path.trim();
+    if (!name || !path) {
+      edit.error = !name ? 'Gib einen Namen ein.' : 'Gib den vorhandenen Projektordner an.';
+      renderPanel(true); return;
+    }
+    const args = { id };
+    if (name !== edit.originalName) args.name = name;
+    if (path !== edit.originalPath) args.path = path;
+    if (!args.name && !args.path) { cancelProjectEdit(id); return; }
+    edit.busy = 'save'; edit.error = null;
+    renderPanel(true);
+    try {
+      const result = await call('update_project', args);
+      delete projectEdits[id];
+      await load(false);
+      toast(result.facts_refresh && result.facts_refresh.ok === false
+        ? 'Projekt geändert. Fakten konnten noch nicht neu gemessen werden. Versuche es mit „Aktualisieren“ erneut.'
+        : 'Projekt geändert. Karten und Verlauf bleiben erhalten.');
+    } catch (e) {
+      edit.busy = null;
+      edit.error = `Nicht gespeichert: ${errText(e)}`;
+      renderPanel(true);
+    }
+  }
   async function removeProject(id) {
     const p = byId(id);
     try {
@@ -1233,6 +1302,14 @@
     if (t.closest('[data-close-panel]')) { closePanel(); return; }
     const pk = t.closest('[data-pick]');
     if (pk) { pick(pk.dataset.target); return; }
+    const pe = t.closest('[data-project-edit]');
+    if (pe) { editProject(pe.dataset.projectEdit); return; }
+    const pf = t.closest('[data-project-folder]');
+    if (pf) { pickProjectFolder(pf.dataset.projectFolder); return; }
+    const ps = t.closest('[data-project-save]');
+    if (ps) { saveProjectEdit(ps.dataset.projectSave); return; }
+    const pc = t.closest('[data-project-cancel]');
+    if (pc) { cancelProjectEdit(pc.dataset.projectCancel); return; }
     if (t.closest('[data-disc-all]')) { const all = disc.result.candidates; disc.checked = disc.checked.size === all.length ? new Set() : new Set(all.map(c => c.path)); rerenderDisc(); return; }
     if (t.closest('[data-disc-add]')) { addPaths([...disc.checked], disc.target); return; }
     if (t.closest('[data-disc-cancel]')) { const target = disc.target; disc = null; rerenderDisc(target); return; }
@@ -1282,6 +1359,9 @@
     if (e.target.id === 'idea-text') ideaDraft = e.target.value;
     if (e.target.id === 'snooze-date') snoozeDate = e.target.value;
     if (e.target.dataset && e.target.dataset.warningNote) warningDrafts[e.target.dataset.warningNote] = e.target.value;
+    const editField = e.target.dataset && e.target.dataset.projectEditField;
+    const edit = editField && projectEdits[e.target.dataset.project];
+    if (edit && !edit.busy && (editField === 'name' || editField === 'path')) edit[editField] = e.target.value;
     const field = { 'status-note': 'status_note', 'goal-text': 'goal', 'goal-due': 'goal_due' }[e.target.id];
     if (field && openId) (projectDrafts[openId] ||= {})[field] = e.target.value;
   });
@@ -1305,6 +1385,12 @@
       return;
     }
     if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing())) { e.preventDefault(); openSearch(); return; }
+    if (e.target.dataset && e.target.dataset.projectEditField && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault();
+      if (e.key === 'Enter') saveProjectEdit(e.target.dataset.project);
+      else cancelProjectEdit(e.target.dataset.project);
+      return;
+    }
     const draft = e.target.closest && e.target.closest('[data-draft]');
     if (draft && (e.key === 'Enter' || e.key === 'Escape')) {
       e.preventDefault();

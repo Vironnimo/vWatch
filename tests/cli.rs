@@ -231,3 +231,68 @@ fn cli_prints_json_for_success_and_expected_failure() {
         (1, Some("version_conflict"))
     );
 }
+
+#[test]
+fn project_update_cli_preserves_the_registered_id_and_card_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let repo = common::demo_repo(tmp.path());
+    assert_eq!(
+        run(&home, &["projects", "add", repo.to_str().unwrap()]).0,
+        0
+    );
+    assert_eq!(
+        run(
+            &home,
+            &[
+                "card",
+                "put",
+                "demo",
+                "--json",
+                &common::card().to_string(),
+                "--context-token",
+                &card_token(&home)
+            ]
+        )
+        .0,
+        0
+    );
+    let moved = tmp.path().join("vUtility");
+    std::fs::rename(repo, &moved).unwrap();
+    let (code, updated) = run(
+        &home,
+        &[
+            "projects",
+            "update",
+            "demo",
+            "--name",
+            "vUtility",
+            "--path",
+            moved.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(updated["project"]["id"], "demo");
+    assert_eq!(updated["project"]["name"], "vUtility");
+    assert_eq!(updated["changed"], true);
+    assert_eq!(updated["facts_refresh"]["ok"], true);
+    assert_eq!(run(&home, &["card", "show", "demo"]).1["version"], 1);
+    assert_eq!(
+        run(&home, &["projects", "update", "demo", "--name", "vUtility"]).1["changed"],
+        false
+    );
+    assert_eq!(
+        run(&home, &["projects", "rename", "demo", "Another Name"]).1["project"]["name"],
+        "Another Name"
+    );
+    for args in [
+        vec!["projects", "update", "demo"],
+        vec!["projects", "update", "demo", "--path", ""],
+    ] {
+        let (code, rejected) = run(&home, &args);
+        assert_eq!(code, 1);
+        assert!(rejected["error"]["hint"].is_string());
+    }
+    assert_eq!(run(&home, &["card", "show", "demo"]).1["version"], 1);
+}

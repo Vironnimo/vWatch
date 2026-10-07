@@ -59,6 +59,24 @@ pub struct Project {
     /// What the owner wants to reach with the project, and by when.
     pub goal: String,
     pub goal_due: Option<String>,
+    /// Changes only when the registered name or folder changes.
+    #[serde(skip_serializing)]
+    pub identity_revision: i64,
+}
+
+pub enum ProjectUpdate {
+    Updated,
+    Conflict,
+    PathTaken(String),
+}
+
+pub(crate) fn same_path(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        let key = |path: &str| path.replace('\\', "/").trim_end_matches('/').to_lowercase();
+        key(a) == key(b)
+    } else {
+        a == b
+    }
 }
 
 pub struct StoredFacts {
@@ -174,6 +192,7 @@ fn project(row: &Row) -> Result<Project> {
         previous_opened_at: row.get("previous_opened_at")?,
         goal: row.get("goal")?,
         goal_due: row.get("goal_due")?,
+        identity_revision: row.get("identity_revision")?,
     })
 }
 
@@ -196,6 +215,11 @@ impl Store {
             ("projects", "previous_opened_at", "TEXT"),
             ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
             ("projects", "goal_due", "TEXT"),
+            (
+                "projects",
+                "identity_revision",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
         ] {
             let present: bool = tx.query_row(
                 &format!(
@@ -243,13 +267,31 @@ impl Store {
         })
     }
 
-    pub fn rename_project(&self, id: &str, name: &str) -> Result<()> {
+    /// Update both fields together; never overwrite a concurrent project edit.
+    pub fn update_project(
+        &self,
+        before: &Project,
+        name: &str,
+        path: &str,
+    ) -> Result<ProjectUpdate> {
         self.with(|db| {
-            db.execute(
-                "UPDATE projects SET name = ?1 WHERE id = ?2",
-                params![name, id],
-            )
-            .map(drop)
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let current = tx.query_row("SELECT * FROM projects WHERE id = ?1", [&before.id], project).optional()?;
+            if current.is_none_or(|p| p.name != before.name || p.path != before.path || p.identity_revision != before.identity_revision) {
+                return Ok(ProjectUpdate::Conflict);
+            }
+            let projects = tx.prepare("SELECT * FROM projects WHERE id != ?1")?
+                .query_map([&before.id], project)?.collect::<Result<Vec<_>>>()?;
+            if let Some(other) = projects.iter().find(|p| same_path(&p.path, path)) {
+                return Ok(ProjectUpdate::PathTaken(other.id.clone()));
+            }
+            tx.execute("UPDATE projects SET name = ?2, path = ?3, identity_revision = identity_revision + 1 WHERE id = ?1", params![before.id, name, path])?;
+            if before.path != path {
+                // A failed refresh must not leave facts from the former folder visible.
+                tx.execute("DELETE FROM facts WHERE project_id = ?1", [&before.id])?;
+            }
+            tx.commit()?;
+            Ok(ProjectUpdate::Updated)
         })
     }
 
@@ -300,6 +342,25 @@ impl Store {
                 params![id, at, fingerprint, data.to_string()],
             )
             .map(drop)
+        })
+    }
+
+    /// A collector started before a relink must not replace the new folder's facts.
+    pub fn save_project_facts(
+        &self,
+        project: &Project,
+        at: &str,
+        fingerprint: &str,
+        data: &Value,
+    ) -> Result<bool> {
+        self.with(|db| {
+            db.execute(
+                "INSERT INTO facts(project_id, collected_at, fingerprint, data)
+                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND path = ?5 AND identity_revision = ?6)
+                 ON CONFLICT(project_id) DO UPDATE SET collected_at = excluded.collected_at,
+                 fingerprint = excluded.fingerprint, data = excluded.data",
+                params![project.id, at, fingerprint, data.to_string(), project.path, project.identity_revision],
+            ).map(|count| count > 0)
         })
     }
 
@@ -692,7 +753,7 @@ fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
     use sha1::{Digest, Sha1};
     let mut basis = serde_json::json!({"scope": scope});
     basis["projects"] = token_rows(db,
-        "SELECT id,name,path,status,status_note,goal,goal_due,added_at FROM projects WHERE (?1 IS NULL AND status != 'archived') OR id = ?1 ORDER BY id", scope)?;
+        "SELECT id,name,path,status,status_note,goal,goal_due,added_at,identity_revision FROM projects WHERE (?1 IS NULL AND status != 'archived') OR id = ?1 ORDER BY id", scope)?;
     basis["cards"] = token_rows(db,
         "SELECT c.project_id,c.id,c.data FROM cards c JOIN projects p ON p.id=c.project_id WHERE c.id=(SELECT MAX(id) FROM cards WHERE project_id=c.project_id) AND ((?1 IS NULL AND p.status != 'archived') OR p.id=?1) ORDER BY p.id", scope)?;
     basis["facts"] = token_rows(db,

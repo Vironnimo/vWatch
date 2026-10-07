@@ -24,7 +24,7 @@ Copy a task and separately mark it assigned when you hand it to an agent. Watcht
 ```
 
 - Double-click `Watchtower-UI.exe` (or the Start menu entry "Watchtower") opens the window. On first start you pick your projects folder and tick the repositories to watch.
-- The gear opens the settings: add or remove projects, "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `watchtower`), and the command that installs the Skill in vBot.
+- The gear opens the settings: add or remove projects, edit a project's name or folder with "Bearbeiten", "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `watchtower`), and the command that installs the Skill in vBot. Editing preserves the project ID, cards, ratings and history. Select the existing folder after moving or renaming it elsewhere.
 - `watchtower <command>` is a native console program: it completes its work and JSON output before returning an exit code. It runs independently of the window, with ordinary stdin, stdout and stderr; no GUI automation or polling for late output is involved. No arguments show CLI usage. The window picks up agent writes within a few seconds.
 - `WATCHTOWER_HOME` moves the data folder elsewhere.
 
@@ -53,6 +53,8 @@ vbot skill install "%LOCALAPPDATA%\Programs\Watchtower\skill\watchtower" --scope
 Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch." for an Agent that can use the Skill and has Bash access.
 
 `watchtower schema card` and `watchtower schema portfolio` print the document schemas; `skill/watchtower/references/cli.md` lists all commands.
+
+To rename a watched project or reconnect its moved folder, first find its stable ID with `watchtower projects list`, then use `watchtower projects update <id> --name "New name" --path "C:/projects/new-folder"`. Either option can be used alone. Never remove and re-add a project for this: removal deletes its stored cards.
 
 ## Development
 

@@ -14,7 +14,8 @@ use serde_json::{json, Map, Value};
 use crate::cards::{self, Kind};
 use crate::facts;
 use crate::store::{
-    CardBasis, Feedback, Idea, Project, Store, StoredCard, StoredFacts, StoredPortfolio,
+    same_path, CardBasis, Feedback, Idea, Project, ProjectUpdate, Store, StoredCard, StoredFacts,
+    StoredPortfolio,
 };
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
@@ -313,14 +314,6 @@ fn parse(s: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(s)
         .map(|t| t.with_timezone(&Utc))
         .unwrap_or_default()
-}
-
-fn same_path(a: &str, b: &str) -> bool {
-    if cfg!(windows) {
-        a.to_lowercase() == b.to_lowercase()
-    } else {
-        a == b
-    }
 }
 
 fn slug(name: &str) -> String {
@@ -717,6 +710,7 @@ fn owner_changes(
                 .status_changed_at
                 .as_ref()
                 .is_some_and(|at| *at > card.created_at)
+                || project.identity_revision > 0
                 || warning_acks.as_array().is_some_and(|acks| !acks.is_empty())
                 || tasks.as_array().is_some_and(|tasks| !tasks.is_empty()),
         ),
@@ -778,6 +772,11 @@ fn owner_basis(p: &Project, reactions: &[Feedback], warning_acks: &Value, tasks:
         &project_json(p),
         &["status", "status_note", "goal", "goal_due"],
     );
+    // Existing cards have no revision. Zero keeps their owner basis unchanged
+    // until their project is actually edited, even within the same clock tick.
+    if p.identity_revision > 0 {
+        project["identity_revision"] = json!(p.identity_revision);
+    }
     if warning_acks.as_array().is_some_and(|acks| !acks.is_empty()) {
         project["warning_acks"] = warning_acks.clone();
     }
@@ -920,7 +919,7 @@ impl Watchtower {
             return Err(WatchtowerError::new(
                 "already_registered",
                 format!("This folder is already registered as '{}'.", p.id),
-            ));
+            ).hint(format!("Use `watchtower projects update {} --name <name>` to rename it while keeping its cards and history.", p.id)));
         }
         let folder = resolved
             .file_name()
@@ -949,7 +948,7 @@ impl Watchtower {
                 "id_taken",
                 format!("The id '{id}' is already used."),
             )
-            .hint("Pass another id with --id."));
+            .hint(format!("If this is the same project after a rename or move, use `watchtower projects update {id} --name <name> --path <folder>` to keep its cards and history. For a different project, pass another id with --id.")));
         }
         self.store
             .add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
@@ -990,16 +989,77 @@ impl Watchtower {
     }
 
     pub fn rename_project(&self, id: &str, name: &str) -> Result<Value> {
-        self.project(id)?;
-        let name = name.trim();
-        if name.is_empty() {
+        Ok(self.update_project(id, Some(name), None)?["project"].clone())
+    }
+
+    /// Change a registered project's identity details, preserving its stable id and history.
+    pub fn update_project(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        path: Option<&str>,
+    ) -> Result<Value> {
+        let before = self.project(id)?;
+        if name.is_none() && path.is_none() {
             return Err(WatchtowerError::new(
-                "invalid_name",
-                "The name must not be empty.",
+                "invalid_update",
+                "No project changes were supplied.",
+            )
+            .hint(
+                "Pass --name <name>, --path <folder>, or both. The project id stays unchanged.",
             ));
         }
-        self.store.rename_project(id, name)?;
-        Ok(project_json(&self.project(id)?))
+        let name = name.map(str::trim).unwrap_or(&before.name);
+        if name.is_empty() {
+            return Err(
+                WatchtowerError::new("invalid_name", "The name must not be empty.")
+                    .hint("Pass a nonempty display name with --name."),
+            );
+        }
+        let path = match path {
+            Some(path) if path.trim().is_empty() => return Err(WatchtowerError::new(
+                "invalid_path",
+                "The folder must not be empty.",
+            )
+            .hint(
+                "Pass the existing project folder with --path. Watchtower does not move folders.",
+            )),
+            Some(path) => {
+                let resolved = resolve(path.trim());
+                if !resolved.is_dir() {
+                    return Err(WatchtowerError::new("path_missing", format!("Folder does not exist: {}", resolved.display()))
+                        .hint("Move or rename the folder first, then pass its new location with --path. Nothing was changed."));
+                }
+                let resolved = resolved.to_string_lossy().into_owned();
+                if same_path(&before.path, &resolved) {
+                    before.path.clone()
+                } else {
+                    resolved
+                }
+            }
+            None => before.path.clone(),
+        };
+        if name == before.name && path == before.path {
+            return Ok(json!({"project": project_json(&before), "changed": false}));
+        }
+        match self.store.update_project(&before, name, &path)? {
+            ProjectUpdate::Updated => (),
+            ProjectUpdate::Conflict => return Err(WatchtowerError::new("version_conflict", "The project changed while you were editing it.")
+                .hint("Read `watchtower projects list` and retry the intended changes.")),
+            ProjectUpdate::PathTaken(other) => return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{other}'."))
+                .hint(format!("Use the existing project '{other}'. Do not remove and recreate a project to rename it; that deletes its cards and history. Nothing was changed."))),
+        }
+        let project = self.project(id)?;
+        let mut result = json!({"project": project_json(&project), "changed": true});
+        if path != before.path {
+            // The path and name are already saved. Report refresh trouble separately
+            // so a caller never mistakes a measurement failure for a rejected edit.
+            result["facts_refresh"] = match self.refresh_one(&project, self.today(), true) {
+                Ok(refreshed) => refreshed,
+                Err(error) => json!({"id": id, "ok": false, "error": error.to_json()}),
+            };
+        }
+        Ok(result)
     }
 
     /// The owner's goal for a project; an empty goal clears it. Like a status change, it makes the card due.
@@ -1162,8 +1222,13 @@ impl Watchtower {
             };
         }
         let fp = facts::fingerprint(&data);
-        self.store
-            .save_facts(&project.id, &self.now(), &fp, &data)?;
+        if !self
+            .store
+            .save_project_facts(project, &self.now(), &fp, &data)?
+        {
+            return Err(WatchtowerError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
+                .hint("Read `watchtower projects list` and refresh the project's facts again. The outdated measurement was discarded."));
+        }
         Ok(json!({
             "id": project.id,
             "ok": data["ok"].as_bool().unwrap_or(false),
@@ -2221,6 +2286,9 @@ impl Watchtower {
                 "project": pick(&project_json(&p), &["name", "status", "status_note", "goal", "goal_due"]),
                 "card": card,
             });
+            if p.identity_revision > 0 {
+                entry["project"]["identity_revision"] = json!(p.identity_revision);
+            }
             let warning_acks = self.warning_acknowledgements(&p.id)?;
             if warning_acks.as_array().is_some_and(|acks| !acks.is_empty()) {
                 entry["warning_acks"] = warning_acks;

@@ -154,6 +154,15 @@ enum ProjectsCmd {
     Remove { id: String },
     /// Change the display name
     Rename { id: String, name: String },
+    /// Change a project's display name or registered folder without losing its history
+    Update {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Existing folder after a rename or move; does not move the folder itself
+        #[arg(long)]
+        path: Option<String>,
+    },
     /// Set the owner's goal for the project (an empty goal clears it)
     Goal {
         id: String,
@@ -343,6 +352,9 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             }
             ProjectsCmd::Remove { id } => svc.remove_project(&id)?,
             ProjectsCmd::Rename { id, name } => json!({"project": svc.rename_project(&id, &name)?}),
+            ProjectsCmd::Update { id, name, path } => {
+                svc.update_project(&id, name.as_deref(), path.as_deref())?
+            }
             ProjectsCmd::Status { id, status, note } => {
                 let status = status
                     .to_possible_value()
@@ -441,7 +453,7 @@ where
     code
 }
 
-/// Entry point of the exe when it is started with arguments.
+/// Entry point used by the console executable.
 pub fn main(args: Vec<OsString>) -> i32 {
     let data_dir = system::data_dir();
     let stdout = std::io::stdout();

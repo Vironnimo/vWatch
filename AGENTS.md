@@ -39,6 +39,7 @@ The owner can separately assign a copied task; agent reports (`tasks report`) aw
 - **Short reading, clear next step.** Word limits in the schemas keep cards readable. Every open end, question and suggestion should lead to a concrete action or decision.
 - **The owner's word wins.** Ratings, replies, status notes and goals are instructions for agents. A rejected idea never returns.
 - **Agents are the users of the CLI.** Its JSON output, error codes (with `hint`) and schemas are designed so a fresh agent with only the Skill can operate Watchtower without mistakes.
+- **Project identity survives renames.** Names and folder paths are editable; IDs stay stable. Update the existing record so cards, feedback, tasks and history remain attached. Never implement renaming by removing and re-adding a project.
 
 ## Layout
 

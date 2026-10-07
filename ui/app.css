@@ -165,8 +165,8 @@ details > summary::-webkit-details-marker { display: none; }
 .idea .mynote { font-size: 13px; color: var(--text-2); border-left: 2px solid var(--line-2); padding-left: 8px; }
 .noteform { border-style: dashed; }
 .inrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
-.inrow input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line-2); background: var(--surface); color: var(--text); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 14px; }
-.inrow input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
+.inrow input, .project-editor > input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line-2); background: var(--surface); color: var(--text); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 14px; }
+.inrow input:focus, .project-editor > input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
 .qs .q .qrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
 .qs .q .qa { display: inline-flex; gap: 10px; opacity: 0; transition: opacity .12s ease; white-space: nowrap; }
 .qs .q:hover .qa, .qs .q:focus-within .qa { opacity: 1; }
@@ -294,6 +294,14 @@ details > summary::-webkit-details-marker { display: none; }
 .prow .d { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; margin-top: 2px; }
 .prow .linkish { font-size: 13px; color: var(--text-3); }
 .prow .linkish:hover { color: var(--bad); }
+.project-actions { display: flex; align-items: center; gap: 12px; }
+.project-editor { display: grid; gap: 6px; flex: 1 0 100%; min-width: 0; padding: 8px 0 4px; }
+.project-editor label { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.project-editor > input { width: 100%; }
+.project-editor .inrow { margin: 0; flex-wrap: wrap; }
+.project-editor .inrow input { flex: 1 1 260px; }
+.project-editor .actions { margin-top: 6px; }
+.project-editor .project-edit-error { margin: 2px 0; font-size: 13px; }
 .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--text-2); }
 
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; }
