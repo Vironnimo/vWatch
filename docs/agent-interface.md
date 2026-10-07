@@ -231,7 +231,7 @@ Completed validation at this report update:
 Release verification completed on 2026-10-07:
 
 - Both release executables were installed with `scripts/install.ps1` and match the built files byte for byte. The CLI uses Windows console subsystem 3; the window uses GUI subsystem 2.
-- All four Skill files match the repository, installed export and global vBot package byte for byte. The vBot package replacement refreshed its Skill catalog.
+- The initial rollout incorrectly created and updated a global vBot package while Nabu's pre-existing private package stayed stale. This was corrected: all four Skill files now match the repository, installed export and Nabu's private package byte for byte. The unintended global copy was removed into vBot's recoverable archive. The private package is available only to Nabu and has no sharing grants. Future updates must retain the package's existing scope.
 - Installed-process checks passed for readable and explicit JSON project lists and missing-target errors, with the expected exit codes and empty stderr.
 - The renamed `vUtility` project retains ID `vutility2` and all five original card versions, with their exact content hash unchanged. Owner preferences, autostart and user PATH are unchanged; installed feedback contains no test entries.
 - After the final UI restoration adapters and readable undo-conflict text, desktop compilation, 11 focused recovery/undo tests, all 25 UI tests and both strict Clippy configurations passed again.

@@ -942,7 +942,7 @@
       <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „watchtower“.</div></div></div>
         ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den Watchtower-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
         <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. Watchtower hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
-        <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Danach in vBot einen täglichen Schedule anlegen, etwa „Führe den täglichen Watchtower-Lauf durch.“</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
+        <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Gib den Befehl dem Agent, der Watchtower betreuen soll. Er installiert den Skill nur für sich. Danach kannst du ihm den täglichen Lauf zuweisen.</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
       <section class="mod"><div class="mod-head"><div><h2>Über</h2></div></div>
         <dl class="kv"><dt>Version</dt><dd class="mono">${esc(st.version || '')}</dd><dt>Programm</dt><dd class="mono">${esc(st.exe || '')}</dd><dt>Daten</dt><dd class="mono">${esc(st.data_dir || '')}</dd></dl></section>
     </aside>`;

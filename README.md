@@ -48,13 +48,15 @@ The [operating Skill](skill/watchtower/SKILL.md), embedded in the executables, t
 
 Agents can also manage watched projects, ideas, ratings, replies, tasks, warnings and display preferences through the CLI when you request those changes. A daily run only observes repositories and updates Watchtower's interpretation; it does not implement suggestions or invent your decisions. Task reports remain subject to your confirmation. Autostart and PATH remain your choices in the window's settings.
 
-In vBot, copy the install command from Watchtower's settings:
+In vBot, give the install command from Watchtower's settings to the Agent that should operate Watchtower. It installs the Skill privately for that Agent:
 
 ```powershell
-vbot skill install "$env:LOCALAPPDATA/Programs/Watchtower/skill/watchtower" --scope global
+vbot skill install "$env:LOCALAPPDATA/Programs/Watchtower/skill/watchtower" --scope own
 ```
 
-Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch." for an Agent that can use the Skill and has Bash access.
+`own` requires the calling vBot Agent's identity. From an external terminal, select that Agent explicitly with `--scope agent:<id>`. When updating an existing installation, keep its existing scope; install globally only when the owner explicitly requests global availability.
+
+Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch." for that Agent with Bash access.
 
 `watchtower schema card` and `watchtower schema portfolio` describe the document fields as readable text; add `--json` for their complete JSON schemas. `watchtower --help` lists commands, and the [CLI reference](skill/watchtower/references/cli.md) explains data, recovery and less common operations. The [agent interface specification](docs/agent-interface.md) records capability coverage, guarantees and validation scope.
 

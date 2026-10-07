@@ -93,6 +93,7 @@ cargo test --no-default-features # the core and CLI without desktop dependencies
 - Tests guard contracts (service behavior, CLI JSON, facts), not individual changes. Extend the test that owns a behavior before adding a new one. Keep them fast and deterministic with the fixed clock and temporary repositories.
 - Verify UI changes in the running window. Do not change the owner's preferences (style, hidden sections) or leave ratings, replies or ticks behind while testing; `watchtower feedback` must show no test entries afterwards.
 - Never toggle the owner's autostart or PATH setting; those are the owner's choices in the settings.
+- When updating an installed operating Skill, first locate its actual scope and preserve it. An agent-private Skill must not become global or shared unless the owner explicitly requests that change.
 
 ## Git
 

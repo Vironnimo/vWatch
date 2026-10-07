@@ -85,7 +85,7 @@ pub fn settings() -> Value {
         "app_dir": app_dir().to_string_lossy(),
         "data_dir": data_dir().to_string_lossy(),
         "skill_dir": skill.to_string_lossy(),
-        "vbot_install": format!("vbot skill install \"{}\" --scope global", skill.to_string_lossy()),
+        "vbot_install": format!("vbot skill install \"{}\" --scope own", skill.to_string_lossy()),
         "autostart": autostart_enabled(),
         "agent_access": agent_access_enabled(),
     })
