@@ -148,12 +148,17 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
     let first = svc
         .put_card(
             "demo",
-            card_with(json!({"features": ["Suche"]})),
+            card_with(json!({
+                "features": ["Suche"],
+                "handbook": {"installed": {"version": "1.0", "path": "C:/Apps/Demo.exe"}}
+            })),
             false,
             false,
         )
         .unwrap();
     let sid = first["items"][0]["id"].as_str().unwrap().to_owned();
+    let handbook = svc.card("demo").unwrap()["card"]["handbook"].clone();
+    assert_eq!(handbook["installed"]["open"], "");
 
     let saved = svc
         .put_card("demo", json!({"headline": "Neu"}), true, false)
@@ -165,6 +170,7 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
         (json!("Neu"), json!(["Suche"]))
     );
     assert_eq!(current["suggestions"][0]["id"], json!(sid));
+    assert_eq!(current["handbook"], handbook);
 }
 
 #[test]

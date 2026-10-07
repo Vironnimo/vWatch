@@ -175,7 +175,7 @@ const READ: &[Field] = &[f("path", COMMAND, Required), f("why", words(12), Requi
 const INSTALLED: &[Field] = &[
     f("version", words(4), Required),
     f("path", COMMAND, Required),
-    f("open", words(8), Text("")),
+    f("open", sentence(8), Text("")),
 ];
 const TERM: &[Field] = &[
     f("term", words(4), Required),
@@ -530,7 +530,11 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
             }
         },
         Ty::Int { min, max } => {
-            let n = value.as_i64().or_else(|| value.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64));
+            let n = value.as_i64().or_else(|| {
+                value.as_f64()
+                    .filter(|f| f.fract() == 0.0 && *f >= i64::MIN as f64 && *f < -(i64::MIN as f64))
+                    .map(|f| f as i64)
+            });
             match n {
                 None => fail(ctx, path, "Input should be a whole number".into()),
                 Some(n) if n < *min || n > *max => fail(ctx, path, format!("Input should be between {min} and {max}")),
