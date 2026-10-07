@@ -8,6 +8,7 @@
 pub mod app;
 pub mod cards;
 pub mod cli;
+mod cli_output;
 pub mod facts;
 pub mod service;
 pub mod store;

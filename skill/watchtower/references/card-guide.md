@@ -2,7 +2,7 @@
 
 The owner opens Watchtower every morning. A card succeeds when, after ten seconds, the owner knows what state the project is in, what is at risk, what waits for them and what the sensible next step is, and when every sentence is specific to this project. A card fails when it is generic, restates what the owner already knows, or says something that is not true.
 
-All text is German, addressed as "du". Dates are `YYYY-MM-DD`. `watchtower schema card` prints the exact JSON schema. The portfolio brief has its own guide, `portfolio-guide.md`.
+All text is German, addressed as "du". Dates are `YYYY-MM-DD`. `watchtower --json schema card` prints the exact JSON schema. The portfolio brief has its own guide, `portfolio-guide.md`.
 
 ## What Watchtower already shows
 
@@ -12,7 +12,7 @@ The facts see only what git sees: work in git-ignored folders (local data, priva
 
 ## Studying a repository
 
-`watchtower context <id>` gives you the path, the facts, the previous card and the commits since it. Then read, in roughly this order, whatever exists:
+`watchtower --json context <id>` gives you the path, the facts, the previous card and the commits since it. Then read, in roughly this order, whatever exists:
 
 Read its `tasks` and `warning_acknowledgements` too. An assigned task remains unfinished; `review` means an agent reported a result and the owner has not yet confirmed it. Check result evidence against the repository before describing progress. A warning acknowledged with an owner reason is an intentional choice; preserve it in `decisions` where relevant and report material worsening instead of repeating the original proposal.
 
@@ -27,7 +27,7 @@ Stay read-only (see the Skill's rules). Never include credentials, tokens or key
 
 ## The card fields
 
-`one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Watchtower checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `watchtower schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
+`one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Watchtower checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `watchtower --json schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
 
 Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12, `options.answer` 8, `options.effect` 20; `reentry.next_step` 20; `done_when` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. In `handbook`: `run.what` 8, `architecture` 60, `places.what` and `read_first.why` 12, `needs` 15 each, `terms.term` 4 and `terms.meaning` 20. `source`, `evidence`, paths and commands have no word limit. Lists hold at most: `options` 3, `run` 8, `places` 10, `read_first` 5, `needs` 8, `terms` 8. Words are counted between spaces, so `cargo test` is two words and `Build-Ordner` one. Every text has at most 600 characters.
 

@@ -28,13 +28,25 @@ fn json_output(output: &Output, code: i32) -> Value {
 #[test]
 fn executable_reports_json_exit_codes_and_usage_on_the_right_streams() {
     let home = tempfile::tempdir().unwrap();
-    let result = json_output(&run(home.path(), &["projects", "list"]), 0);
+    let result = json_output(&run(home.path(), &["--json", "projects", "list"]), 0);
     assert_eq!(result, json!({"ok": true, "projects": []}));
 
-    let result = json_output(&run(home.path(), &["context", "missing"]), 1);
+    let result = json_output(&run(home.path(), &["context", "missing", "--json"]), 1);
     assert_eq!(result["ok"], false);
     assert_eq!(result["error"]["code"], "project_not_found");
     assert!(result["error"]["hint"].is_string());
+
+    let output = run(home.path(), &["projects", "list"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    assert!(!output.stdout.is_empty());
+    assert!(serde_json::from_slice::<Value>(&output.stdout).is_err());
+
+    let output = run(home.path(), &["context", "missing"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("missing"));
+    assert!(serde_json::from_slice::<Value>(&output.stderr).is_err());
 
     for args in [&[][..], &["unknown-command"][..]] {
         let output = run(home.path(), args);
@@ -43,20 +55,57 @@ fn executable_reports_json_exit_codes_and_usage_on_the_right_streams() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
     }
 
-    let output = run(home.path(), &["--help"]);
+    for args in [
+        vec!["--help"],
+        vec!["--json", "--help"],
+        vec!["projects", "update", "--help"],
+    ] {
+        let output = run(home.path(), &args);
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("--json"));
+    }
+    let output = run(home.path(), &["--version"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(output.stderr.is_empty(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains(env!("CARGO_PKG_VERSION")));
+
+    let result = json_output(&run(home.path(), &["--json", "unknown-command"]), 2);
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["error"]["code"], "invalid_arguments");
+
+    let absent_home = home.path().join("not-created-by-usage");
+    for (args, code) in [
+        (vec!["--help"], 0),
+        (vec!["--version"], 0),
+        (vec!["unknown-command"], 2),
+        (vec!["--json", "unknown-command"], 2),
+        (vec!["schema", "card"], 0),
+        (vec!["--json", "schema", "portfolio"], 0),
+    ] {
+        let output = run(&absent_home, &args);
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(!absent_home.exists(), "{args:?} must not create app data");
+    }
 }
 
 #[test]
 fn executable_reads_unicode_json_from_stdin_and_closes_with_complete_output() {
     let home = tempfile::tempdir().unwrap();
-    let context = json_output(&run(home.path(), &["portfolio", "context"]), 0);
+    let context = json_output(&run(home.path(), &["--json", "portfolio", "context"]), 0);
     let token = context["context_token"].as_str().unwrap();
     let greeting = "Grüße aus Köln – 日本語 🗼";
     let mut child = command(home.path())
-        .args(["portfolio", "put", "--file", "-", "--context-token", token])
+        .args([
+            "--json",
+            "portfolio",
+            "put",
+            "--file",
+            "-",
+            "--context-token",
+            token,
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -71,8 +120,13 @@ fn executable_reads_unicode_json_from_stdin_and_closes_with_complete_output() {
         .unwrap();
     let saved = json_output(&child.wait_with_output().unwrap(), 0);
     assert_eq!(saved["saved"], true);
-    let result = json_output(&run(home.path(), &["portfolio", "show"]), 0);
+    let result = json_output(&run(home.path(), &["--json", "portfolio", "show"]), 0);
     assert_eq!(result["portfolio"]["greeting"], greeting);
+
+    let output = run(home.path(), &["portfolio", "show"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8(output.stdout).unwrap().contains(greeting));
 }
 
 #[cfg(windows)]
@@ -145,14 +199,14 @@ mod windows {
     #[test]
     fn powershell_waits_for_work_and_receives_json_before_continuing() {
         let home = tempfile::tempdir().unwrap();
-        json_output(&run(home.path(), &["projects", "list"]), 0);
+        json_output(&run(home.path(), &["--json", "projects", "list"]), 0);
         let db = rusqlite::Connection::open(home.path().join("watchtower.db")).unwrap();
         db.execute_batch("BEGIN IMMEDIATE").unwrap();
 
         // Keep the CLI busy deterministically. A GUI-subsystem entry lets PowerShell
         // continue and exit here, even though the CLI is still waiting for this lock.
         // No pipeline/redirection in the script may accidentally make PowerShell wait.
-        let mut child = powershell(home.path(), "runs start --no-refresh")
+        let mut child = powershell(home.path(), "--json runs start --no-refresh")
             .spawn()
             .unwrap();
         let started = Instant::now();
@@ -179,14 +233,28 @@ mod windows {
         );
         assert_eq!(shell_json(&output, 0)["ok"], true);
 
-        let output = powershell(home.path(), "context missing").output().unwrap();
+        let output = powershell(home.path(), "--json context missing")
+            .output()
+            .unwrap();
         assert_eq!(shell_json(&output, 1)["error"]["code"], "project_not_found");
+
+        let output = powershell(home.path(), "projects list").output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert!(output.stderr.is_empty());
+        let text = std::str::from_utf8(&output.stdout).unwrap();
+        let human = text.trim_end().strip_suffix("WATCHTOWER_DONE:0").unwrap();
+        assert!(!human.trim().is_empty());
+        assert!(serde_json::from_str::<Value>(human).is_err());
     }
 
     #[test]
     fn cmd_receives_complete_json_and_native_exit_codes() {
         let home = tempfile::tempdir().unwrap();
-        for (invocation, code) in [("projects list", 0), ("context missing", 1)] {
+        for (invocation, code, json) in [
+            ("--json projects list", 0, true),
+            ("context missing --json", 1, true),
+            ("projects list", 0, false),
+        ] {
             let output = Command::new("cmd.exe")
                 .env("WATCHTOWER_HOME", home.path())
                 .env("WATCHTOWER_TEST_EXE", CLI)
@@ -200,7 +268,16 @@ mod windows {
                 ))
                 .output()
                 .unwrap();
-            assert_eq!(shell_json(&output, code)["ok"], code == 0);
+            if json {
+                assert_eq!(shell_json(&output, code)["ok"], code == 0);
+            } else {
+                assert_eq!(output.status.code(), Some(code), "{output:?}");
+                assert!(output.stderr.is_empty());
+                let text = std::str::from_utf8(&output.stdout).unwrap();
+                let human = text.trim_end().strip_suffix("WATCHTOWER_DONE:0").unwrap();
+                assert!(!human.trim().is_empty());
+                assert!(serde_json::from_str::<Value>(human).is_err());
+            }
         }
     }
 }

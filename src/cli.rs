@@ -1,27 +1,32 @@
-//! The command line agents use. Every command prints one JSON object.
+//! Human-readable commands by default, with explicit `--json` output for agents.
 //!
-//! Success: {"ok": true, ...}. Expected failure: {"ok": false, "error": {"code", "message", "hint"}}
-//! with exit code 1. Wrong usage prints help on stderr with exit code 2.
+//! JSON mode: success {"ok": true, ...}; failures {"ok": false, "error": {"code", "message", "hint"}}.
+//! Expected failures exit 1, wrong usage exits 2. Human-readable errors go to stderr.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 
 use crate::cards::{self, Kind};
 use crate::service::{Result, Watchtower, WatchtowerError, DEFAULT_MAX_AGE_DAYS};
-use crate::system;
+use crate::{cli_output, system};
 
 #[derive(Parser)]
 #[command(
     name = "watchtower",
     bin_name = "watchtower",
     version,
-    about = "Morning overview of all your agent-built projects. Every command prints JSON."
+    about = "Morning overview of all your agent-built projects.",
+    after_help = "Commands show readable text by default. Agents and scripts should add --json."
 )]
 struct Cli {
+    /// Print one JSON object for agents and scripts
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -82,7 +87,7 @@ enum Cmd {
         #[command(subcommand)]
         action: TasksCmd,
     },
-    /// JSON schema of a document
+    /// Document fields and constraints (use --json for the complete JSON schema)
     Schema { kind: SchemaKind },
 }
 
@@ -224,11 +229,11 @@ enum PortfolioCmd {
 #[derive(Args)]
 struct DocArgs {
     /// JSON file with the document; '-' reads stdin
-    #[arg(long, conflicts_with = "json")]
+    #[arg(long, conflicts_with = "input_json")]
     file: Option<String>,
     /// The document as a JSON string
     #[arg(long)]
-    json: Option<String>,
+    input_json: Option<String>,
     /// Send only changed top-level fields; the rest is kept from the previous version
     #[arg(long)]
     merge: bool,
@@ -252,6 +257,59 @@ enum Status {
 enum SchemaKind {
     Card,
     Portfolio,
+}
+
+impl Cmd {
+    fn output_key(&self) -> &'static str {
+        match self {
+            Cmd::Status => "status",
+            Cmd::Projects { action } => match action {
+                ProjectsCmd::List => "projects.list",
+                ProjectsCmd::Add { .. } => "projects.add",
+                ProjectsCmd::Remove { .. } => "projects.remove",
+                ProjectsCmd::Rename { .. } => "projects.rename",
+                ProjectsCmd::Update { .. } => "projects.update",
+                ProjectsCmd::Goal { .. } => "projects.goal",
+                ProjectsCmd::Status { .. } => "projects.status",
+                ProjectsCmd::Discover { .. } => "projects.discover",
+            },
+            Cmd::Facts { action } => match action {
+                FactsCmd::Refresh { .. } => "facts.refresh",
+                FactsCmd::Show { .. } => "facts.show",
+            },
+            Cmd::Due { .. } => "due",
+            Cmd::Context { .. } => "context",
+            Cmd::Card { action } => match action {
+                CardCmd::Put { .. } => "card.put",
+                CardCmd::Show { .. } => "card.show",
+            },
+            Cmd::Portfolio { action } => match action {
+                PortfolioCmd::Context => "portfolio.context",
+                PortfolioCmd::Put { .. } => "portfolio.put",
+                PortfolioCmd::Show => "portfolio.show",
+            },
+            Cmd::Feedback { .. } => "feedback",
+            Cmd::Ideas { action } => match action {
+                IdeasCmd::List => "ideas.list",
+                IdeasCmd::Add { .. } => "ideas.add",
+                IdeasCmd::Remove { .. } => "ideas.remove",
+            },
+            Cmd::Runs { action } => match action {
+                RunsCmd::Start { .. } => "runs.start",
+                RunsCmd::Status => "runs.status",
+                RunsCmd::Fail { .. } => "runs.fail",
+                RunsCmd::Finish { .. } => "runs.finish",
+            },
+            Cmd::Tasks { action } => match action {
+                TasksCmd::List { .. } => "tasks.list",
+                TasksCmd::Report { .. } => "tasks.report",
+            },
+            Cmd::Schema { kind } => match kind {
+                SchemaKind::Card => "schema.card",
+                SchemaKind::Portfolio => "schema.portfolio",
+            },
+        }
+    }
 }
 
 /// Decode a document: UTF-8 with or without BOM, or UTF-16 with BOM (Windows PowerShell's default).
@@ -289,8 +347,8 @@ fn decode(bytes: &[u8], origin: &str) -> Result<String> {
 }
 
 fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
-    let (text, origin) = match (&doc.json, doc.file.as_deref()) {
-        (Some(json), _) => (json.clone(), "--json".to_owned()),
+    let (text, origin) = match (&doc.input_json, doc.file.as_deref()) {
+        (Some(json), _) => (json.clone(), "--input-json".to_owned()),
         (None, Some("-")) => {
             let mut buf = Vec::new();
             stdin.read_to_end(&mut buf).map_err(|e| {
@@ -307,7 +365,7 @@ fn read_document(doc: &DocArgs, stdin: &mut dyn Read) -> Result<Value> {
         (None, None) => {
             return Err(
                 WatchtowerError::new("missing_document", "No document given.")
-                    .hint("Pass --file <path>, --file - for stdin, or --json '<object>'."),
+                    .hint("Pass --file <path>, --file - for stdin, or --input-json '<object>'."),
             )
         }
     };
@@ -325,6 +383,13 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         };
         return Ok(json!({"schema": cards::json_schema(kind)}));
     }
+    std::fs::create_dir_all(data_dir).map_err(|e| {
+        WatchtowerError::new(
+            "storage_error",
+            format!("Cannot create data folder {}: {e}.", data_dir.display()),
+        )
+        .hint("Check that Watchtower can write to its data folder.")
+    })?;
     let db = system::db_path(data_dir);
     let svc = Watchtower::open(&db)?;
     Ok(match cmd {
@@ -342,7 +407,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 "skill_dir": skill.map(|d| d.to_string_lossy().into_owned()),
                 "projects": list.len(),
                 "with_card": list.iter().filter(|p| p["has_card"] == json!(true)).count(),
-                "hint": if list.is_empty() { json!("No projects yet. The owner adds them in the Watchtower app, or run `watchtower projects add <path>` when the owner asks.") } else { Value::Null },
+                "hint": if list.is_empty() { json!("No projects yet. The owner adds them in the Watchtower app, or run `watchtower --json projects add <path>` when the owner asks.") } else { Value::Null },
             })
         }
         Cmd::Projects { action } => match action {
@@ -423,39 +488,132 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
     })
 }
 
-/// Run one command. Output goes to `out`, usage errors to stderr. Returns the exit code.
+/// Run one command, using the process stderr for human-readable errors.
 pub fn run<I, T>(args: I, data_dir: &Path, stdin: &mut dyn Read, out: &mut dyn Write) -> i32
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = match Cli::try_parse_from(args) {
+    run_with_streams(args, data_dir, stdin, out, &mut std::io::stderr().lock())
+}
+
+// After a parse failure there is no Cli value to ask about the mode. Consult the
+// same argument definitions, skipping actual option values and positional-only
+// input after `--`. A missing value before `--json` still requests JSON errors.
+fn requested_json(args: &[OsString]) -> bool {
+    fn value_options(command: &clap::Command, options: &mut HashMap<OsString, bool>) {
+        for arg in command.get_arguments() {
+            if arg.get_action().takes_values() {
+                let allow_hyphens = arg.is_allow_hyphen_values_set();
+                if let Some(long) = arg.get_long() {
+                    options.insert(format!("--{long}").into(), allow_hyphens);
+                }
+                if let Some(short) = arg.get_short() {
+                    options.insert(format!("-{short}").into(), allow_hyphens);
+                }
+            }
+        }
+        for subcommand in command.get_subcommands() {
+            value_options(subcommand, options);
+        }
+    }
+
+    let mut command = Cli::command();
+    command.build();
+    let mut options = HashMap::new();
+    value_options(&command, &mut options);
+    let mut pending_value = None;
+    for arg in args.iter().skip(1) {
+        if let Some(allow_hyphens) = pending_value.take() {
+            if allow_hyphens || !arg.as_encoded_bytes().starts_with(b"-") || arg == "-" {
+                continue;
+            }
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg == "--json" {
+            return true;
+        }
+        pending_value = options.get(arg).copied();
+    }
+    false
+}
+
+fn write_json(out: &mut dyn Write, body: &Value) {
+    let text = serde_json::to_string_pretty(body).expect("JSON values are serializable");
+    let _ = writeln!(out, "{text}");
+}
+
+/// Run one command with explicit streams. JSON results and errors use stdout;
+/// readable successes use stdout and readable errors use stderr. Returns 0/1/2.
+pub fn run_with_streams<I, T>(
+    args: I,
+    data_dir: &Path,
+    stdin: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
         Err(e) => {
             let code = e.exit_code();
-            let _ = e.print();
+            if code == 0 {
+                // Help and version are explicitly requested human-readable text,
+                // including when combined with the machine-output switch.
+                let _ = write!(out, "{e}");
+            } else if requested_json(&args) {
+                let error = WatchtowerError::new("invalid_arguments", e.to_string())
+                    .hint("Run `watchtower --help` or `watchtower <command> --help` for usage.");
+                write_json(out, &json!({"ok": false, "error": error.to_json()}));
+            } else {
+                let _ = write!(err, "{e}");
+            }
+            let _ = out.flush();
+            let _ = err.flush();
             return code;
         }
     };
-    let (body, code) = match execute(cli.command, data_dir, stdin) {
+    let key = cli.command.output_key();
+    let code = match execute(cli.command, data_dir, stdin) {
         Ok(result) => {
-            let mut body = json!({"ok": true});
-            if let (Some(b), Value::Object(r)) = (body.as_object_mut(), result) {
-                b.extend(r);
+            if cli.json {
+                let mut body = json!({"ok": true});
+                if let (Some(b), Value::Object(r)) = (body.as_object_mut(), result) {
+                    b.extend(r);
+                }
+                write_json(out, &body);
+            } else {
+                let _ = writeln!(out, "{}", cli_output::human(key, &result));
             }
-            (body, 0)
+            0
         }
-        Err(e) => (json!({"ok": false, "error": e.to_json()}), 1),
+        Err(e) => {
+            if cli.json {
+                write_json(out, &json!({"ok": false, "error": e.to_json()}));
+            } else {
+                let _ = writeln!(err, "Fehler: {} ({})", e.message, e.code);
+                if let Some(hint) = e.hint {
+                    let hint = hint.replace("watchtower --json ", "watchtower ");
+                    let _ = writeln!(err, "Hinweis: {hint}");
+                }
+            }
+            1
+        }
     };
-    let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{\"ok\": false}".into());
-    let _ = writeln!(out, "{text}");
     let _ = out.flush();
+    let _ = err.flush();
     code
 }
 
 /// Entry point used by the console executable.
 pub fn main(args: Vec<OsString>) -> i32 {
-    let data_dir = system::data_dir();
+    let data_dir = system::data_path();
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
     run(args, &data_dir, &mut std::io::stdin(), &mut lock)

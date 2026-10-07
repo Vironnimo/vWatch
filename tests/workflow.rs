@@ -6,7 +6,9 @@ use watchtower::Watchtower;
 
 fn run(home: &Path, args: &[&str]) -> Value {
     let mut out = Vec::new();
-    let argv = std::iter::once("watchtower").chain(args.iter().copied());
+    let argv = ["watchtower", "--json"]
+        .into_iter()
+        .chain(args.iter().copied());
     let code = watchtower::cli::run(argv, home, &mut std::io::empty(), &mut out);
     let value: Value = serde_json::from_slice(&out).expect("CLI JSON");
     assert_eq!(code, 0, "{args:?}: {value}");
@@ -49,7 +51,7 @@ fn tracked_cli_run_and_reported_task_complete_only_after_the_required_steps() {
             "demo",
             "--context-token",
             context["context_token"].as_str().unwrap(),
-            "--json",
+            "--input-json",
             &common::card().to_string(),
         ],
     );
@@ -62,7 +64,7 @@ fn tracked_cli_run_and_reported_task_complete_only_after_the_required_steps() {
             "put",
             "--context-token",
             context["context_token"].as_str().unwrap(),
-            "--json",
+            "--input-json",
             &json!({"greeting":"Guten Morgen"}).to_string(),
         ],
     );

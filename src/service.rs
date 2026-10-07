@@ -919,7 +919,7 @@ impl Watchtower {
             return Err(WatchtowerError::new(
                 "already_registered",
                 format!("This folder is already registered as '{}'.", p.id),
-            ).hint(format!("Use `watchtower projects update {} --name <name>` to rename it while keeping its cards and history.", p.id)));
+            ).hint(format!("Use `watchtower --json projects update {} --name <name>` to rename it while keeping its cards and history.", p.id)));
         }
         let folder = resolved
             .file_name()
@@ -948,7 +948,7 @@ impl Watchtower {
                 "id_taken",
                 format!("The id '{id}' is already used."),
             )
-            .hint(format!("If this is the same project after a rename or move, use `watchtower projects update {id} --name <name> --path <folder>` to keep its cards and history. For a different project, pass another id with --id.")));
+            .hint(format!("If this is the same project after a rename or move, use `watchtower --json projects update {id} --name <name> --path <folder>` to keep its cards and history. For a different project, pass another id with --id.")));
         }
         self.store
             .add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
@@ -1045,7 +1045,7 @@ impl Watchtower {
         match self.store.update_project(&before, name, &path)? {
             ProjectUpdate::Updated => (),
             ProjectUpdate::Conflict => return Err(WatchtowerError::new("version_conflict", "The project changed while you were editing it.")
-                .hint("Read `watchtower projects list` and retry the intended changes.")),
+                .hint("Read `watchtower --json projects list` and retry the intended changes.")),
             ProjectUpdate::PathTaken(other) => return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{other}'."))
                 .hint(format!("Use the existing project '{other}'. Do not remove and recreate a project to rename it; that deletes its cards and history. Nothing was changed."))),
         }
@@ -1227,7 +1227,7 @@ impl Watchtower {
             .save_project_facts(project, &self.now(), &fp, &data)?
         {
             return Err(WatchtowerError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
-                .hint("Read `watchtower projects list` and refresh the project's facts again. The outdated measurement was discarded."));
+                .hint("Read `watchtower --json projects list` and refresh the project's facts again. The outdated measurement was discarded."));
         }
         Ok(json!({
             "id": project.id,
@@ -1356,10 +1356,10 @@ impl Watchtower {
         // cards that only gain new fields do not change what the brief builds on
         let brief_affected = projects.iter().any(|e| e["reason"] != "new_fields");
         let next = if any_due {
-            "For each project listed: `watchtower context <id>`, study the repository, then `watchtower card put <id> --file <card.json> --context-token <context_token>`. \
-             Afterwards: `watchtower portfolio context` and `watchtower portfolio put --file <portfolio.json> --context-token <context_token>`. Use the token from each corresponding context."
+            "For each project listed: `watchtower --json context <id>`, study the repository, then `watchtower --json card put <id> --file <card.json> --context-token <context_token>`. \
+             Afterwards: `watchtower --json portfolio context` and `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>`. Use the token from each corresponding context."
         } else if portfolio_reason.is_some() {
-            "Every card is current; only the portfolio brief is due: `watchtower portfolio context`, then `watchtower portfolio put --file <portfolio.json> --context-token <context_token>` with that context's token."
+            "Every card is current; only the portfolio brief is due: `watchtower --json portfolio context`, then `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>` with that context's token."
         } else {
             "Nothing is due. Every card and the portfolio brief are current."
         };
@@ -1401,8 +1401,8 @@ impl Watchtower {
 
     fn version_conflict(project: Option<&str>) -> WatchtowerError {
         let command = project.map_or_else(
-            || "watchtower portfolio context".to_owned(),
-            |id| format!("watchtower context {id}"),
+            || "watchtower --json portfolio context".to_owned(),
+            |id| format!("watchtower --json context {id}"),
         );
         WatchtowerError::new("version_conflict", "The context changed. Nothing was saved.")
             .hint(format!("Read `{command}` again, reconcile your document with the new facts, owner instructions and previous document, then retry with its context_token. Do not merely replace the token."))
@@ -1420,8 +1420,8 @@ impl Watchtower {
             }
             None if !dry_run => {
                 let command = project.map_or_else(
-                    || "watchtower portfolio context".to_owned(),
-                    |id| format!("watchtower context {id}"),
+                    || "watchtower --json portfolio context".to_owned(),
+                    |id| format!("watchtower --json context {id}"),
                 );
                 Err(WatchtowerError::new("context_required", "Saving requires the context_token from the context you used.")
                     .hint(format!("Read `{command}`, prepare your document from that context, and pass `--context-token <context_token>`. Schema-only --dry-run may omit it.")))
@@ -1471,7 +1471,7 @@ impl Watchtower {
             .map(feedback_json)
             .collect();
         let next = format!(
-            "Write the card with `watchtower card put {id} --file <card.json> --context-token <context_token>`{}",
+            "Write the card with `watchtower --json card put {id} --file <card.json> --context-token <context_token>`{}",
             if card.is_some() {
                 " (add --merge to send only the fields that changed)."
             } else {
@@ -1538,7 +1538,7 @@ impl Watchtower {
         let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
             WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
+                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower --json schema card` prints the full schema."))
         })?;
         self.validate_item_ids(Kind::Card, Some(id), &clean)?;
         let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
@@ -1611,8 +1611,9 @@ impl Watchtower {
     pub fn card(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let card = self.store.latest_card(id)?.ok_or_else(|| {
-            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet."))
-                .hint(format!("Run `watchtower context {id}` and write one."))
+            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet.")).hint(
+                format!("Run `watchtower --json context {id}` and write one."),
+            )
         })?;
         Ok(
             json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}),
@@ -1696,7 +1697,7 @@ impl Watchtower {
             "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
             "tasks": self.tasks(None)?["tasks"],
-            "next": "Write the brief with `watchtower portfolio put --file <portfolio.json> --context-token <context_token>`.",
+            "next": "Write the brief with `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>`.",
         }))
     }
 
@@ -1724,7 +1725,7 @@ impl Watchtower {
         )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
             WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint("Fix the listed fields and send it again. `watchtower schema portfolio` prints the full schema.")
+                .hint("Fix the listed fields and send it again. `watchtower --json schema portfolio` prints the full schema.")
         })?;
         self.validate_item_ids(Kind::Portfolio, None, &clean)?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
@@ -1762,7 +1763,7 @@ impl Watchtower {
                 ),
             )
             .hint(format!(
-                "Use the ids from `watchtower portfolio context`: {}.",
+                "Use the ids from `watchtower --json portfolio context`: {}.",
                 known.join(", ")
             )));
         }
@@ -1775,7 +1776,7 @@ impl Watchtower {
             .collect();
         if !strange.is_empty() {
             return Err(WatchtowerError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
-                .hint("Use the ids from `owner_ideas` in `watchtower portfolio context`; the owner may have removed an idea since."));
+                .hint("Use the ids from `owner_ideas` in `watchtower --json portfolio context`; the owner may have removed an idea since."));
         }
         let mut clean = clean;
         // a brief written later in the week keeps the week's review
@@ -1826,7 +1827,7 @@ impl Watchtower {
                 "idea_not_found",
                 format!("No parked idea with id {id}."),
             )
-            .hint("`watchtower ideas list` shows the parked ideas."));
+            .hint("`watchtower --json ideas list` shows the parked ideas."));
         }
         Ok(json!({"removed": id}))
     }
@@ -1843,7 +1844,7 @@ impl Watchtower {
     pub fn portfolio(&self) -> Result<Value> {
         let p = self.store.latest_portfolio()?.ok_or_else(|| {
             WatchtowerError::new("no_portfolio", "No portfolio brief has been written yet.")
-                .hint("Run `watchtower portfolio context` and write one.")
+                .hint("Run `watchtower --json portfolio context` and write one.")
         })?;
         Ok(json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data}))
     }
@@ -1948,7 +1949,7 @@ impl Watchtower {
                     format!("No current card or brief has an item with id '{item_id}'."),
                 )
                 .hint(
-                    "Use an id from `watchtower card show <id>` or `watchtower portfolio show`.",
+                    "Use an id from `watchtower --json card show <id>` or `watchtower --json portfolio show`.",
                 )),
             };
         let kind = item
@@ -2365,12 +2366,12 @@ impl Watchtower {
         let id = self.store.start_agent_run(&self.now(), &initial)?;
         let mut status = self.agent_run_response(id)?;
         status["due"] = due;
-        status["next"] = json!(format!("For every project in due.projects: read `watchtower context <id>`, study the repository, and save its card with that context_token. Then read `watchtower portfolio context` and save the due brief with its context_token. Record failures with `watchtower runs fail {id}`. Finish with `watchtower runs finish {id}`, even when nothing was due; only complete confirms a successful run."));
+        status["next"] = json!(format!("For every project in due.projects: read `watchtower --json context <id>`, study the repository, and save its card with that context_token. Then read `watchtower --json portfolio context` and save the due brief with its context_token. Record failures with `watchtower --json runs fail {id}`. Finish with `watchtower --json runs finish {id}`, even when nothing was due; only complete confirms a successful run."));
         Ok(status)
     }
 
     fn require_agent_run(&self, id: i64) -> Result<crate::store::StoredAgentRun> {
-        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower runs status` to see the latest run, or `watchtower runs start` to begin one."))
+        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower --json runs status` to see the latest run, or `watchtower --json runs start` to begin one."))
     }
 
     pub fn run_fail(&self, run_id: i64, project_id: Option<&str>, error: &str) -> Result<Value> {
@@ -2434,7 +2435,7 @@ impl Watchtower {
             }
         }
         Err(WatchtowerError::new("run_conflict", "The run or its project evidence kept changing. No completion was recorded.")
-            .hint(format!("Inspect `watchtower runs status` and retry `watchtower runs finish {run_id}` after current writes finish.")))
+            .hint(format!("Inspect `watchtower --json runs status` and retry `watchtower --json runs finish {run_id}` after current writes finish.")))
     }
 
     fn agent_run_response(&self, run_id: i64) -> Result<Value> {
@@ -2459,7 +2460,7 @@ impl Watchtower {
             .filter_map(|project| project["id"].as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower runs status` und `watchtower due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler mit `watchtower runs fail {}`. Schließe mit `watchtower runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
+        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower --json runs status` und `watchtower --json due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler mit `watchtower --json runs fail {}`. Schließe mit `watchtower --json runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
     }
 
     fn pending_run_replies(
@@ -3086,7 +3087,7 @@ impl Watchtower {
     fn tracked_task(&self, id: i64) -> Result<Value> {
         self.store.task(id)?.ok_or_else(|| {
             WatchtowerError::new("unknown_task", format!("Task {id} does not exist."))
-                .hint("Use `watchtower tasks list` to find the current task ids.")
+                .hint("Use `watchtower --json tasks list` to find the current task ids.")
         })
     }
 

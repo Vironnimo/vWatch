@@ -191,7 +191,7 @@
       if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
       if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
     }
-    if (Number.isInteger(t.id)) lines.push('', `Dieser Auftrag wird in Watchtower als #${t.id} verfolgt. Melde das Ergebnis mit konkretem Beleg zurück:`, `watchtower tasks report ${t.id} --status done --result "Was erledigt wurde" --evidence "Prüfung, Datei oder Commit"`, `Wenn du blockiert bist: watchtower tasks report ${t.id} --status blocked --result "Was fehlt und wer es klären kann"`);
+    if (Number.isInteger(t.id)) lines.push('', `Dieser Auftrag wird in Watchtower als #${t.id} verfolgt. Melde das Ergebnis mit konkretem Beleg zurück:`, `watchtower --json tasks report ${t.id} --status done --result "Was erledigt wurde" --evidence "Prüfung, Datei oder Commit"`, `Wenn du blockiert bist: watchtower --json tasks report ${t.id} --status blocked --result "Was fehlt und wer es klären kann"`);
     lines.push('', `Aus Watchtower kopiert am ${fmtDate(S.today)}. Prüfe den Befund zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
     return lines.join('\n');
   }

@@ -5,7 +5,7 @@ A local morning overview of all your software projects: where each one stands, w
 Watchtower holds two kinds of data:
 
 - **Facts** it measures itself from git: activity, backup (remote), uncommitted and unpushed work, leftover worktrees and branches, GitHub CI state. Exact and free.
-- **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `watchtower due` tells an agent which projects actually changed, so a daily run only re-analyses those.
+- **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `watchtower --json due` tells an agent which projects actually changed, so a daily run only re-analyses those.
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
@@ -17,7 +17,7 @@ Copy a task and separately mark it assigned when you hand it to an agent. Watcht
 
 ```
 %LOCALAPPDATA%\Programs\Watchtower\
-  Watchtower.exe        the console CLI for agents
+  Watchtower.exe        the console CLI for people and agents
   Watchtower-UI.exe     the window for the owner
   data\                 database and window cache
   skill\watchtower\     the Skill for agents, written by Watchtower on start
@@ -25,7 +25,8 @@ Copy a task and separately mark it assigned when you hand it to an agent. Watcht
 
 - Double-click `Watchtower-UI.exe` (or the Start menu entry "Watchtower") opens the window. On first start you pick your projects folder and tick the repositories to watch.
 - The gear opens the settings: add or remove projects, edit a project's name or folder with "Bearbeiten", "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `watchtower`), and the command that installs the Skill in vBot. Editing preserves the project ID, cards, ratings and history. Select the existing folder after moving or renaming it elsewhere.
-- `watchtower <command>` is a native console program: it completes its work and JSON output before returning an exit code. It runs independently of the window, with ordinary stdin, stdout and stderr; no GUI automation or polling for late output is involved. No arguments show CLI usage. The window picks up agent writes within a few seconds.
+- `watchtower <command>` shows readable text. Add `--json` for structured output, for example `watchtower projects list --json`; agents and scripts always use this flag. Document input uses `--file <path>`, `--file -` for stdin, or `--input-json '<object>'`.
+- The CLI is a native console program: it completes its work and output before returning an exit code. It runs independently of the window, with ordinary stdin, stdout and stderr; no GUI automation or polling for late output is involved. No arguments show CLI usage. The window picks up agent writes within a few seconds.
 - `WATCHTOWER_HOME` moves the data folder elsewhere.
 
 Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin Watchtower`.
@@ -42,7 +43,7 @@ Builds both release executables (needs Rust), copies them to `%LOCALAPPDATA%\Pro
 
 ## Agents
 
-The Skill (`skill/watchtower/`, embedded in the exe) teaches the tracked daily run (`runs start` → study due repositories read-only → `context` → `card put` → `portfolio context` → `portfolio put` → `runs finish`), task reports, project intent and questions from stored data. Card and portfolio writes require the `--context-token` returned by their context command. If another agent or the owner changes that context, the write is rejected until the agent rereads and reconciles it.
+The Skill (`skill/watchtower/`, embedded in the exe) teaches the tracked daily run (`runs start` → study due repositories read-only → `context` → `card put` → `portfolio context` → `portfolio put` → `runs finish`), task reports, project intent and questions from stored data. Every agent command uses `watchtower --json <command>`. Card and portfolio writes require the `--context-token` returned by their context command. If another agent or the owner changes that context, the write is rejected until the agent rereads and reconciles it.
 
 In vBot, copy the install command from Watchtower's settings:
 
@@ -52,7 +53,7 @@ vbot skill install "%LOCALAPPDATA%\Programs\Watchtower\skill\watchtower" --scope
 
 Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch." for an Agent that can use the Skill and has Bash access.
 
-`watchtower schema card` and `watchtower schema portfolio` print the document schemas; `skill/watchtower/references/cli.md` lists all commands.
+`watchtower schema card` and `watchtower schema portfolio` describe the document fields as readable text; add `--json` for their complete JSON schemas. `skill/watchtower/references/cli.md` lists all commands and JSON results.
 
 To rename a watched project or reconnect its moved folder, first find its stable ID with `watchtower projects list`, then use `watchtower projects update <id> --name "New name" --path "C:/projects/new-folder"`. Either option can be used alone. Never remove and re-add a project for this: removal deletes its stored cards.
 

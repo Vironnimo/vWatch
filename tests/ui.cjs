@@ -349,7 +349,7 @@ test('copying never assigns; assignment is explicit and copied tracked tasks req
   await a.ui.assignTask('s1');
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 1);
   await a.ui.copyTask('s1');
-  assert.match(a.copied.at(-1), /watchtower tasks report 12 --status done/);
+  assert.match(a.copied.at(-1), /watchtower --json tasks report 12 --status done/);
 });
 
 test('tracked results await owner confirmation and survive replacement of the source card', async () => {
@@ -380,7 +380,7 @@ test('tracked task copies retain the original project after it leaves the watche
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }] });
   assert.match(prompt, /Original project \(C:\/original\)/);
   assert.doesNotMatch(prompt, /neues Projekt/);
-  assert.match(prompt, /watchtower tasks report 3/);
+  assert.match(prompt, /watchtower --json tasks report 3/);
   a.state.projects = [];
   a.state.tasks = [{ id: 3, revision: 2, projects: ['removed'], status: 'review', title: 'Fix the build', result: 'Build fixed',
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }], created_at: '2026-10-07T12:00:00Z' }];

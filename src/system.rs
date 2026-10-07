@@ -39,10 +39,15 @@ pub fn gui_exe_path() -> PathBuf {
     app_dir().join(format!("Watchtower-UI{}", std::env::consts::EXE_SUFFIX))
 }
 
-pub fn data_dir() -> PathBuf {
-    let dir = std::env::var_os("WATCHTOWER_HOME")
+/// Resolve the data folder without creating it (help and usage must be read-only).
+pub fn data_path() -> PathBuf {
+    std::env::var_os("WATCHTOWER_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| app_dir().join("data"));
+        .unwrap_or_else(|| app_dir().join("data"))
+}
+
+pub fn data_dir() -> PathBuf {
+    let dir = data_path();
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
