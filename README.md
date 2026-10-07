@@ -52,7 +52,10 @@ Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch.
 ```bash
 cargo test
 cargo clippy --all-targets
+node --test tests/ui.cjs
 cargo build --release
 ```
 
 Run the window from source with `cargo run`; set `WATCHTOWER_HOME` to a scratch folder to keep test data out of the installed app.
+
+The UI behavior tests use Node's built-in test runner and need no browser packages.

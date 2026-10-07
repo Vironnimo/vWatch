@@ -19,6 +19,8 @@
   let noteFor = null;     // item whose "why?" field shows right after a later/down rating
   let answering = null;   // question whose answer field is open
   const drafts = {};      // unsent note and answer text per item, kept across re-renders
+  let ideaDraft = '';
+  const projectDrafts = {}; // unsaved status note and goal fields per project
   let openId = null;      // project whose drawer is open
   let hbOpen = false;     // the drawer's handbook section is expanded
   let since = null;       // { id, data, dismissed }: what happened since the owner last opened that project
@@ -26,7 +28,7 @@
   let settings = null;    // autostart, agent access, paths
   let disc = null;        // project search: { target, result (from discover), checked:Set, busy }
   let confirmRemove = null;
-  let round = null;       // decision round: { queue: question ids, i, stats }
+  let round = null;       // decision round: { queue: question ids, i, stats, busy }
   let searchOpen = false;
   let searchQ = '';
   let searchSel = 0;
@@ -52,6 +54,25 @@
   const plink = id => { const p = byId(id); return p ? `<button class="plink" type="button" data-open="${esc(id)}">${dot(id)}${esc(p.name)}</button>` : esc(id); };
   const isNew = iso => !!(iso && S.previous_visit && iso > S.previous_visit);
   const phasePill = p => p.card ? `<span class="pill ${esc(p.card.phase)}">${esc(PHASE[p.card.phase] || p.card.phase)}</span>` : '<span class="pill unknown">ohne Karte</span>';
+  const projectValue = (p, field) => (projectDrafts[p.id] || {})[field] ?? p[field] ?? '';
+  const clearProjectDraft = (id, field, saved) => {
+    const d = projectDrafts[id];
+    if (d && d[field] === saved) delete d[field];
+  };
+  function inputFocus() {
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'INPUT') return null;
+    const selector = el.id ? `#${CSS.escape(el.id)}` : el.dataset.draft ? `[data-draft="${CSS.escape(el.dataset.draft)}"]` : null;
+    return selector ? { selector, start: el.selectionStart, end: el.selectionEnd } : null;
+  }
+  function restoreInputFocus(saved) {
+    if (!saved) return;
+    const fields = document.querySelectorAll(saved.selector), el = fields[fields.length - 1];
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (saved.start != null) el.setSelectionRange(saved.start, saved.end);
+    }
+  }
 
   const visible = () => S.projects.filter(p => p.status !== 'archived');
   const lastWork = p => (p.facts && p.facts.last_work) || (p.card_updated_at || '').slice(0, 10) || null;
@@ -132,7 +153,7 @@
       if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
       if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
     }
-    lines.push('', `Der Befund stammt aus Watchtower (Stand ${fmtDate(S.today)}). Prüfe ihn zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
+    lines.push('', `Aus Watchtower kopiert am ${fmtDate(S.today)}. Prüfe den Befund zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
     return lines.join('\n');
   }
 
@@ -184,7 +205,7 @@
   // what the facts say about a project, as a few short badges
   const bytes = n => n >= 1e9 ? `${(n / 1e9).toLocaleString('de-DE', { maximumFractionDigits: 1 })} GB` : `${Math.round(n / 1e6).toLocaleString('de-DE')} MB`;
   const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
-  // two lines of work that change the same files will conflict when merged
+  // two lines of work that change the same files may conflict when merged
   const lineName = l => l.kind === 'main' ? 'ungesicherte Arbeit im Hauptordner' : l.kind === 'worktree' ? `Worktree ${l.name}` : `Branch ${l.name}`;
   const collisions = p => (p.facts && p.facts.collisions) || [];
   const collisionText = c => `${lineName(c.a)} und ${lineName(c.b)} ändern ${plural(c.count, 'gleiche Datei', 'gleiche Dateien')}: ${c.files.join(', ')}${c.count > c.files.length ? ' …' : ''}`;
@@ -353,8 +374,8 @@
 
   function blockIdeas() {
     const fromProjects = visible().map(p => {
-      const list = ((p.card || {}).suggestions || []).filter(s => !hiddenByRating(s.id));
-      const s = list.find(x => x.type === 'feature') || list[0];
+      const list = ((p.card || {}).suggestions || []).filter(s => s.id === noteFor || !hiddenByRating(s.id));
+      const s = list.find(x => x.id === noteFor) || list.find(x => x.type === 'feature') || list[0];
       return s ? ideaCard(s, [p.id], p.id, 'Aus dem Projekt') : '';
     });
     const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App'));
@@ -375,7 +396,7 @@
       const task = c && (c.verdict === 'build' || c.verdict === 'fold_in') ? taskBtn(`idea:${i.id}`, { projects: c.fits || [], title: i.text, why: c.why }) : '';
       return `<div class="idea"><div class="h"><div class="t">${esc(i.text)}</div><button class="linkish faint" type="button" data-idea-remove="${i.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${verdict}<div class="foot"><span class="faint mono" style="font-size:12px">geparkt ${fmtShort(i.added_at)}</span>${task}</div></div>`;
     }).join('');
-    const form = `<div class="parkform"><input id="idea-text" type="text" maxlength="600" placeholder="Idee festhalten, z. B. eine App, die meine Stromzähler ausliest" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Parken</button></div>`;
+    const form = `<div class="parkform"><input id="idea-text" type="text" value="${esc(ideaDraft)}" maxlength="600" placeholder="Idee festhalten, z. B. eine App, die meine Stromzähler ausliest" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Parken</button></div>`;
     return mod('parking', 'Ideen-Parkplatz', 'Halt eine Idee fest; der nächste Agent-Lauf prüft, ob und wo sie sich lohnt', form + (items ? `<div class="cards2">${items}</div>` : ''));
   }
 
@@ -521,8 +542,8 @@
   function drawerHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
     const commits = f.commits || {};
-    const statusBar = `<div class="statusbar"><span class="faint" style="font-size:13px">Deine Absicht:</span><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt oder worauf sie achten sollen" value="${esc(p.status_note)}" aria-label="Notiz an die Agents"></div>
-      <div class="statusbar goalbar"><span class="faint" style="font-size:13px">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(p.goal)}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(p.goal_due || '')}" aria-label="Bis wann" title="Bis wann (optional)"></div>`;
+    const statusBar = `<div class="statusbar"><span class="faint" style="font-size:13px">Deine Absicht:</span><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt oder worauf sie achten sollen" value="${esc(projectValue(p, 'status_note'))}" aria-label="Notiz an die Agents"></div>
+      <div class="statusbar goalbar"><span class="faint" style="font-size:13px">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(projectValue(p, 'goal'))}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(projectValue(p, 'goal_due'))}" aria-label="Bis wann" title="Bis wann (optional)"></div>`;
     const factsKv = f.is_git ? `<dl class="kv">
       <dt>Commits</dt><dd class="mono">${num(commits.total)} gesamt · 7 T: ${num(commits.last_7d)} · 30 T: ${num(commits.last_30d)} · seit ${commits.first ? fmtDate(commits.first) : '—'}</dd>
       <dt>Branch</dt><dd class="mono">${esc(f.branch || '—')}${f.upstream ? ` → ${esc(f.upstream)}` : ''}${f.ahead ? ` · ${f.ahead} voraus` : ''}${f.behind ? ` · ${f.behind} zurück` : ''}</dd>
@@ -574,6 +595,7 @@
   function openDrawer(id, keepScroll) {
     const p = byId(id);
     if (!p) return;
+    const focused = keepScroll ? inputFocus() : null;
     const root = $('#drawer-root');
     const prev = root.querySelector('.drawer');
     const top = keepScroll && prev ? prev.scrollTop : 0;
@@ -586,6 +608,7 @@
     const d = root.querySelector('.drawer');
     d.scrollTop = top;
     if (!keepScroll) root.querySelector('.close').focus();
+    else restoreInputFocus(focused);
   }
   const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; };
 
@@ -594,13 +617,17 @@
     const queue = [...visible()].filter(p => p.card).sort((a, b) => risk(b) - risk(a)).flatMap(p => openQs(p.card).map(w => w.id)).filter(Boolean);
     if (!queue.length) return;
     closeDrawer();
-    round = { queue, i: 0, stats: { answered: 0, done: 0, skipped: 0 } };
+    round = { queue, i: 0, stats: { answered: 0, done: 0, skipped: 0 }, busy: false };
     renderRound();
   }
   const closeRound = () => { round = null; $('#round-root').innerHTML = ''; };
-  function renderRound() {
+  function renderRound(keepFocus = false) {
     const root = $('#round-root');
     if (!round) { root.innerHTML = ''; return; }
+    if (round.busy) return;
+    const previousInput = $('#round-answer');
+    const hadFocus = previousInput && document.activeElement === previousInput;
+    const selection = hadFocus ? [previousInput.selectionStart, previousInput.selectionEnd] : null;
     while (round.i < round.queue.length && (!findQ(round.queue[round.i]) || reply(round.queue[round.i]))) round.i++;
     const n = round.queue.length;
     let body;
@@ -614,19 +641,33 @@
       body = `<div class="rproj">${dot(p.id)}<b>${esc(p.name)}</b>${p.card.headline ? `<span class="faint"> · ${esc(p.card.headline)}</span>` : ''}</div>
         <h3>${esc(w.title)}</h3>${w.source ? `<div class="qsrc mono">${esc(w.source)}</div>` : ''}
         ${opts ? `<div class="ropts">${opts}</div>` : ''}
-        <div class="inrow"><input type="text" id="round-answer" maxlength="600" placeholder="${opts ? 'Oder eigene Antwort' : 'Deine Antwort'}" aria-label="Deine Antwort"><button class="btn primary" type="button" data-round-send>Antworten</button></div>
+        <div class="inrow"><input type="text" id="round-answer" data-draft="${esc(w.id)}" data-kind="answer" value="${esc(drafts[w.id] || '')}" maxlength="600" placeholder="${opts ? 'Oder eigene Antwort' : 'Deine Antwort'}" aria-label="Deine Antwort"><button class="btn primary" type="button" data-round-send>Antworten</button></div>
         <div class="actions"><button class="btn" type="button" data-round-done title="Die Frage ist erledigt oder nicht mehr nötig">Erledigt</button><button class="btn" type="button" data-round-skip>Überspringen</button></div>`;
     }
     root.innerHTML = `<div class="scrim" data-round-close></div><div class="round" role="dialog" aria-modal="true" aria-label="Entscheidungsrunde">
       <div class="rhead"><span class="faint">Entscheidungsrunde${round.i < n ? ` · Frage ${round.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-round-close>beenden</button></div>
       <div class="rprog"><span style="width:${(Math.min(round.i, n) / n * 100).toFixed(1)}%"></span></div>${body}</div>`;
     const input = $('#round-answer');
-    if (input) input.focus(); else root.querySelector('[data-round-close].btn')?.focus();
+    if (!keepFocus || hadFocus) {
+      if (input) {
+        input.focus();
+        if (keepFocus && selection) input.setSelectionRange(...selection);
+      } else root.querySelector('[data-round-close].btn')?.focus();
+    }
   }
   async function roundStep(value, note) {
-    const id = round.queue[round.i];
+    const active = round;
+    if (!active || active.busy) return;
+    const id = active.queue[active.i];
+    if (!id || !findQ(id) || reply(id)) { renderRound(); return; }
     if (value === 'skip') { round.stats.skipped++; round.i++; renderRound(); return; }
-    if (await react(id, value, note)) { round.stats[value === 'answered' ? 'answered' : 'done']++; round.i++; }
+    active.busy = true;
+    document.querySelectorAll('#round-root button:not([data-round-close]), #round-answer').forEach(el => { el.disabled = true; });
+    const saved = await react(id, value, note);
+    // A save may finish after the owner closed this round or started another one.
+    if (round !== active) return;
+    active.busy = false;
+    if (saved) { active.stats[value === 'answered' ? 'answered' : 'done']++; active.i++; delete drafts[id]; }
     renderRound();
   }
 
@@ -673,11 +714,26 @@
       .slice(0, 40);
   }
   function highlight(text) {
-    let html = esc(text);
-    for (const w of searchQ.split(/\s+/).filter(Boolean)) {
-      html = html.replace(new RegExp(esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
+    // Match plain text first: replacing inside escaped HTML corrupts entities and
+    // the <mark> tags inserted for earlier search words.
+    const words = norm(searchQ).split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length);
+    if (!words.length) return esc(text);
+    const source = String(text), normalized = norm(source);
+    const pattern = new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    const offsets = [];
+    for (let i = 0; i < source.length;) {
+      const character = String.fromCodePoint(source.codePointAt(i));
+      for (let n = 0; n < norm(character).length; n++) offsets.push(i);
+      i += character.length;
     }
-    return html;
+    offsets.push(source.length);
+    let html = '', end = 0;
+    for (const match of normalized.matchAll(pattern)) {
+      const start = offsets[match.index], next = offsets[match.index + match[0].length];
+      html += esc(source.slice(end, start)) + `<mark>${esc(source.slice(start, next))}</mark>`;
+      end = next;
+    }
+    return html + esc(source.slice(end));
   }
   function renderSearchResults() {
     const box = $('#search-root .sresults');
@@ -806,6 +862,7 @@
 
   // ---------- page ----------
   function render() {
+    const focused = inputFocus();
     const d = new Date(S.today + 'T12:00:00');
     $('#date').textContent = d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const collected = S.projects.map(p => p.facts_collected_at).filter(Boolean).sort()[0];
@@ -817,6 +874,8 @@
     renderFoot();
     if (openId) openDrawer(openId, true);
     if (panelOpen) renderPanel(true);
+    if (round) renderRound(true);
+    restoreInputFocus(focused);
   }
 
   // ---------- calls into the app ----------
@@ -876,27 +935,36 @@
   async function saveNote(id) {
     const text = (drafts[id] || '').trim();
     noteFor = null;
-    delete drafts[id];
-    if (!text || !S.feedback[id]) { render(); return; }
-    if (await react(id, S.feedback[id].value, text)) toast('Gemerkt. Die Agents lesen das beim nächsten Lauf.');
+    if (!text || !S.feedback[id]) { delete drafts[id]; render(); return; }
+    if (await react(id, S.feedback[id].value, text)) {
+      delete drafts[id];
+      toast('Gemerkt. Die Agents lesen das beim nächsten Lauf.');
+    } else { noteFor = id; render(); focusDraft(id); }
   }
   async function saveAnswer(id) {
     const text = (drafts[id] || '').trim();
     if (!text) { focusDraft(id); return; }
     answering = null;
     if (await react(id, 'answered', text, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.')) delete drafts[id];
+    else { answering = id; render(); focusDraft(id); }
   }
   async function addIdea() {
     const el = $('#idea-text'), text = el ? el.value.trim() : '';
     if (!text) { if (el) el.focus(); return; }
-    try { await call('add_idea', { text }); await load(false); toast('Idee geparkt. Der nächste Agent-Lauf schätzt sie ein.'); } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
+    try {
+      await call('add_idea', { text });
+      if (ideaDraft.trim() === text) ideaDraft = '';
+      await load(false);
+      toast('Idee geparkt. Der nächste Agent-Lauf schätzt sie ein.');
+    } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
   }
   async function removeIdea(id) {
     try { await call('remove_idea', { id }); await load(false); toast('Idee entfernt.'); } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
   }
   async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
   async function setStatus(status, note) {
-    try { await call('set_status', { id: openId, status, note }); await load(false); }
+    const id = openId;
+    try { await call('set_status', { id, status, note }); clearProjectDraft(id, 'status_note', note); await load(false); }
     catch (e) { toast('Status nicht gespeichert.'); }
   }
 
@@ -946,7 +1014,7 @@
     if (t.closest('[data-round-close]')) { closeRound(); return; }
     if (round) {
       const ro = t.closest('[data-round-opt]');
-      if (ro) { const { w } = findQ(round.queue[round.i]); roundStep('answered', w.options[Number(ro.dataset.roundOpt)].answer); return; }
+      if (ro) { const q = findQ(round.queue[round.i]); const option = q && (q.w.options || [])[Number(ro.dataset.roundOpt)]; if (option) roundStep('answered', option.answer); else renderRound(); return; }
       if (t.closest('[data-round-send]')) { const v = ($('#round-answer').value || '').trim(); if (v) roundStep('answered', v); else $('#round-answer').focus(); return; }
       if (t.closest('[data-round-done]')) { roundStep('done', null); return; }
       if (t.closest('[data-round-skip]')) { roundStep('skip'); return; }
@@ -1023,17 +1091,18 @@
       return;
     }
     if ((e.target.id === 'goal-text' || e.target.id === 'goal-due') && openId) {
-      const p = byId(openId), goal = $('#goal-text').value, due = $('#goal-due').value || null;
+      const id = openId, p = byId(id), goal = $('#goal-text').value, due = $('#goal-due').value || null;
       try {
-        await call('set_goal', { id: openId, goal, due });
+        await call('set_goal', { id, goal, due });
         p.goal = goal.trim(); p.goal_due = p.goal ? due : null;
+        clearProjectDraft(id, 'goal', goal); clearProjectDraft(id, 'goal_due', due || '');
         toast(p.goal ? 'Ziel gespeichert. Die Agents messen den Stand ab dem nächsten Lauf daran.' : 'Ziel entfernt.');
       } catch (err) { toast('Ziel nicht gespeichert: ' + errText(err)); }
       return;
     }
     if (e.target.id === 'status-note' && openId) {
-      const p = byId(openId);
-      try { await call('set_status', { id: openId, status: p.status, note: e.target.value }); p.status_note = e.target.value; toast('Notiz gespeichert.'); }
+      const id = openId, p = byId(id), note = e.target.value;
+      try { await call('set_status', { id, status: p.status, note }); p.status_note = note; clearProjectDraft(id, 'status_note', note); toast('Notiz gespeichert.'); }
       catch (err) { toast('Notiz nicht gespeichert.'); }
     }
   });
@@ -1041,13 +1110,18 @@
   document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('[data-hb]')) hbOpen = e.target.open; }, true);
   document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
+  document.addEventListener('input', e => {
+    if (e.target.id === 'idea-text') ideaDraft = e.target.value;
+    const field = { 'status-note': 'status_note', 'goal-text': 'goal', 'goal-due': 'goal_due' }[e.target.id];
+    if (field && openId) (projectDrafts[openId] ||= {})[field] = e.target.value;
+  });
   document.addEventListener('keydown', e => {
     if (e.target.id === 'idea-text' && e.key === 'Enter') { e.preventDefault(); addIdea(); return; }
     if (round) {
       if (e.key === 'Escape') { e.preventDefault(); closeRound(); return; }
       const inInput = e.target.id === 'round-answer';
       if (inInput && e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) roundStep('answered', v); return; }
-      if (!inInput || !e.target.value) {
+      if (!inInput) {
         const k = Number(e.key), q = findQ(round.queue[round.i] || '');
         if (k >= 1 && q && q.w.options && q.w.options[k - 1]) { e.preventDefault(); roundStep('answered', q.w.options[k - 1].answer); }
       }
