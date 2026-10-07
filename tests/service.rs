@@ -318,6 +318,14 @@ fn invalid_cards_are_refused_with_field_paths() {
     let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
+    // A mistyped project id must be corrected before asking for its context.
+    for token in [None, Some("wrong-token")] {
+        let error = svc
+            .put_card_guarded("demoo", card(), false, false, token)
+            .unwrap_err();
+        assert_eq!(error.code, "project_not_found");
+        assert!(error.hint.as_deref().unwrap().contains("demo"));
+    }
     let err = svc
         .put_card(
             "demo",
@@ -575,7 +583,7 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     assert_eq!(svc.portfolio_context().unwrap()["review_week"]["due"], true);
 
     assert_eq!(svc.remove_idea(id).unwrap()["removed"], id);
-    assert_eq!(svc.remove_idea(id).unwrap_err().code, "idea_not_found");
+    assert_eq!(svc.remove_idea(id).unwrap()["already_removed"], true);
 }
 
 #[test]
@@ -604,11 +612,37 @@ fn status_and_registration_rules() {
     let repo = demo_repo(tmp.path());
     let other = common::make_repo(tmp.path(), "Other App", &["2026-09-20T10:00:00"]);
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    let missing = tmp.path().join("missing folder");
+    let error = svc
+        .add_project(missing.to_str().unwrap(), None, None)
+        .unwrap_err();
+    assert_eq!(error.code, "path_missing");
+    let hint = error.hint.as_deref().unwrap();
+    assert!(hint.contains("projects update with its existing id and --path"));
+    assert!(hint.contains("preserve its cards and history"));
+    let error = svc.discover(missing.to_str().unwrap()).unwrap_err();
+    assert_eq!(error.code, "path_missing");
+    assert!(error
+        .hint
+        .as_deref()
+        .unwrap()
+        .contains("projects discover with an existing projects folder"));
+    for name in ["", "   "] {
+        assert_eq!(
+            svc.add_project(other.to_str().unwrap(), None, Some(name))
+                .unwrap_err()
+                .code,
+            "invalid_name"
+        );
+    }
     assert_eq!(
-        svc.add_project(repo.to_str().unwrap(), None, None)
-            .unwrap_err()
-            .code,
-        "already_registered"
+        svc.add_project("", None, None).unwrap_err().code,
+        "invalid_path"
+    );
+    assert_eq!(svc.list_projects().unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(
+        svc.add_project(repo.to_str().unwrap(), None, None).unwrap()["already_exists"],
+        true
     );
 
     common::make_repo(tmp.path(), "side", &["2026-09-25T10:00:00"]);
@@ -662,7 +696,8 @@ fn status_and_registration_rules() {
         ])
         .unwrap();
     assert_eq!(batch["added"][0]["id"], "other-app");
-    assert_eq!(batch["failed"][0]["error"]["code"], "already_registered");
+    assert_eq!(batch["added"][1]["id"], "demo");
+    assert!(batch["failed"].as_array().unwrap().is_empty());
 
     svc.put_card("demo", card(), false, false).unwrap();
     // versions count per project
@@ -728,6 +763,56 @@ fn status_and_registration_rules() {
         svc.store().project("demo").unwrap().unwrap().status_note,
         "wartet auf Entscheidung"
     );
+}
+
+#[test]
+fn database_errors_distinguish_retryable_locks_from_access_and_corruption() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("watchtower.db");
+    let writable = rusqlite::Connection::open(&path).unwrap();
+    writable
+        .execute_batch("CREATE TABLE example (id INTEGER);")
+        .unwrap();
+    let readonly =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let error = watchtower::WatchtowerError::from(
+        readonly
+            .execute("INSERT INTO example VALUES (1)", [])
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, "storage_error");
+    let hint = error.hint.as_deref().unwrap();
+    assert!(hint.contains("Restore the intended access"));
+    assert!(hint.contains("read the current state before retrying a write"));
+    assert!(!hint.contains("Wait for"));
+
+    let contender = rusqlite::Connection::open(&path).unwrap();
+    contender.busy_timeout(std::time::Duration::ZERO).unwrap();
+    writable.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    let error = watchtower::WatchtowerError::from(
+        contender
+            .execute("INSERT INTO example VALUES (2)", [])
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, "storage_error");
+    let hint = error.hint.as_deref().unwrap();
+    assert!(hint.contains("Wait for the other database operation"));
+    assert!(hint.contains("does not confirm that earlier steps were undone"));
+    writable.execute_batch("ROLLBACK;").unwrap();
+
+    let damaged = tmp.path().join("damaged.db");
+    let bytes = b"This is not a SQLite database.";
+    std::fs::write(&damaged, bytes).unwrap();
+    let error = match watchtower::Watchtower::open(&damaged) {
+        Ok(_) => panic!("An invalid database must not be opened or replaced."),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "storage_error");
+    let hint = error.hint.as_deref().unwrap();
+    assert!(hint.contains("Stop writing and preserve the database"));
+    assert!(hint.contains("do not delete or recreate"));
+    assert_eq!(std::fs::read(&damaged).unwrap(), bytes);
 }
 
 #[test]

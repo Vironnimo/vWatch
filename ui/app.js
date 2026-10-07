@@ -191,7 +191,7 @@
       if ((h.read_first || []).length) lines.push('', `${pre}Zum Einlesen: ${h.read_first.map(r => r.path).join(', ')}`);
       if ((h.run || []).length) lines.push(`${pre}Befehle laut Handbuch:`, ...h.run.map(r => `- ${r.what}: ${r.how}${r.folder && r.folder !== '.' ? ` (in ${r.folder})` : ''}`));
     }
-    if (Number.isInteger(t.id)) lines.push('', `Dieser Auftrag wird in Watchtower als #${t.id} verfolgt. Melde das Ergebnis mit konkretem Beleg zurück:`, `watchtower --json tasks report ${t.id} --status done --result "Was erledigt wurde" --evidence "Prüfung, Datei oder Commit"`, `Wenn du blockiert bist: watchtower --json tasks report ${t.id} --status blocked --result "Was fehlt und wer es klären kann"`);
+    if (Number.isInteger(t.id)) lines.push('', `Dieser Auftrag wird in Watchtower als #${t.id} verfolgt. Melde das Ergebnis mit konkretem Beleg zurück:`, `watchtower tasks report ${t.id} --status done --result "Was erledigt wurde" --evidence "Prüfung, Datei oder Commit"`, `Wenn du blockiert bist: watchtower tasks report ${t.id} --status blocked --result "Was fehlt und wer es klären kann"`);
     lines.push('', `Aus Watchtower kopiert am ${fmtDate(S.today)}. Prüfe den Befund zuerst gegen den aktuellen Stand; ist er überholt, sag das, statt etwas zu ändern.`);
     return lines.join('\n');
   }
@@ -928,7 +928,7 @@
     const st = settings || {};
     const projects = S.projects.map(p => `<div class="prow"><div class="pmain"><div class="pname-s">${dot(p.id)}<b>${esc(p.name)}</b>${p.status !== 'active' ? `<span class="tag">${esc(STATUS[p.status])}</span>` : ''}</div><div class="d mono">${esc(p.path)}</div></div>
       ${projectEdits[p.id] ? '' : confirmRemove === p.id
-        ? `<div class="confirm"><span>Karten und Verlauf werden gelöscht.</span><button class="btn danger" type="button" data-remove="${esc(p.id)}">Entfernen</button><button class="btn" type="button" data-remove-cancel>Behalten</button></div>`
+        ? `<div class="confirm"><span>Nicht mehr beobachten? Karten, Antworten und Verlauf bleiben gespeichert.</span><button class="btn danger" type="button" data-remove="${esc(p.id)}">Entfernen</button><button class="btn" type="button" data-remove-cancel>Behalten</button></div>`
         : `<div class="project-actions"><button class="btn" type="button" data-project-edit="${esc(p.id)}">Bearbeiten</button><button class="linkish" type="button" data-remove-ask="${esc(p.id)}">entfernen</button></div>`}${projectEditor(p)}</div>`).join('');
     return `<div class="scrim" data-close-panel></div><aside class="drawer panel" role="dialog" aria-modal="true" aria-label="Einstellungen">
       <button class="close" data-close-panel type="button">Schließen</button>
@@ -1019,17 +1019,20 @@
   async function react(id, value, note, msg, until) {
     const prev = S.feedback[id] ? { ...S.feedback[id] } : null;
     try {
-      await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note, until: until === undefined ? null : until });
-      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: note === undefined ? (prev ? prev.note : '') : note, snoozed_until: value === 'later' ? (until || (prev && prev.snoozed_until) || addDays(S.today, S.snooze_days || 7)) : null }; else delete S.feedback[id];
+      const result = await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note, until: until === undefined ? null : until });
+      const undoToken = typeof result.undo === 'string' ? result.undo.match(/^watchtower undo ([a-f0-9]{32})$/)?.[1] : null;
+      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: typeof result.note === 'string' ? result.note : (note === undefined ? (prev ? prev.note : '') : note), snoozed_until: Object.hasOwn(result, 'snoozed_until') ? result.snoozed_until : (value === 'later' ? (until || (prev && prev.snoozed_until) || addDays(S.today, S.snooze_days || 7)) : null) }; else delete S.feedback[id];
       render();
-      if (msg) toast(msg, async () => {
+      if (msg) toast(msg, undoToken ? async () => {
         noteFor = null;
         try {
-          await call('restore_feedback', { item_id: id, snapshot: prev });
-          if (prev) S.feedback[id] = prev; else delete S.feedback[id];
-        } catch (e) { toast('Rückgängig hat nicht geklappt: ' + errText(e)); }
-        render();
-      });
+          await call('undo', { token: undoToken });
+          await load(false);
+        } catch (e) {
+          await load(false);
+          toast('Rückgängig hat nicht geklappt: ' + errText(e));
+        }
+      } : null);
       return true;
     } catch (e) { toast('Nicht gespeichert: ' + errText(e)); return false; }
   }
@@ -1128,7 +1131,17 @@
     } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
   }
   async function removeIdea(id) {
-    try { await call('remove_idea', { id }); await load(false); toast('Idee entfernt.'); } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
+    try {
+      await call('remove_idea', { id });
+      await load(false);
+      toast('Idee entfernt. Sie bleibt gespeichert.', async () => {
+        try {
+          await call('restore_idea', { id });
+          await load(false);
+          toast('Idee wiederhergestellt.');
+        } catch (e) { toast(`Nicht wiederhergestellt: ${errText(e)}`); }
+      });
+    } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
   }
   async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
   async function setStatus(status, note) {
@@ -1224,7 +1237,13 @@
       await call('remove_project', { id });
       confirmRemove = null;
       await load(false);
-      toast(`${p ? p.name : id} ist nicht mehr im Blick.`);
+      toast(`${p ? p.name : id} ist nicht mehr im Blick. Karten und Verlauf bleiben gespeichert.`, async () => {
+        try {
+          await call('restore_project', { id });
+          await load(false);
+          toast(`${p ? p.name : id} ist wieder im Blick.`);
+        } catch (e) { toast(`Nicht wiederhergestellt: ${errText(e)}`); }
+      });
     } catch (e) { toast(errText(e)); }
   }
 

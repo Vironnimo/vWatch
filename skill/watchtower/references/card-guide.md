@@ -1,73 +1,90 @@
 # Writing Watchtower cards
 
-The owner opens Watchtower every morning. A card succeeds when, after ten seconds, the owner knows what state the project is in, what is at risk, what waits for them and what the sensible next step is, and when every sentence is specific to this project. A card fails when it is generic, restates what the owner already knows, or says something that is not true.
+This guide covers studying a due project and writing every field of its card. The user needs to understand the state, risk and next step within ten seconds. Write in German, address the user as "du", and keep each finding specific to evidence you read.
 
-All text is German, addressed as "du". Dates are `YYYY-MM-DD`. `watchtower --json schema card` prints the exact JSON schema. The portfolio brief has its own guide, `portfolio-guide.md`.
+## Study only what changes the card
 
-## What Watchtower already shows
+1. Read the complete `watchtower context <project-id>` result: project path and intent, facts, previous card, changes, feedback, tasks and warning acknowledgements. Keep the context token for the save. For `changed` or `stale`, start with the previous card and investigate what changed.
+2. Read the project's history and documents that explain its purpose, decisions and unfinished work: README, project instructions, roadmap, TODO, plans and review reports where present. Use `git log --format="%cs %s"`, then `git show --stat <commit>` for unclear changes. For large histories, group related commits instead of reading each one.
+3. Inspect uncommitted work with `git diff --stat` and `git ls-files --others --exclude-standard`; read relevant changed files and accompanying notes. Inspect extra worktrees when their facts show work. Git-ignored project notes can establish intent; private personal content stays out of the card.
+4. Read the source layout enough to establish what the app does today. For red CI, inspect `facts.ci.workflows` and, when needed, `gh run view <run-id>` using the ID at the end of the run URL. Read failed logs only when the cause remains unclear. Distinguish a weeks-old failure from recent news.
+5. For a changed or missing handbook, read the project's documented start/test/release commands, data locations, installation and shortcuts. Inspect the installed version without starting the app or changing its files. Never execute the handbook's commands during this observation run.
+6. Check task results against evidence before describing progress. Assigned work is unfinished; `review` means reported but unconfirmed; `done` is confirmed. Respect deliberate warning acknowledgements and recorded decisions. Report material worsening instead of repeating an unwanted proposal.
 
-The page renders the measured facts itself: commit counts and the weekly activity curve, last activity, remote or no remote, uncommitted files and lines, unpushed commits, extra worktrees, unmerged branches, CI state (the newest run of every GitHub workflow on the default branch; the worst one decides, and `ci.failing` names the red workflows). Do not copy these numbers into the card for their own sake. Use them to judge the project and mention them where they matter ("12 Tage Arbeit liegen ohne Commit und ohne Remote nur auf dieser Platte"). Three facts point at open ends worth naming: `collisions` (two lines of work change the same files and may conflict when merged; say which to finish first), `release.commits_since` (work since the newest tag; compare it with `handbook.installed.version` when the project is installed) and `night.reverts` (reverted commits since yesterday evening, often a sign an agent ran into trouble).
+Measured facts already appear in the window. Use them to interpret a finding; do not fill card text with numbers already visible there. Useful signals include `collisions` (overlapping changes), `release.commits_since` (work after the reachable release tag) and `night.reverts` (reverted commits since yesterday evening). Facts cover git-visible work, not ignored data. A failed facts measurement does not mean a clean repository. Timestamps containing a time are UTC; dates such as `last_work` are local.
 
-The facts see only what git sees: work in git-ignored folders (local data, private notes, build output) does not appear in them. Timestamps with a time (`collected_at`, `dirty.oldest_change`, `ci.at`) are UTC; dates without a time (`today`, `last_work`, commit dates) are local.
+## Place each finding once
 
-## Studying a repository
+- `open_ends`: unfinished work, including uncommitted/unpushed work, unfinished branches, plans and broken CI.
+- `health_notes`: other concrete risk or deterioration.
+- `waiting_on_you`: a decision only the user can settle.
+- `suggestions`: a distinct proposal grounded in a finding and the project's goals.
 
-`watchtower --json context <id>` gives you the path, the facts, the previous card and the commits since it. Then read, in roughly this order, whatever exists:
+The obvious repair of an open end is not an additional suggestion. The `reentry` step does not reappear as a suggestion. `headline` and `reentry` can refer to the leading finding without duplicating it in other sections. Remove finished, disproved or rejected items. Keep IDs for retained questions and suggestions; omit IDs for new ones.
 
-Read its `tasks` and `warning_acknowledgements` too. An assigned task remains unfinished; `review` means an agent reported a result and the owner has not yet confirmed it. Check result evidence against the repository before describing progress. A warning acknowledged with an owner reason is an intentional choice; preserve it in `decisions` where relevant and report material worsening instead of repeating the original proposal.
+## Fields and limits
 
-1. The previous card, if any. For `changed` or `stale`, most of it probably still holds; check what the new commits and edits change.
-2. The commit history: `git log --format="%cs %s"`. For large histories, group by prefix or scope and look at merge commits rather than reading every line. Use `git show --stat <commit>` only where a theme is unclear.
-3. The project's own documents: README, AGENTS.md or CLAUDE.md, VISION, ROADMAP, TODO, IDEAS, CHANGELOG, `.vorch/PROJECT.md`, `.vorch/FLAGGED.md`, plans under `.vorch/plans/` or `docs/`, review and audit reports. Private notes (for example git-ignored TODO files) often say what the owner actually wants.
-4. Uncommitted work: `git diff --stat` for changed files and `git ls-files --others --exclude-standard` for new ones (`git status --short` folds new folders into one line, so its count differs from Watchtower's). `facts.worktrees.items[].dirty_files` counts uncommitted files in each extra worktree; look at those worktrees too. For a project whose real work is uncommitted, read the changed files' names and the docs written alongside them. For a red CI, `facts.ci.workflows` lists the newest run of every workflow with its `state`, `conclusion` and date; cancelled and timed-out runs count as red. `gh run view <run-id>` names the failing job and step (the id ends the run's `url`); add `--log-failed` only when you need the log. Check the date: a red run weeks old, with nothing pushed since, is a stale warning rather than news, so say so.
-5. The source layout, enough to know what the app really does today. Do not read every file.
-6. For the handbook: how the project is started, tested and released (README, `package.json` scripts, `Cargo.toml`, `pyproject.toml`, Makefile, `scripts/`, AGENTS.md) and, outside the repository, its installed version and shortcuts.
+The required top-level fields are `one_liner`, `phase`, `headline` and `reentry`. Fill other fields when evidence exists; empty lists and nulls are better than invented findings. `watchtower schema card` describes the accepted shape and limits when a detail is unclear.
 
-Stay read-only (see the Skill's rules). Never include credentials, tokens or keys you come across.
+A word is a space-separated piece containing a letter or digit. A standalone dash does not count. Every text has at most 600 characters. The limits below are words unless stated otherwise. Paths, commands, `source` and `evidence` have no word limit. One-sentence fields allow 30 words. Suggested list lengths describe reading priorities, not a reason to fabricate entries.
 
-## The card fields
+| Field | Content |
+|---|---|
+| `one_liner` | Purpose in plain words; at most 15 words. |
+| `stack` | Main technologies; at most 25 words. |
+| `phase` | `active`: work within 7 days; `cooling`: 1–4 weeks; `dormant`: over 4 weeks; `maintenance`: scope finished, upkeep continues; `done`: stated scope complete. Use `facts.last_work`, which includes uncommitted edits. |
+| `phase_evidence` | One sentence supporting the phase. |
+| `headline` | Most consequential truth, at most 10 words; e.g. "Release fertig, aber noch nicht veröffentlicht." |
+| `personality` | One playful but strictly true sentence in the project's voice. |
+| `recent_changes` | Aim for 3–6 themes, newest first. Each has `date` (`YYYY-MM-DD`), `title` (8 words) and `detail` (30 words). Describe the user-visible effect. Date uncommitted work by file times and identify it as uncommitted. |
+| `milestones` | Up to 8 major lifetime steps, oldest first. Each has `date` (`YYYY-MM-DD`) and `title` (10 words). Include releases. |
+| `features` | Aim for 5–10 capabilities that exist today; each at most 8 words. |
+| `open_ends` | Each has `kind`, `title` (10 words), `detail` (30 words), `source` and `age_days`. Kinds: `worktree`, `branch`, `uncommitted`, `unpushed`, `ci`, `flagged`, `todo`, `plan`, `other`. Sources identify a file, git ref, or fact such as `facts: has_remote`. Use the oldest dated evidence for age, or null if unknown. |
+| `waiting_on_you` | Consequential questions in priority order; aim for 0–3. Each has `id` when retained, `title` as a question (12 words), `source` and `options`. Each of at most 3 options has `answer` (8 words) and `effect` (20 words). Use options only for known alternatives; for names, places or unknown values, use an empty list. Remove answered or dismissed questions. |
+| `vision` | `statement`: documented goal, one sentence or null. `progress_note`: progress against that goal, one sentence or null. `progress_pct`: integer 0–100 only when derivable from stated work, otherwise null. |
+| `reentry` | One useful next step: `next_step` (20 words), `effort` (`15min`, `1h`, `half-day`, `day+`), `why` (30 words), `done_when` (20 words). Completion must be observable. |
+| `health_notes` | Concrete risks or deterioration, each at most 30 words. Empty when none were found. |
+| `decisions` | Recorded deliberate choices with their source, each at most 20 words. Example: "Kein Remote: bewusst nur lokal (AGENTS.md)." These are the user's decisions, not your conclusions. |
+| `suggestions` | Up to 4 distinct proposals; fields and selection below. |
+| `cross_project_hints` | Possible reuse or overlap with other projects, each at most 30 words. The brief uses these findings. |
+| `handbook` | Project commands, installation, structure and orientation; fields below. |
 
-`one_liner`, `phase`, `headline` and `reentry` are required; fill the others whenever you found something for them. Keep to the lengths; the page has room for exactly that. Watchtower checks every word limit and refuses a card with a text that is too long, naming the field and its word count. `watchtower --json schema card` states each limit ("At most N words"): a field described as one sentence allows 30 words. A word is any space-separated piece of text that contains a letter or digit; a lone dash or symbol does not count.
-
-Word limits at a glance: `headline` 10, `one_liner` 15, `stack` 25, `features` 8 each; `recent_changes` title 8; `milestones` title 10; `open_ends` title 10; `waiting_on_you` title 12, `options.answer` 8, `options.effect` 20; `reentry.next_step` 20; `done_when` 20; `decisions` 20 each; `suggestions` title 8 and `why` 25; every other text described as one sentence 30. In `handbook`: `run.what` 8, `architecture` 60, `places.what` and `read_first.why` 12, `needs` 15 each, `terms.term` 4 and `terms.meaning` 20. `source`, `evidence`, paths and commands have no word limit. Lists hold at most: `options` 3, `run` 8, `places` 10, `read_first` 5, `needs` 8, `terms` 8. Words are counted between spaces, so `cargo test` is two words and `Build-Ordner` one. Every text has at most 600 characters.
-
-**Each finding has one home.** Unfinished work (uncommitted or unpushed changes, a branch, a half-done plan) goes into `open_ends`; a risk or rot that is not unfinished work into `health_notes`; a decision into `waiting_on_you`; a proposal for new work into `suggestions`. The obvious fix of a finding (commit it, push it, merge it) is not a separate suggestion, and the step named in `reentry` never reappears as one. `headline` and `reentry` may point to the most important finding in their own words; do not repeat it in further fields.
-
-- `one_liner` (≤ 15 words): what the project is, in plain words. "Wartungslog fürs Fahrrad, das an Kettenwechsel und Reifendruck erinnert."
-- `stack`: the main technologies, e.g. "Python/FastAPI + Svelte, SQLite".
-- `phase`, judged by `facts.last_work` (the newest commit or uncommitted edit): `active` (worked on in the last 7 days), `cooling` (last work 1-4 weeks ago), `dormant` (no work for more than 4 weeks), `maintenance` (finished, only upkeep), `done` (its stated scope is complete). `phase_evidence`: one sentence with the facts behind the choice.
-- `headline` (≤ 10 words): the single most important truth about the project right now, like a newspaper headline. "Release 1.2 fertig, aber nie veröffentlicht." Not "Projekt macht Fortschritte."
-- `personality` (one sentence): the project speaking about itself, a little playful, strictly true. "Ich kann Statistiken, Export und Erinnerungen, benutzt werde ich nur für den Reifendruck."
-- `recent_changes` (3-6, newest first): recent **themes**, not single commits. `title` (≤ 8 words) names the effect a user would notice; `detail` is one sentence. For uncommitted work, date it by the file times and say it is not committed.
-- `milestones` (up to 8, oldest first; fewer for a young project): the big steps of the project's whole life, releases included.
-- `features` (5-10, ≤ 8 words each): what the app can actually do today, not what is planned.
-- `open_ends`: concrete unfinished things you found, each with `kind` (`worktree`, `branch`, `uncommitted`, `unpushed`, `ci`, `flagged`, `todo`, `plan`, `other`), `title` (≤ 10 words), `detail` (one sentence), `source` (file path or git ref; for a finding from Watchtower's facts, `facts: <field>`, e.g. `facts: has_remote`) and `age_days`: days since the oldest evidence, such as `dirty.oldest_change` for uncommitted work, `unpushed_since` for unpushed commits, the first red run, or `commits.first` for a missing remote; null when nothing dates it. Prefer what matters: forgotten finished work, risks, promises in docs that were never kept. Leave out trivia.
-- `waiting_on_you`: decisions or answers only the owner can give (a provider to choose, a key to obtain, a direction to pick), each a question (≤ 12 words) with its `source`. Not tasks an agent could do. Usually 0-3 per project, the most consequential first; more only when each one blocks progress. Ask so that a short answer settles it; the owner can answer or dismiss each question in Watchtower. When the choice is between two or three known alternatives, add `options` (up to 3): each an `answer` (≤ 8 words) and its `effect` (≤ 20 words, what follows from it), so the owner can answer with one click. Leave `options` empty when the answer is a name, a place, a value or anything else only the owner knows; do not invent alternatives to fill it. Keep a still-open question's `id` when you send it again, and remove questions the owner answered or marked `done`.
-- `vision`: `statement` is the project's own stated goal in one sentence; `progress_note` says in one sentence how far along it is against that goal; `progress_pct` only when the docs make it derivable (for example completed phases), otherwise null.
-- `reentry`: if the owner opened this project today, the **one** most sensible concrete step (`next_step`, ≤ 20 words), its `effort` (`15min`, `1h`, `half-day`, `day+`), `why` (one sentence) and `done_when` (see below).
-- `health_notes`: concrete risks or rot you found, one sentence each: failing checks and why, docs that contradict the code, dependencies that will break, a bug you can point to. May be empty.
-- `decisions` (≤ 20 words each): deliberate choices the project's docs record that change how its state reads, for example "Kein Remote: bewusst nur lokal (AGENTS.md)." Only recorded choices, with their source; never your own conclusions. If the previous card has no `decisions`, check the docs for them; most projects have none, and then the list stays empty.
-- `suggestions` (up to 4; fewer when fewer findings deserve one): see below.
-- `cross_project_hints`: things that look reusable in, or overlap with, other kinds of projects; one sentence each. The portfolio brief builds on them.
-- `handbook`: what the owner needs to find their way around after months away. It describes the project as it is on disk, uncommitted work included. It is opened rarely, so make it complete and exact; change it only when the project's commands, structure or docs change. With `--merge` it carries over; when you change part of it, send the whole `handbook`, because a field you send replaces its previous version completely.
-  - `run` (up to 8): how to start, open, test or release the project, each with `what` (for example "Entwicklung starten", "Oberfläche öffnen", "Tests"), `how` and `folder`. `how` holds only what the owner types or opens, because Watchtower offers a command for copying and a URL for opening: the exact command with all its arguments and flags (several commands joined with `; `, in the syntax of the shell the project's docs use), or one URL. Explanations, shortcuts to click and the working folder stay out of `how` (no `cd`; that is what `folder` is for), and a URL to open after starting something is its own entry; variants of one command share an entry with a placeholder (`gusto <start|stop|status>`); a flag worth knowing about gets its own entry. When there are more commands than entries, keep what the owner needs most: starting, testing, releasing. `folder` is where a command runs, relative to the repository (`.` for its root, `webui` for a subfolder); empty for URLs and commands that work from anywhere. Take every command from the project's own files, including test names in the source; never invent one. Write `<placeholders>` for values that depend on the situation, such as a free port.
-  - `installed`: the installed build's `version` (≤ 4 words), `path` and optional `open` (≤ 8 words, empty when unknown; how the owner starts it, in words: "Startmenü → Gusto", "Morrow.lnk im Repository-Ordner doppelklicken"), or null when the project is not installed on this machine. Look in the places the project's install script or docs name, `%LOCALAPPDATA%/Programs`, `C:/Program Files` and the Start menu; a build the owner starts through a shortcut counts too. Take the version from the installed app itself (a version file, `--version`, its manifest); when only the build's source states it, use that. Null when you find no installed copy.
-  - `architecture` (2-3 sentences): the main parts and how they work together.
-  - `places` (3-10): key folders and files (a folder or a pattern such as `src/*_tests.rs` is fine), each with `path` and `what`. Include where its data and configuration live.
-  - `read_first` (1-5): the documents to read first when coming back, each with `path` and `why`. The project's own notes count, git-ignored ones too.
-  - `needs` (up to 8): what must be installed or available: runtimes, services, hardware, and API keys by name and where they are configured, never their values.
-  - `terms` (up to 8): project-specific words the owner would otherwise forget, each with `term` and `meaning`. No standard vocabulary.
-
-  Paths are relative to the repository; outside it, write them with environment variables (`%LOCALAPPDATA%/Gusto`, `%APPDATA%/…`, `~/.vbot`) so the card holds no user name. Use forward slashes in paths and commands: Windows understands them, and they need no escaping in JSON.
+For ages, use `dirty.oldest_change` for uncommitted work, `unpushed_since` for unpushed commits, the first failing run for CI, or the oldest documented evidence. Do not invent a date from today's observation.
 
 ## Suggestions
 
-A suggestion is worth showing when the owner reads it and thinks "right, I had not seen that". Each has `type` (`next`, `feature`, `cleanup`, `park`), `title` (≤ 8 words), `why` (one sentence, ≤ 25 words), `evidence` (what you saw, with file paths or commits), `effort` (`S`, `M`, `L`) and `done_when`.
+Each suggestion has `id` when retained, `type` (`next`, `feature`, `cleanup`, `park`), `title` (8 words), `why` (25 words), `evidence`, `effort` (`S`, `M`, `L`) and `done_when` (20 words). Name files, functions or commits in evidence; line numbers drift. Tie features to the project's vision or the user's notes. A parking proposal is useful when the scope is complete or remaining work depends on people, money or decisions.
 
-The owner can copy a suggestion or the `reentry` step for a coding agent, and separately mark it assigned. Watchtower builds the task from `title`, `why`, `evidence`, `done_when`, the card's `decisions` and the handbook, and keeps an assigned task's original text through later card rewrites. `done_when` (≤ 20 words) says how that agent would know it is finished: an observable result, for example "Monatsraten stimmen mit dem Kalender überein; `pytest tests/schedule` ist grün."
+The user can turn a suggestion or `reentry` into an assigned task. Write `done_when` so another agent can tell whether it succeeded: "Monatsraten stimmen mit dem Kalender überein; dokumentierter Planungstest besteht." Include an exact test command only when the repository actually defines it. Assignments keep their original text through card rewrites.
 
-- Ground every suggestion in a finding. "Erinnerung reparieren: der Zeitplan rechnet Monate als 30 Tage (src/schedule.ts, addMonths)" is good. "Fehlerbehandlung verbessern" is not. In `evidence` and `source`, name files, functions and commits rather than line numbers, which move with every edit.
-- Features should follow the project's own vision or the owner's notes, not your taste.
-- `park` is welcome when honest: the scope is complete, or everything left needs people, money or decisions rather than code.
-- Check the owner's ratings in `context` first (see the Skill's rules). To keep a suggestion from the previous card, send it again with its `id`; a suggestion without `id` counts as new.
-- Replace suggestions that are done or no longer true.
+Read feedback before choosing suggestions. Never reintroduce a rejected idea through rewording. Preserve a still-relevant item's ID, respect snooze dates and remove completed proposals. The user's recorded choices take priority over generic advice.
+
+## Handbook
+
+Update this field when commands, structure, installation or documents change. With `--merge`, an omitted `handbook` carries over. When changing part of it, send the whole object with the unchanged fields included.
+
+| Field | Content |
+|---|---|
+| `run` | At most 8 entries, each with `what` (8 words), `how` (command or one URL) and `folder`. Prioritize starting, testing and releasing. |
+| `installed` | Object with `version` (4 words), `path` and `open` (8 words; empty if unknown), or null when no installed copy exists. Take the version from the installed app's manifest/version file or the matching build source. Use "unbekannt" when an installed copy exists but its version cannot be established. `open` describes a shortcut or menu action in words. |
+| `architecture` | Main parts and how they interact, at most 60 words. |
+| `places` | At most 10 important folders/files/patterns; each has `path` and `what` (12 words). Include data and configuration. |
+| `read_first` | At most 5 documents; each has `path` and `why` (12 words). Include relevant private project notes without copying personal content. |
+| `needs` | At most 8 strings of 15 words: runtimes, services, hardware and credential names/configuration locations. Never credential values. |
+| `terms` | At most 8 project-specific terms; each has `term` (4 words) and `meaning` (20 words). Omit standard programming vocabulary. |
+
+`run.how` contains only what the user can copy and run or open. Use commands taken from the project's files, with the documented shell syntax and exact flags. Keep explanations, shortcuts and working-directory changes out of `how`: put the working directory in `folder`, relative to the repository (`.` for its root), or empty when none is needed. A URL opened after starting a service is a separate entry. Use `<placeholders>` for variable values such as a free port. Prefer one entry with variants when they share a command.
+
+Paths inside the repository are relative to its root. Outside it, use `%LOCALAPPDATA%`, `%APPDATA%` or `~` where applicable so stored cards contain no user name. Use forward slashes in paths. Preserve the command syntax of the shell the project documents.
+
+## Save only the intended change
+
+For `changed`, `ci_changed`, `answered` or `stale`, update the affected fields and keep still-valid content. For `new_fields`, fill every listed path; a path inside a list item or the handbook requires the whole containing top-level field. Context lists these under `new_fields`. A save lists omissions under `unfilled_fields`; complete them before declaring the card current.
+
+Use a UTF-8 file for the card payload. For a card that already exists, replace `<project-id>`, `<context-token>` and `<card-file>` with the project ID, token from its current context and your changed-field payload path:
+
+```powershell
+watchtower card put <project-id> --context-token <context-token> --file <card-file> --merge
+```
+
+For a project's first card, omit `--merge` and provide the complete card. The output confirms whether it saved, the version, changed fields, item IDs and warnings. A list in a merge replaces the whole list. A context conflict saves nothing: read the changed context and reconcile before submitting again. A schema error saves nothing: fix the named fields and retry. Never record credentials or unsupported conclusions to satisfy a missing field.

@@ -5,13 +5,17 @@ use std::path::Path;
 use watchtower::Watchtower;
 
 fn run(home: &Path, args: &[&str]) -> Value {
+    run_expecting(home, args, 0)
+}
+
+fn run_expecting(home: &Path, args: &[&str], expected_exit: i32) -> Value {
     let mut out = Vec::new();
     let argv = ["watchtower", "--json"]
         .into_iter()
         .chain(args.iter().copied());
     let code = watchtower::cli::run(argv, home, &mut std::io::empty(), &mut out);
     let value: Value = serde_json::from_slice(&out).expect("CLI JSON");
-    assert_eq!(code, 0, "{args:?}: {value}");
+    assert_eq!(code, expected_exit, "{args:?}: {value}");
     value
 }
 
@@ -40,7 +44,10 @@ fn tracked_cli_run_and_reported_task_complete_only_after_the_required_steps() {
         ],
     );
     assert_eq!(failed["run"]["projects"][0]["status"], "failed");
-    assert_eq!(run(&home, &["runs", "finish", &id])["state"], "failed");
+    assert_eq!(
+        run_expecting(&home, &["runs", "finish", &id], 1)["state"],
+        "failed"
+    );
 
     let context = run(&home, &["context", "demo"]);
     run(
@@ -55,7 +62,10 @@ fn tracked_cli_run_and_reported_task_complete_only_after_the_required_steps() {
             &common::card().to_string(),
         ],
     );
-    assert_eq!(run(&home, &["runs", "finish", &id])["state"], "incomplete");
+    assert_eq!(
+        run_expecting(&home, &["runs", "finish", &id], 1)["state"],
+        "incomplete"
+    );
     let context = run(&home, &["portfolio", "context"]);
     run(
         &home,

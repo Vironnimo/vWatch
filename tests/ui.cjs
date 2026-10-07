@@ -14,7 +14,8 @@ const expose = `globalThis.ui = {
   answer: id => { answering = id; },
   render, blockIdeas, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus,
   openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead,
-  openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit
+  openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit,
+  removeProject, removeIdea
 };`;
 
 function fixture() {
@@ -212,6 +213,55 @@ test('editing a name and folder saves once under the existing project id', async
   assert.equal(a.calls.filter(c => ['add_projects', 'remove_project'].includes(c.command)).length, 0);
 });
 
+test('removing projects and ideas retains their data and offers targeted undo in the window', async () => {
+  let project, idea;
+  const a = await app((command, args, state) => {
+    if (command === 'remove_project') {
+      project = state.projects.find(p => p.id === args.id);
+      state.projects = state.projects.filter(p => p.id !== args.id);
+    }
+    if (command === 'restore_project') state.projects.push(project);
+    if (command === 'remove_idea') {
+      idea = state.ideas.find(i => i.id === args.id);
+      state.ideas = state.ideas.filter(i => i.id !== args.id);
+    }
+    if (command === 'restore_idea') state.ideas.push(idea);
+    return { removed: args?.id };
+  });
+  a.state.ideas = [{ id: 17, text: 'A useful idea', added_at: '2026-10-07' }];
+  const originalProject = structuredClone(a.state.projects[0]);
+  const originalIdea = structuredClone(a.state.ideas[0]);
+  await a.ui.openPanel();
+  a.dispatch('click', { target: { closest: selector => selector === '[data-remove-ask]' ? { dataset: { removeAsk: 'sample' } } : null } });
+  const confirmation = a.node('#panel-root').innerHTML;
+  assert.match(confirmation, /Karten, Antworten und Verlauf bleiben gespeichert/);
+  assert.match(confirmation, /data-remove="sample"/);
+  assert.match(confirmation, /data-remove-cancel/);
+  assert.doesNotMatch(confirmation, /werden gelöscht|verloren|watchtower projects restore/);
+  await a.ui.removeProject('sample');
+  assert.equal(a.state.projects.length, 0);
+  assert.match(a.node('#toast').innerHTML, /Karten und Verlauf bleiben gespeichert/);
+  assert.match(a.node('#toast').innerHTML, /Rückgängig/);
+  assert.doesNotMatch(a.node('#toast').innerHTML, /watchtower|CLI/);
+  a.node('#undo').onclick();
+  await new Promise(setImmediate);
+  assert.equal(a.calls.find(c => c.command === 'restore_project').args.id, 'sample');
+  assert.deepEqual(a.state.projects[0], originalProject);
+  assert.match(a.node('#panel-root').innerHTML, /Sample/);
+  await a.ui.removeIdea(17);
+  assert.equal(a.state.ideas.length, 0);
+  assert.match(a.node('#toast').innerHTML, /bleibt gespeichert/);
+  assert.match(a.node('#toast').innerHTML, /Rückgängig/);
+  assert.doesNotMatch(a.node('#toast').innerHTML, /watchtower|CLI/);
+  a.node('#undo').onclick();
+  await new Promise(setImmediate);
+  assert.equal(a.calls.find(c => c.command === 'restore_idea').args.id, 17);
+  assert.deepEqual(a.state.ideas[0], originalIdea);
+  assert.match(a.node('#view').innerHTML, /A useful idea/);
+  assert.equal(a.calls.filter(c => c.command === 'remove_project').length, 1);
+  assert.equal(a.calls.filter(c => c.command === 'remove_idea').length, 1);
+});
+
 test('project edits retain drafts, focus and cursor across refresh and panel reopening', async () => {
   const a = await app();
   await a.ui.openPanel();
@@ -318,9 +368,17 @@ test('later waits for an explicit future calendar date and preserves its note', 
   assert.match(a.node('#view').innerHTML, /Wieder am 14\.10\.2026/);
 });
 
-test('snoozes expire on the stored local date and undo restores the old deadline', async () => {
-  const a = await app();
+test('snoozes expire on the stored local date and undo uses the stored receipt', async () => {
   const old = { value: 'later', note: 'Next week', at: '2026-10-01T23:00:00Z', snoozed_until: '2026-10-07' };
+  const token = '0123456789abcdef0123456789abcdef';
+  const a = await app((command, args, state) => {
+    if (command === 'set_feedback') {
+      state.feedback.s1 = { value: args.value, note: args.note, snoozed_until: args.until };
+      return { undo: `watchtower undo ${token}` };
+    }
+    if (command === 'undo') { state.feedback.s1 = old; return { restored: true }; }
+    return {};
+  });
   a.state.feedback.s1 = old;
   await a.ui.load(false);
   assert.equal(a.ui.rated('s1'), null);
@@ -328,8 +386,27 @@ test('snoozes expire on the stored local date and undo restores the old deadline
   await a.ui.saveSnooze('2026-10-14');
   a.node('#undo').onclick();
   await new Promise(setImmediate);
-  const undo = a.calls.find(c => c.command === 'restore_feedback');
-  assert.deepEqual(JSON.parse(JSON.stringify(undo.args.snapshot)), old);
+  const undo = a.calls.find(c => c.command === 'undo');
+  assert.equal(undo.args.token, token);
+  assert.equal(a.calls.filter(c => c.command === 'restore_feedback').length, 0);
+  assert.equal(a.ui.rated('s1'), null);
+  assert.deepEqual(a.state.feedback.s1, old);
+});
+
+test('feedback undo keeps and shows a newer owner change when the receipt conflicts', async () => {
+  const a = await app((command, args, state) => {
+    if (command === 'set_feedback') return { undo: 'watchtower undo 0123456789abcdef0123456789abcdef' };
+    if (command === 'undo') throw { code: 'undo_conflict', message: 'A newer reply is saved. Nothing was changed.' };
+    return {};
+  });
+  await a.ui.setFeedback({ dataset: { item: 's1' } }, 'down');
+  a.state.feedback.s1 = { value: 'up', note: 'The newer decision' };
+  a.node('#undo').onclick();
+  await new Promise(setImmediate);
+  assert.equal(a.calls.filter(c => c.command === 'undo').length, 1);
+  assert.equal(a.calls.filter(c => c.command === 'restore_feedback').length, 0);
+  assert.equal(a.ui.rated('s1'), 'up');
+  assert.match(a.node('#toast').innerHTML, /newer reply|Nothing was changed/);
 });
 
 test('copying never assigns; assignment is explicit and copied tracked tasks request a report', async () => {
@@ -349,7 +426,7 @@ test('copying never assigns; assignment is explicit and copied tracked tasks req
   await a.ui.assignTask('s1');
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 1);
   await a.ui.copyTask('s1');
-  assert.match(a.copied.at(-1), /watchtower --json tasks report 12 --status done/);
+  assert.match(a.copied.at(-1), /watchtower tasks report 12 --status done/);
 });
 
 test('tracked results await owner confirmation and survive replacement of the source card', async () => {
@@ -380,7 +457,7 @@ test('tracked task copies retain the original project after it leaves the watche
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }] });
   assert.match(prompt, /Original project \(C:\/original\)/);
   assert.doesNotMatch(prompt, /neues Projekt/);
-  assert.match(prompt, /watchtower --json tasks report 3/);
+  assert.match(prompt, /watchtower tasks report 3/);
   a.state.projects = [];
   a.state.tasks = [{ id: 3, revision: 2, projects: ['removed'], status: 'review', title: 'Fix the build', result: 'Build fixed',
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }], created_at: '2026-10-07T12:00:00Z' }];

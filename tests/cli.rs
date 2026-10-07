@@ -121,10 +121,9 @@ fn json_output_requires_an_explicit_flag_at_any_command_level() {
         let (code, out, err) = streams(home.path(), &args);
         assert_eq!(code, 0, "{args:?}: {err}");
         assert!(err.is_empty());
-        assert_eq!(
-            serde_json::from_str::<Value>(&out).unwrap(),
-            json!({"ok": true, "projects": []})
-        );
+        let result: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["projects"], json!([]));
     }
 
     let payload = json!({"greeting": "Die Option --json bleibt Text."}).to_string();
@@ -144,9 +143,9 @@ fn json_output_requires_an_explicit_flag_at_any_command_level() {
         &["portfolio", "put", "--input-json=--json", "--dry-run"],
     );
     assert_eq!(code, 1);
-    assert!(out.is_empty());
-    assert!(!err.is_empty());
-    assert!(serde_json::from_str::<Value>(&err).is_err());
+    assert!(err.is_empty());
+    assert!(out.starts_with("Error:"));
+    assert!(serde_json::from_str::<Value>(&out).is_err());
 
     for args in [
         vec!["portfolio", "put", "--file", "--", "--json"],
@@ -154,12 +153,12 @@ fn json_output_requires_an_explicit_flag_at_any_command_level() {
     ] {
         let (code, out, err) = streams(home.path(), &args);
         assert_eq!(code, 2, "{args:?}");
+        assert!(err.is_empty(), "{args:?}: {err}");
+        assert!(out.starts_with("Error:"));
         assert!(
-            out.is_empty(),
+            serde_json::from_str::<Value>(&out).is_err(),
             "A value must not activate JSON output: {out}"
         );
-        assert!(!err.is_empty());
-        assert!(serde_json::from_str::<Value>(&err).is_err());
     }
 
     // With space-separated options, clap rejects the missing value; --json is
@@ -178,7 +177,89 @@ fn json_output_requires_an_explicit_flag_at_any_command_level() {
 }
 
 #[test]
-fn human_errors_use_stderr_while_json_errors_preserve_the_envelope() {
+fn output_aliases_are_explicit_and_help_remains_readable() {
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["projects", "list", "--format", "json"],
+        vec!["projects", "list", "--output", "json"],
+        vec!["-o", "json", "project", "ls"],
+    ] {
+        let (code, out, err) = streams(home.path(), &args);
+        assert_eq!(code, 0, "{args:?}: {out}");
+        assert!(err.is_empty(), "{args:?}: {err}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap()["projects"],
+            json!([])
+        );
+    }
+    human_success(home.path(), &["projects", "list", "--format", "text"]);
+    for args in [
+        vec!["--help"],
+        vec!["--format", "json", "--help"],
+        vec!["--json", "projects", "update", "--help"],
+        vec!["--output", "json", "--version"],
+    ] {
+        human_success(home.path(), &args);
+    }
+}
+
+#[test]
+fn invalid_flags_or_unrecognized_targets_cannot_mutate_a_nearby_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let repo = common::demo_repo(tmp.path());
+    assert_eq!(
+        run(
+            &home,
+            &["projects", "add", repo.to_str().unwrap(), "--id", "demo"]
+        )
+        .0,
+        0
+    );
+    let before = run(&home, &["projects", "list"]).1["projects"].clone();
+    for args in [
+        vec![
+            "projects",
+            "update",
+            "demo",
+            "--name",
+            "Must not save",
+            "--include-everything",
+        ],
+        vec!["projects", "update", "dem", "--name", "Must not save"],
+        vec!["projects", "status", "<project-id>", "parked"],
+        vec!["projects", "remove", "dem"],
+        vec!["projects", "remove", "demo", "--include-everything"],
+        vec![
+            "projects",
+            "goal",
+            "demo",
+            "Must not save",
+            "--due",
+            "09/10/2026",
+        ],
+    ] {
+        let (code, out, err) = streams(&home, &args);
+        assert!(matches!(code, 1 | 2), "{args:?}: {out}");
+        assert!(err.is_empty(), "{args:?}: {err}");
+        assert!(out.starts_with("Error:"), "{args:?}: {out}");
+        assert!(
+            out.lines()
+                .skip(1)
+                .any(|line| !line.trim().is_empty() && !line.starts_with("Note: non-default")),
+            "Recovery guidance must follow the outcome: {args:?}: {out}"
+        );
+        assert_eq!(
+            run(&home, &["projects", "list"]).1["projects"],
+            before,
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn expected_errors_keep_recovery_on_stdout_in_both_output_formats() {
     let home = tempfile::tempdir().unwrap();
     for (args, expected_code) in [
         (vec!["context", "missing"], 1),
@@ -187,9 +268,13 @@ fn human_errors_use_stderr_while_json_errors_preserve_the_envelope() {
     ] {
         let (code, out, err) = streams(home.path(), &args);
         assert_eq!(code, expected_code);
-        assert!(out.is_empty(), "{args:?}: {out}");
-        assert!(!err.is_empty());
-        assert!(serde_json::from_str::<Value>(&err).is_err());
+        assert!(err.is_empty(), "{args:?}: {err}");
+        assert!(out.starts_with("Error:"), "{args:?}: {out}");
+        assert!(
+            out.contains("Usage:") || out.contains("projects") || out.contains("possible values:"),
+            "The recovery must identify accepted arguments or an available project operation: {args:?}: {out}"
+        );
+        assert!(serde_json::from_str::<Value>(&out).is_err());
 
         for position in [0, args.len()] {
             let mut json_args = args.clone();
@@ -204,9 +289,10 @@ fn human_errors_use_stderr_while_json_errors_preserve_the_envelope() {
             assert!(result["error"]["hint"].is_string());
         }
     }
-    let (_, _, err) = streams(home.path(), &["context", "missing"]);
-    assert!(err.contains("missing"));
-    assert!(err.contains("Hinweis:"));
+    let (_, out, err) = streams(home.path(), &["context", "missing"]);
+    assert!(err.is_empty());
+    assert!(out.contains("missing"));
+    assert!(out.contains("projects"));
 }
 
 #[test]
@@ -253,6 +339,9 @@ fn cli_prints_json_for_success_and_expected_failure() {
         ],
     );
     assert_eq!((code, out["saved"].as_bool()), (0, Some(true)));
+    // Replaying the identical accepted write may be idempotent. A stale token
+    // must still reject a different document rather than overwrite new work.
+    let stale_edit = common::card_with(json!({"headline": "Veralteter anderer Entwurf"}));
     let (code, out) = run(
         &home,
         &[
@@ -260,7 +349,7 @@ fn cli_prints_json_for_success_and_expected_failure() {
             "put",
             "demo",
             "--input-json",
-            &common::card().to_string(),
+            &stale_edit.to_string(),
             "--context-token",
             &token,
         ],
@@ -371,8 +460,10 @@ fn cli_prints_json_for_success_and_expected_failure() {
 
     let (code, out) = run(&home, &["context", "nope"]);
     assert_eq!(code, 1);
-    let expected = json!({"ok": false, "error": {"code": "project_not_found", "message": "No project with id 'nope'.", "hint": "Known project ids: demo."}});
-    assert_eq!(out, expected);
+    assert_eq!(out["ok"], false);
+    assert_eq!(out["error"]["code"], "project_not_found");
+    assert!(out["error"]["message"].as_str().unwrap().contains("nope"));
+    assert!(out["error"]["hint"].as_str().unwrap().contains("demo"));
 
     let (code, out) = run(&home, &["card", "put", "demo", "--input-json", "{broken"]);
     assert_eq!(
@@ -419,7 +510,7 @@ fn cli_prints_json_for_success_and_expected_failure() {
             "portfolio",
             "put",
             "--input-json",
-            &brief,
+            &json!({"greeting":"Veralteter anderer Entwurf"}).to_string(),
             "--context-token",
             &token,
         ],

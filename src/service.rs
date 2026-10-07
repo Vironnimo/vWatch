@@ -11,12 +11,20 @@ use std::sync::Mutex;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde_json::{json, Map, Value};
 
+mod undo;
+use undo::with_receipt;
+
 use crate::cards::{self, Kind};
 use crate::facts;
 use crate::store::{
-    same_path, CardBasis, Feedback, Idea, Project, ProjectUpdate, Store, StoredCard, StoredFacts,
-    StoredPortfolio,
+    same_path, CardBasis, Feedback, Idea, Project, ProjectRegistration, ProjectUpdate, Store,
+    StoredCard, StoredFacts, StoredPortfolio,
 };
+
+fn document_request(value: &Value) -> String {
+    use sha1::{Digest, Sha1};
+    format!("request1-{:x}", Sha1::digest(value.to_string().as_bytes()))
+}
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
@@ -87,11 +95,25 @@ impl std::error::Error for WatchtowerError {}
 
 impl From<rusqlite::Error> for WatchtowerError {
     fn from(e: rusqlite::Error) -> Self {
+        use rusqlite::ErrorCode;
+
+        let recovery = match e.sqlite_error_code() {
+            Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) =>
+                "Wait for the other database operation to finish. Read the current state before retrying a write; this error does not confirm that earlier steps were undone.",
+            Some(ErrorCode::ReadOnly | ErrorCode::PermissionDenied | ErrorCode::CannotOpen | ErrorCode::AuthorizationForStatementDenied) =>
+                "Check WATCHTOWER_HOME and access to its data folder and database. Restore the intended access, then read the current state before retrying a write. Do not create a replacement database.",
+            Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) =>
+                "Stop writing and preserve the database and its -wal/-shm files. Check WATCHTOWER_HOME points to the intended data folder and report this error for recovery; do not delete or recreate the database.",
+            Some(ErrorCode::DiskFull | ErrorCode::SystemIoFailure) =>
+                "Check available space and access to the disk containing WATCHTOWER_HOME. Resolve the storage problem, then read the current state before retrying a write; this error does not confirm that earlier steps were undone.",
+            _ =>
+                "Read the current state before repeating a write; this error does not confirm that earlier steps were undone. If the error persists, report it with the failing command and preserve the database. Do not delete or recreate it.",
+        };
         WatchtowerError::new(
             "storage_error",
             format!("Watchtower's database failed: {e}"),
         )
-        .hint("Try again in a moment.")
+        .hint(recovery)
     }
 }
 
@@ -872,15 +894,43 @@ impl Watchtower {
         if let Some(p) = self.store.project(id)? {
             return Ok(p);
         }
-        let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
-        let known = if known.is_empty() {
-            "none yet".to_owned()
+        if let Some(p) = self.store.project_including_removed(id)? {
+            return Err(WatchtowerError::new(
+                "project_removed",
+                format!(
+                    "Project '{}' ({}) is in the trash. Nothing was changed.",
+                    p.id, p.name
+                ),
+            )
+            .hint(format!(
+                "To restore its cards and history: watchtower projects restore {}",
+                p.id
+            )));
+        }
+        let known: Vec<String> = self
+            .store
+            .projects()?
+            .into_iter()
+            .map(|p| format!("{} ({})", p.id, p.name))
+            .collect();
+        let hint = if known.is_empty() {
+            "No projects are registered. To watch the project the user requested, use projects add with its existing folder path; quote paths containing spaces.".to_owned()
         } else {
-            known.join(", ")
+            let shown = known
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            if known.len() > 10 {
+                format!("Known project ids (first 10 of {}): {shown}. Read watchtower projects list for the complete list; choose the intended project explicitly.",known.len())
+            } else {
+                format!("Known project ids: {shown}. Use the exact id of the intended project.")
+            }
         };
         Err(
             WatchtowerError::new("project_not_found", format!("No project with id '{id}'."))
-                .hint(format!("Known project ids: {known}.")),
+                .hint(hint),
         )
     }
 
@@ -901,25 +951,61 @@ impl Watchtower {
         Ok(Value::Array(out))
     }
 
-    fn register(&self, path: &str, id: Option<&str>, name: Option<&str>) -> Result<Project> {
+    fn register(
+        &self,
+        path: &str,
+        id: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<(Project, bool)> {
+        let name = name.map(str::trim);
+        if name.is_some_and(str::is_empty) {
+            return Err(WatchtowerError::new(
+                "invalid_name",
+                "The name must not be empty. No project was registered.",
+            )
+            .hint(
+                "Pass a nonempty display name with --name, or omit --name to use the folder name.",
+            ));
+        }
+        if path.trim().is_empty() {
+            return Err(WatchtowerError::new(
+                "invalid_path",
+                "The folder must not be empty. No project was registered.",
+            )
+            .hint("Pass the existing project folder; quote paths containing spaces."));
+        }
         let resolved = resolve(path);
         let resolved_str = resolved.to_string_lossy().into_owned();
         if !resolved.is_dir() {
             return Err(WatchtowerError::new(
                 "path_missing",
-                format!("Folder does not exist: {resolved_str}"),
-            ));
+                format!("Folder does not exist: {resolved_str}. No project was registered."),
+            ).hint("Pass an existing project folder and quote paths containing spaces. If a watched project moved, run `watchtower projects list`, then use projects update with its existing id and --path to preserve its cards and history."));
         }
         if let Some(p) = self
             .store
-            .projects()?
+            .all_projects()?
             .into_iter()
             .find(|p| same_path(&p.path, &resolved_str))
         {
-            return Err(WatchtowerError::new(
-                "already_registered",
-                format!("This folder is already registered as '{}'.", p.id),
-            ).hint(format!("Use `watchtower --json projects update {} --name <name>` to rename it while keeping its cards and history.", p.id)));
+            if p.removed_at.is_some() {
+                return Err(WatchtowerError::new(
+                    "project_removed",
+                    format!(
+                        "This folder belongs to removed project '{}' ({}). Nothing was changed.",
+                        p.id, p.name
+                    ),
+                )
+                .hint(format!(
+                    "Restore its cards and history with: watchtower projects restore {}",
+                    p.id
+                )));
+            }
+            if id.is_none_or(|id| id == p.id) && name.is_none_or(|name| name == p.name) {
+                return Ok((p, false));
+            }
+            return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{}' ({}) with different identity fields. Nothing was changed.",p.id,p.name))
+                .hint(format!("Use projects update {} with --name for an intentional rename; the existing id remains {}.",p.id,p.id)));
         }
         let folder = resolved
             .file_name()
@@ -940,25 +1026,31 @@ impl Watchtower {
         if !valid_project_id(&id) {
             return Err(
                 WatchtowerError::new("invalid_id", format!("Invalid project id '{id}'."))
-                    .hint("Use lowercase letters, digits and hyphens, at most 40 characters."),
+                    .hint("Use 1 to 40 lowercase letters, digits or hyphens; start with a letter or digit."),
             );
         }
-        if self.store.project(&id)?.is_some() {
+        if self.store.project_including_removed(&id)?.is_some() {
             return Err(WatchtowerError::new(
                 "id_taken",
                 format!("The id '{id}' is already used."),
             )
-            .hint(format!("If this is the same project after a rename or move, use `watchtower --json projects update {id} --name <name> --path <folder>` to keep its cards and history. For a different project, pass another id with --id.")));
+            .hint(format!("If this is the same project after a rename or move, update project {id} with --name for the display name or --path for the existing folder. Its cards and history stay attached. For a different project, pass another id with --id.")));
         }
-        self.store
-            .add_project(&id, name.unwrap_or(&folder), &resolved_str, &self.now())?;
-        self.project(&id)
+        match self.store.add_project(&id,name.unwrap_or(&folder),&resolved_str,&self.now())? {
+            ProjectRegistration::Added => self.project(&id).map(|p|(p,true)),
+            ProjectRegistration::Existing => self.project(&id).map(|p|(p,false)),
+            ProjectRegistration::IdTaken => Err(WatchtowerError::new("id_taken",format!("Project id '{id}' was registered by another caller. Nothing was changed by this call.")).hint("Choose a different id for a different project, or inspect the existing project first.")),
+            ProjectRegistration::PathTaken(other) => Err(WatchtowerError::new("already_registered",format!("This folder was registered as '{other}' by another caller. Nothing was changed by this call.")).hint(format!("Read watchtower projects show {other} to inspect its identity before any edit."))),
+        }
     }
 
     pub fn add_project(&self, path: &str, id: Option<&str>, name: Option<&str>) -> Result<Value> {
-        let project = self.register(path, id, name)?;
+        let (project, created) = self.register(path, id, name)?;
         let refreshed = self.refresh_facts(Some(std::slice::from_ref(&project.id)), true)?;
-        let mut result = extend(project_json(&project), json!({"facts": refreshed[0]}));
+        let mut result = extend(
+            project_json(&project),
+            json!({"facts": refreshed[0], "created":created, "already_exists":!created, "undo":created.then(||format!("watchtower projects remove {}",project.id))}),
+        );
         if !facts::is_git_repo(&project.path) {
             result["warning"] = json!("The folder is not a git repository; only a card written by an agent can describe it.");
         }
@@ -968,28 +1060,71 @@ impl Watchtower {
     /// Register several folders at once and measure them in parallel.
     pub fn add_projects(&self, paths: &[String]) -> Result<Value> {
         let mut added = Vec::new();
+        let mut already_registered = Vec::new();
         let mut failed = Vec::new();
         for path in paths {
             match self.register(path, None, None) {
-                Ok(p) => added.push(p),
+                Ok((p, created)) => {
+                    if !created {
+                        already_registered.push(p.id.clone());
+                    }
+                    added.push(p);
+                }
                 Err(e) => failed.push(json!({"path": path, "error": e.to_json()})),
             }
         }
         let ids: Vec<String> = added.iter().map(|p| p.id.clone()).collect();
-        if !ids.is_empty() {
-            self.refresh_facts(Some(&ids), true)?;
-        }
-        Ok(json!({"added": added.iter().map(project_json).collect::<Vec<_>>(), "failed": failed}))
+        let refreshed = if ids.is_empty() {
+            Vec::new()
+        } else {
+            self.refresh_facts(Some(&ids), true)?
+        };
+        Ok(
+            json!({"added": added.iter().map(project_json).collect::<Vec<_>>(), "failed": failed,"refreshed":refreshed,"already_registered":already_registered}),
+        )
     }
 
     pub fn remove_project(&self, id: &str) -> Result<Value> {
-        self.project(id)?;
-        self.store.remove_project(id)?;
-        Ok(json!({"removed": id}))
+        let project = self.store.project_including_removed(id)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "project_not_found",
+                format!("No project with id '{id}'. Nothing was changed."),
+            )
+            .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
+        })?;
+        let changed = self.store.set_project_removed(id, Some(&self.now()))?;
+        Ok(
+            json!({"removed": id, "project": project_json(&project), "changed": changed,
+            "already_removed": !changed, "undo": changed.then(||format!("watchtower projects restore {id}"))}),
+        )
+    }
+
+    pub fn trash_projects(&self) -> Result<Value> {
+        Ok(
+            json!({"projects": self.store.all_projects()?.iter().filter(|p| p.removed_at.is_some()).map(|p|
+            extend(project_json(p), json!({"removed_at":p.removed_at}))).collect::<Vec<_>>() }),
+        )
+    }
+
+    pub fn restore_project(&self, id: &str) -> Result<Value> {
+        let project = self.store.project_including_removed(id)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "project_not_found",
+                format!("No project with id '{id}'. Nothing was changed."),
+            )
+            .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
+        })?;
+        let restored = self.store.set_project_removed(id, None)?;
+        Ok(
+            json!({"project": project_json(&project), "restored": restored, "already_active": !restored,
+            "undo": restored.then(||format!("watchtower projects remove {id}"))}),
+        )
     }
 
     pub fn rename_project(&self, id: &str, name: &str) -> Result<Value> {
-        Ok(self.update_project(id, Some(name), None)?["project"].clone())
+        let mut result = self.update_project(id, Some(name), None)?;
+        let project = result.as_object_mut().unwrap().remove("project").unwrap();
+        Ok(with_receipt(project, result))
     }
 
     /// Change a registered project's identity details, preserving its stable id and history.
@@ -1000,13 +1135,18 @@ impl Watchtower {
         path: Option<&str>,
     ) -> Result<Value> {
         let before = self.project(id)?;
+        let fields = [("name", name.is_some()), ("path", path.is_some())]
+            .into_iter()
+            .filter(|(_, present)| *present)
+            .map(|(field, _)| field.to_owned())
+            .collect();
         if name.is_none() && path.is_none() {
             return Err(WatchtowerError::new(
                 "invalid_update",
                 "No project changes were supplied.",
             )
             .hint(
-                "Pass --name <name>, --path <folder>, or both. The project id stays unchanged.",
+                "Supply --name with a display name, --path with an existing folder, or both. The project id stays unchanged.",
             ));
         }
         let name = name.map(str::trim).unwrap_or(&before.name);
@@ -1039,18 +1179,15 @@ impl Watchtower {
             }
             None => before.path.clone(),
         };
-        if name == before.name && path == before.path {
-            return Ok(json!({"project": project_json(&before), "changed": false}));
-        }
-        match self.store.update_project(&before, name, &path)? {
-            ProjectUpdate::Updated => (),
+        let receipt = match self.store.update_project(&before, name, &path, fields, &self.now())? {
+            ProjectUpdate::Updated(receipt) => receipt,
             ProjectUpdate::Conflict => return Err(WatchtowerError::new("version_conflict", "The project changed while you were editing it.")
-                .hint("Read `watchtower --json projects list` and retry the intended changes.")),
+                .hint("Read `watchtower projects list` and retry the intended changes.")),
             ProjectUpdate::PathTaken(other) => return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{other}'."))
-                .hint(format!("Use the existing project '{other}'. Do not remove and recreate a project to rename it; that deletes its cards and history. Nothing was changed."))),
-        }
+                .hint(format!("Use the existing project '{other}'. Rename or relink the existing project to preserve its identity. Nothing was changed."))),
+        };
         let project = self.project(id)?;
-        let mut result = json!({"project": project_json(&project), "changed": true});
+        let mut result = with_receipt(json!({"project": project_json(&project)}), receipt);
         if path != before.path {
             // The path and name are already saved. Report refresh trouble separately
             // so a caller never mistakes a measurement failure for a rejected edit.
@@ -1075,17 +1212,17 @@ impl Watchtower {
             }
         }
         let goal = goal.trim();
-        self.store.set_goal(
+        let receipt = self.store.set_goal(
             id,
             goal,
             if goal.is_empty() { None } else { due },
             &self.now(),
         )?;
-        Ok(project_json(&self.project(id)?))
+        Ok(with_receipt(project_json(&self.project(id)?), receipt))
     }
 
     pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
-        let project = self.project(id)?;
+        self.project(id)?;
         if !STATUSES.contains(&status) {
             return Err(WatchtowerError::new(
                 "invalid_status",
@@ -1093,13 +1230,8 @@ impl Watchtower {
             )
             .hint(format!("Use one of: {}.", STATUSES.join(", "))));
         }
-        self.store.set_status(
-            id,
-            status,
-            note.unwrap_or(&project.status_note),
-            &self.now(),
-        )?;
-        Ok(project_json(&self.project(id)?))
+        let receipt = self.store.set_status(id, status, note, &self.now())?;
+        Ok(with_receipt(project_json(&self.project(id)?), receipt))
     }
 
     /// Git repositories directly inside `root` that are not registered yet, most recently committed first.
@@ -1112,7 +1244,7 @@ impl Watchtower {
             return Err(WatchtowerError::new(
                 "path_missing",
                 format!("Folder does not exist: {}", base.to_string_lossy()),
-            ));
+            ).hint("Retry projects discover with an existing projects folder; quote paths containing spaces."));
         }
         let folder_is_repo = base.join(".git").exists();
         let mut repos: Vec<PathBuf> = Vec::new();
@@ -1127,6 +1259,7 @@ impl Watchtower {
                     "path_unreadable",
                     format!("Cannot read {}: {e}", base.to_string_lossy()),
                 )
+                .hint("Check that the folder is accessible with your current account, then retry discovery. No projects were registered.")
             })?;
             repos = find_repos(&base, DISCOVER_DEPTH);
         }
@@ -1227,7 +1360,7 @@ impl Watchtower {
             .save_project_facts(project, &self.now(), &fp, &data)?
         {
             return Err(WatchtowerError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
-                .hint("Read `watchtower --json projects list` and refresh the project's facts again. The outdated measurement was discarded."));
+                .hint("Read `watchtower projects list` and refresh the project's facts again. The outdated measurement was discarded."));
         }
         Ok(json!({
             "id": project.id,
@@ -1244,6 +1377,7 @@ impl Watchtower {
         self.refresh_facts(Some(&[id.to_owned()]), true)?;
         self.store.facts(id)?.ok_or_else(|| {
             WatchtowerError::new("facts_missing", format!("Could not measure '{id}'."))
+                .hint(format!("Read `watchtower projects list` to check the folder, then run `watchtower facts refresh {id}` and inspect its per-project result before continuing."))
         })
     }
 
@@ -1258,9 +1392,11 @@ impl Watchtower {
 
     // ---------- the agent's daily run ----------
     pub fn due(&self, max_age_days: i64, refresh: bool) -> Result<Value> {
-        if refresh {
-            self.refresh_facts(None, true)?;
-        }
+        let refreshed = if refresh {
+            self.refresh_facts(None, true)?
+        } else {
+            Vec::new()
+        };
         let now = (self.clock)();
         let (mut projects, mut problems, mut up_to_date) = (Vec::new(), Vec::new(), Vec::new());
         let brief = self.store.latest_portfolio()?;
@@ -1289,11 +1425,14 @@ impl Watchtower {
                 .as_ref()
                 .map(|c| owner_changes(c, &p, &reactions, &warning_acks, &tasks))
                 .unwrap_or_default();
-            if stored
-                .as_ref()
-                .is_some_and(|s| s.data["error"] == "path_missing")
-            {
-                problems.push(json!({"id": p.id, "problem": "path_missing", "path": p.path}));
+            if stored.as_ref().is_none_or(|s| s.data["ok"] != true) {
+                let problem = stored.as_ref().map_or("facts_missing", |s| {
+                    s.data["error"].as_str().unwrap_or("facts_unavailable")
+                });
+                let error = stored.as_ref().map(|s| s.data["error"].clone());
+                problems.push(
+                    json!({"id":p.id,"name":p.name,"problem":problem,"error":error,"path":p.path}),
+                );
                 continue;
             }
             let reason = match &card {
@@ -1356,18 +1495,21 @@ impl Watchtower {
         // cards that only gain new fields do not change what the brief builds on
         let brief_affected = projects.iter().any(|e| e["reason"] != "new_fields");
         let next = if any_due {
-            "For each project listed: `watchtower --json context <id>`, study the repository, then `watchtower --json card put <id> --file <card.json> --context-token <context_token>`. \
-             Afterwards: `watchtower --json portfolio context` and `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>`. Use the token from each corresponding context."
+            projects
+                .first()
+                .and_then(|p| p["id"].as_str())
+                .map(|id| format!("watchtower context {id}"))
         } else if portfolio_reason.is_some() {
-            "Every card is current; only the portfolio brief is due: `watchtower --json portfolio context`, then `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>` with that context's token."
+            Some("watchtower portfolio context".to_owned())
         } else {
-            "Nothing is due. Every card and the portfolio brief are current."
+            None
         };
         Ok(json!({
             "today": self.today().to_string(),
             "projects": projects,
             "up_to_date": up_to_date,
             "problems": problems,
+            "refreshed": refreshed,
             "portfolio": {
                 "due": portfolio_reason.is_some() || brief_affected,
                 "reason": portfolio_reason.or(brief_affected.then_some("cards_will_change")),
@@ -1401,8 +1543,8 @@ impl Watchtower {
 
     fn version_conflict(project: Option<&str>) -> WatchtowerError {
         let command = project.map_or_else(
-            || "watchtower --json portfolio context".to_owned(),
-            |id| format!("watchtower --json context {id}"),
+            || "watchtower portfolio context".to_owned(),
+            |id| format!("watchtower context {id}"),
         );
         WatchtowerError::new("version_conflict", "The context changed. Nothing was saved.")
             .hint(format!("Read `{command}` again, reconcile your document with the new facts, owner instructions and previous document, then retry with its context_token. Do not merely replace the token."))
@@ -1420,11 +1562,11 @@ impl Watchtower {
             }
             None if !dry_run => {
                 let command = project.map_or_else(
-                    || "watchtower --json portfolio context".to_owned(),
-                    |id| format!("watchtower --json context {id}"),
+                    || "watchtower portfolio context".to_owned(),
+                    |id| format!("watchtower context {id}"),
                 );
                 Err(WatchtowerError::new("context_required", "Saving requires the context_token from the context you used.")
-                    .hint(format!("Read `{command}`, prepare your document from that context, and pass `--context-token <context_token>`. Schema-only --dry-run may omit it.")))
+                    .hint(format!("Read `{command}`, prepare your document from that context, and pass its context_token value with --context-token. Schema-only --dry-run may omit it.")))
             }
             _ => Ok(()),
         }
@@ -1434,9 +1576,10 @@ impl Watchtower {
         write: crate::store::GuardedWrite,
         kind: Kind,
         project: Option<&str>,
-    ) -> Result<i64> {
+    ) -> Result<(i64, String, bool)> {
         match write {
-            crate::store::GuardedWrite::Saved(version) => Ok(version),
+            crate::store::GuardedWrite::Saved(version, token) => Ok((version, token, false)),
+            crate::store::GuardedWrite::Replayed(version, token) => Ok((version, token, true)),
             crate::store::GuardedWrite::Conflict => Err(Self::version_conflict(project)),
             crate::store::GuardedWrite::ItemConflict(conflicts) => {
                 let (code, name) = match kind {
@@ -1470,14 +1613,7 @@ impl Watchtower {
             .filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str()))
             .map(feedback_json)
             .collect();
-        let next = format!(
-            "Write the card with `watchtower --json card put {id} --file <card.json> --context-token <context_token>`{}",
-            if card.is_some() {
-                " (add --merge to send only the fields that changed)."
-            } else {
-                "."
-            }
-        );
+        let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() { " Use --merge only when sending changed top-level fields; send each changed list in full." } else { " Send a complete card." });
         Ok(json!({
             "today": self.today().to_string(),
             "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
@@ -1529,8 +1665,21 @@ impl Watchtower {
         dry_run: bool,
         context_token: Option<&str>,
     ) -> Result<Value> {
-        self.check_context(Some(id), context_token, dry_run)?;
         let project = self.project(id)?;
+        let request = document_request(&json!(["put", merge, payload]));
+        if !dry_run {
+            if let Some(result) = self.document_replay(Some(id), context_token, &request)? {
+                return Ok(result);
+            }
+        }
+        if let Err(error) = self.check_context(Some(id), context_token, dry_run) {
+            if !dry_run {
+                if let Some(result) = self.document_replay(Some(id), context_token, &request)? {
+                    return Ok(result);
+                }
+            }
+            return Err(error);
+        }
         let previous = self.store.latest_card(id)?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|c| &c.data), sent.as_deref());
@@ -1538,7 +1687,7 @@ impl Watchtower {
         let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
             WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower --json schema card` prints the full schema."))
+                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
         self.validate_item_ids(Kind::Card, Some(id), &clean)?;
         let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
@@ -1601,19 +1750,216 @@ impl Watchtower {
             &basis,
             &clean,
             context_token.expect("checked before validation"),
+            &request,
         )?;
-        let version = Self::guarded_version(write, Kind::Card, Some(id))?;
+        let (version, token, replayed) = Self::guarded_version(write, Kind::Card, Some(id))?;
+        Ok(extend(
+            self.document_saved(Some(id), version, &token, replayed),
+            json!({"card":clean,"changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
+        ))
+    }
+
+    fn document_saved(
+        &self,
+        project: Option<&str>,
+        version: i64,
+        token: &str,
+        replayed: bool,
+    ) -> Value {
+        let undo = (version > 1).then(|| match project {
+            Some(id) => format!(
+                "watchtower card restore {id} --version {} --context-token {token}",
+                version - 1
+            ),
+            None => format!(
+                "watchtower portfolio restore --version {} --context-token {token}",
+                version - 1
+            ),
+        });
+        let mut result = json!({"saved":true,"version":version,"already_saved":replayed,"context_token":token,"undo":undo});
+        if let Some(id) = project {
+            result["project"] = json!(id);
+        }
+        result
+    }
+
+    fn document_replay(
+        &self,
+        project: Option<&str>,
+        expected: Option<&str>,
+        request: &str,
+    ) -> Result<Option<Value>> {
+        let Some(expected) = expected else {
+            return Ok(None);
+        };
+        let Some((version, token)) = self.store.document_replay(project, expected, request)? else {
+            return Ok(None);
+        };
+        let mut result = self.document_saved(project, version, &token, true);
+        result["changed_fields"] = json!([]);
+        result["unfilled_fields"] = json!([]);
+        result["warnings"] = json!([]);
+        let (kind, key, data) = match project {
+            Some(id) => (
+                Kind::Card,
+                "card",
+                self.store.card_version(id, version)?.map(|c| c.data),
+            ),
+            None => (
+                Kind::Portfolio,
+                "portfolio",
+                self.store.portfolio_version(version)?.map(|p| p.data),
+            ),
+        };
+        if let Some(data) = data {
+            result["items"] = Value::Array(item_ids(kind, &data));
+            result[key] = data;
+        }
+        Ok(Some(result))
+    }
+
+    pub fn card_history(&self, id: &str) -> Result<Value> {
+        self.project(id)?;
+        self.context_with_token(Some(id), || {
+            let versions = self.store.card_history(id)?.into_iter().enumerate().map(|(i,(at,data))|
+                json!({"version":i+1,"created_at":at,"headline":data["headline"]})).collect::<Vec<_>>();
+            Ok(json!({"project":id,"current_version":versions.len(),"versions":versions}))
+        })
+    }
+
+    pub fn card_version(&self, id: &str, version: i64) -> Result<Value> {
+        self.project(id)?;
+        let card = self.store.card_version(id, version)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "version_not_found",
+                format!("Project '{id}' has no card version {version}. Nothing was changed."),
+            )
+            .hint(format!(
+                "Read watchtower card history {id} for saved versions."
+            ))
+        })?;
         Ok(
-            json!({"saved": true, "project": id, "version": version, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
+            json!({"project":id,"version":card.version,"created_at":card.created_at,"card":card.data}),
         )
+    }
+
+    /// Restore appends the historical evidence too: restoring old wording does not
+    /// assert that an agent has reconciled it with today's facts or owner decisions.
+    pub fn restore_card(&self, id: &str, version: i64, token: Option<&str>) -> Result<Value> {
+        self.project(id)?;
+        let request = document_request(&json!(["restore", version]));
+        if let Some(result) = self.document_replay(Some(id), token, &request)? {
+            return Ok(extend(result, json!({"restored_from":version})));
+        }
+        if let Err(error) = self.check_context(Some(id), token, false) {
+            if let Some(result) = self.document_replay(Some(id), token, &request)? {
+                return Ok(extend(result, json!({"restored_from":version})));
+            }
+            return Err(error);
+        }
+        let current = self.store.latest_card(id)?;
+        let card = self.store.card_version(id, version)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "version_not_found",
+                format!("Project '{id}' has no card version {version}. Nothing was changed."),
+            )
+            .hint(format!(
+                "Read watchtower card history {id} for saved versions."
+            ))
+        })?;
+        if current.as_ref().is_some_and(|c| c.version == version) {
+            return Ok(extend(
+                self.document_saved(Some(id), version, token.unwrap(), true),
+                json!({"restored_from":version,"already_current":true,"undo":null}),
+            ));
+        }
+        let parts = card.basis.unwrap_or(Value::Null);
+        let basis = CardBasis {
+            fingerprint: &card.fingerprint,
+            head: card.head.as_deref(),
+            ci: card.ci.as_deref(),
+            parts: &parts,
+            owner: card.owner_basis.as_ref(),
+        };
+        let write = self.store.add_card_guarded(
+            id,
+            &self.now(),
+            &basis,
+            &card.data,
+            token.unwrap(),
+            &request,
+        )?;
+        let (new_version, after, replayed) = Self::guarded_version(write, Kind::Card, Some(id))?;
+        Ok(extend(
+            self.document_saved(Some(id), new_version, &after, replayed),
+            json!({"restored_from":version,"card":card.data}),
+        ))
+    }
+
+    pub fn portfolio_history(&self) -> Result<Value> {
+        self.context_with_token(None, || {
+            let versions = self.store.portfolio_history()?.into_iter().map(|p|
+                json!({"version":p.version,"created_at":p.created_at,"greeting":p.data["greeting"]})).collect::<Vec<_>>();
+            Ok(json!({"current_version":versions.last().map(|p| p["version"].clone()).unwrap_or(json!(0)),"versions":versions}))
+        })
+    }
+
+    pub fn portfolio_version(&self, version: i64) -> Result<Value> {
+        let p = self.store.portfolio_version(version)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "version_not_found",
+                format!("There is no portfolio version {version}. Nothing was changed."),
+            )
+            .hint("Read watchtower portfolio history for saved versions.")
+        })?;
+        Ok(json!({"version":p.version,"created_at":p.created_at,"portfolio":p.data}))
+    }
+
+    pub fn restore_portfolio(&self, version: i64, token: Option<&str>) -> Result<Value> {
+        let request = document_request(&json!(["restore", version]));
+        if let Some(result) = self.document_replay(None, token, &request)? {
+            return Ok(extend(result, json!({"restored_from":version})));
+        }
+        if let Err(error) = self.check_context(None, token, false) {
+            if let Some(result) = self.document_replay(None, token, &request)? {
+                return Ok(extend(result, json!({"restored_from":version})));
+            }
+            return Err(error);
+        }
+        let current = self.store.latest_portfolio()?;
+        let p = self.store.portfolio_version(version)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "version_not_found",
+                format!("There is no portfolio version {version}. Nothing was changed."),
+            )
+            .hint("Read watchtower portfolio history for saved versions.")
+        })?;
+        if current.as_ref().is_some_and(|c| c.version == version) {
+            return Ok(extend(
+                self.document_saved(None, version, token.unwrap(), true),
+                json!({"restored_from":version,"already_current":true,"undo":null}),
+            ));
+        }
+        let basis = p.basis.unwrap_or(Value::Null);
+        let write = self.store.add_portfolio_guarded(
+            &self.now(),
+            &p.data,
+            &basis,
+            token.unwrap(),
+            &request,
+        )?;
+        let (new_version, after, replayed) = Self::guarded_version(write, Kind::Portfolio, None)?;
+        Ok(extend(
+            self.document_saved(None, new_version, &after, replayed),
+            json!({"restored_from":version,"portfolio":p.data}),
+        ))
     }
 
     pub fn card(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let card = self.store.latest_card(id)?.ok_or_else(|| {
-            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet.")).hint(
-                format!("Run `watchtower --json context {id}` and write one."),
-            )
+            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet."))
+                .hint(format!("Run `watchtower context {id}` and write one."))
         })?;
         Ok(
             json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}),
@@ -1697,7 +2043,7 @@ impl Watchtower {
             "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
             "tasks": self.tasks(None)?["tasks"],
-            "next": "Write the brief with `watchtower --json portfolio put --file <portfolio.json> --context-token <context_token>`.",
+            "next": "Prepare the brief from this context and save the document to a UTF-8 file. Use portfolio put with --file for that file and --context-token for this context's token.",
         }))
     }
 
@@ -1713,7 +2059,20 @@ impl Watchtower {
         dry_run: bool,
         context_token: Option<&str>,
     ) -> Result<Value> {
-        self.check_context(None, context_token, dry_run)?;
+        let request = document_request(&json!(["put", merge, payload]));
+        if !dry_run {
+            if let Some(result) = self.document_replay(None, context_token, &request)? {
+                return Ok(result);
+            }
+        }
+        if let Err(error) = self.check_context(None, context_token, dry_run) {
+            if !dry_run {
+                if let Some(result) = self.document_replay(None, context_token, &request)? {
+                    return Ok(result);
+                }
+            }
+            return Err(error);
+        }
         let previous = self.store.latest_portfolio()?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|p| &p.data), sent.as_deref());
@@ -1725,7 +2084,7 @@ impl Watchtower {
         )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
             WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint("Fix the listed fields and send it again. `watchtower --json schema portfolio` prints the full schema.")
+                .hint(format!("Fix the listed fields and send it again. {} `watchtower schema portfolio` describes the fields.", if merge { "With --merge, fields marked (from the previous card) were inherited: include corrected versions of those fields too." } else { "" }))
         })?;
         self.validate_item_ids(Kind::Portfolio, None, &clean)?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
@@ -1763,7 +2122,7 @@ impl Watchtower {
                 ),
             )
             .hint(format!(
-                "Use the ids from `watchtower --json portfolio context`: {}.",
+                "Use the ids from `watchtower portfolio context`: {}.",
                 known.join(", ")
             )));
         }
@@ -1776,7 +2135,7 @@ impl Watchtower {
             .collect();
         if !strange.is_empty() {
             return Err(WatchtowerError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
-                .hint("Use the ids from `owner_ideas` in `watchtower --json portfolio context`; the owner may have removed an idea since."));
+                .hint("Use the ids from `owner_ideas` in `watchtower portfolio context`; the owner may have removed an idea since."));
         }
         let mut clean = clean;
         // a brief written later in the week keeps the week's review
@@ -1801,11 +2160,13 @@ impl Watchtower {
             &clean,
             &self.portfolio_basis()?,
             context_token.expect("checked before validation"),
+            &request,
         )?;
-        let version = Self::guarded_version(write, Kind::Portfolio, None)?;
-        Ok(
-            json!({"saved": true, "version": version, "warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
-        )
+        let (version, token, replayed) = Self::guarded_version(write, Kind::Portfolio, None)?;
+        Ok(extend(
+            self.document_saved(None, version, &token, replayed),
+            json!({"portfolio":clean,"warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
+        ))
     }
 
     /// Parks an idea of the owner's; the next brief assesses it.
@@ -1817,19 +2178,47 @@ impl Watchtower {
                 format!("An idea needs 1 to {IDEA_MAX} characters."),
             ));
         }
-        let id = self.store.add_idea(text, &self.now())?;
-        Ok(json!({"id": id, "text": text}))
+        let (id, created) = self.store.add_idea(text, &self.now())?;
+        Ok(
+            json!({"id": id, "text": text, "created": created, "already_exists": !created,
+            "undo": created.then(||format!("watchtower ideas remove {id}"))}),
+        )
     }
 
     pub fn remove_idea(&self, id: i64) -> Result<Value> {
-        if !self.store.remove_idea(id)? {
-            return Err(WatchtowerError::new(
+        let idea = self.store.idea(id)?.ok_or_else(|| {
+            WatchtowerError::new(
                 "idea_not_found",
-                format!("No parked idea with id {id}."),
+                format!("No idea with id {id}. Nothing was changed."),
             )
-            .hint("`watchtower --json ideas list` shows the parked ideas."));
-        }
-        Ok(json!({"removed": id}))
+            .hint("Read `watchtower ideas list` or `watchtower ideas trash` for existing idea ids.")
+        })?;
+        let changed = self.store.set_idea_removed(id, Some(&self.now()))?;
+        let idea = self.store.idea(id)?.unwrap_or(idea);
+        Ok(
+            json!({"removed": id, "idea": idea, "changed": changed, "already_removed": !changed,
+            "undo": changed.then(||format!("watchtower ideas restore {id}"))}),
+        )
+    }
+
+    pub fn ideas_trash(&self) -> Result<Value> {
+        Ok(json!(self.store.removed_ideas()?))
+    }
+
+    pub fn restore_idea(&self, id: i64) -> Result<Value> {
+        let idea = self.store.idea(id)?.ok_or_else(|| {
+            WatchtowerError::new(
+                "idea_not_found",
+                format!("No idea with id {id}. Nothing was changed."),
+            )
+            .hint("Read `watchtower ideas trash` for removed idea ids.")
+        })?;
+        let restored = self.store.set_idea_removed(id, None)?;
+        let idea = self.store.idea(id)?.unwrap_or(idea);
+        Ok(
+            json!({"idea": idea, "restored": restored, "already_active": !restored,
+            "undo": restored.then(||format!("watchtower ideas remove {id}"))}),
+        )
     }
 
     pub fn ideas(&self) -> Result<Value> {
@@ -1844,7 +2233,7 @@ impl Watchtower {
     pub fn portfolio(&self) -> Result<Value> {
         let p = self.store.latest_portfolio()?.ok_or_else(|| {
             WatchtowerError::new("no_portfolio", "No portfolio brief has been written yet.")
-                .hint("Run `watchtower --json portfolio context` and write one.")
+                .hint("Run `watchtower portfolio context` and write one.")
         })?;
         Ok(json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data}))
     }
@@ -1932,8 +2321,11 @@ impl Watchtower {
             None
         };
         let Some(value) = value else {
-            self.store.delete_feedback(item_id)?;
-            return Ok(json!({"item_id": item_id, "value": null}));
+            let receipt = self.store.delete_feedback(item_id, &self.now())?;
+            return Ok(with_receipt(
+                json!({"item_id": item_id, "value": null}),
+                receipt,
+            ));
         };
         let existing = self
             .store
@@ -1949,7 +2341,7 @@ impl Watchtower {
                     format!("No current card or brief has an item with id '{item_id}'."),
                 )
                 .hint(
-                    "Use an id from `watchtower --json card show <id>` or `watchtower --json portfolio show`.",
+                    "Use an existing item ID from the current card or brief. Read watchtower overview for the current projects and portfolio.",
                 )),
             };
         let kind = item
@@ -1964,45 +2356,59 @@ impl Watchtower {
             )
             .hint(format!("Use one of: {}.", allowed.join(", "))));
         }
-        let note = match note {
-            Some(n) => n.trim().to_owned(),
-            None => existing
-                .as_ref()
-                .map(|f| f.note.clone())
-                .unwrap_or_default(),
-        };
-        if value == "answered" && note.is_empty() {
-            return Err(
-                WatchtowerError::new("answer_missing", "An answer needs its text.")
-                    .hint("Send the answer as the note, or mark the question `done`."),
-            );
-        }
         let title = match (&item, &existing) {
             (Some(item), _) => title_of(item),
             (None, Some(f)) => f.title.clone(),
             (None, None) => String::new(),
         };
         let at = self.now();
-        let snoozed_until = if value == "later" {
-            explicit_until
-                .or_else(|| existing.as_ref().and_then(snoozed_until))
-                .or_else(|| Some((self.today() + chrono::Duration::days(SNOOZE_DAYS)).to_string()))
-        } else {
-            None
-        };
-        self.store.set_feedback(&Feedback {
-            item_id: item_id.to_owned(),
-            project_id,
-            title,
-            value: value.to_owned(),
-            at,
-            note: note.clone(),
-            item,
-            snoozed_until: snoozed_until.clone(),
-        })?;
-        Ok(
-            json!({"item_id": item_id, "value": value, "note": note, "snoozed_until": snoozed_until}),
-        )
+        let default_until = (self.today() + chrono::Duration::days(SNOOZE_DAYS)).to_string();
+        let receipt = self
+            .store
+            .set_feedback(
+                &Feedback {
+                    item_id: item_id.to_owned(),
+                    project_id,
+                    title,
+                    value: value.to_owned(),
+                    at,
+                    note: String::new(),
+                    item,
+                    snoozed_until: None,
+                },
+                |current| {
+                    let note = note.map(|note| note.trim().to_owned()).unwrap_or_else(|| {
+                        current
+                            .as_ref()
+                            .map(|feedback| feedback.note.clone())
+                            .unwrap_or_default()
+                    });
+                    if value == "answered" && note.is_empty() {
+                        return None;
+                    }
+                    let until = if value == "later" {
+                        explicit_until
+                            .or_else(|| current.as_ref().and_then(snoozed_until))
+                            .or(Some(default_until))
+                    } else {
+                        None
+                    };
+                    Some((note, until))
+                },
+            )?
+            .ok_or_else(|| {
+                WatchtowerError::new(
+                    "answer_missing",
+                    "An answer needs its text. Nothing was changed.",
+                )
+                .hint("Send the answer as the note, or mark the question done.")
+            })?;
+        // Report the values saved under the transaction, including inherited concurrent edits.
+        let current = &receipt["current"];
+        Ok(with_receipt(
+            json!({"item_id": item_id, "value": current["value"], "note": current["note"], "snoozed_until": current["snoozed_until"]}),
+            receipt,
+        ))
     }
 
     /// The item with this id in the current cards and brief: (its project, the item with its `kind`).
@@ -2112,7 +2518,7 @@ impl Watchtower {
             )
             .hint("Refresh the project and choose one of its current warnings."));
         }
-        self.store.set_warning_ack(
+        let receipt = self.store.set_warning_ack(
             id,
             key,
             note,
@@ -2121,7 +2527,10 @@ impl Watchtower {
                 .unwrap_or(Value::Null),
             &self.now(),
         )?;
-        Ok(json!({"project": id, "key": key, "warnings": self.project_warnings(id)?}))
+        Ok(with_receipt(
+            json!({"project": id, "key": key, "warnings": self.project_warnings(id)?}),
+            receipt,
+        ))
     }
 
     /// Feedback is keyed globally by item id, so an id must remain in its original
@@ -2193,14 +2602,49 @@ impl Watchtower {
         Ok(())
     }
 
-    pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
-        if !PREFS.contains(&key) {
-            return Err(WatchtowerError::new(
+    pub fn validate_pref(&self, key: &str, value: &Value) -> Result<()> {
+        const MODULES: &[&str] = &[
+            "focus", "projects", "waiting", "safety", "recent", "across", "ideas", "pulse", "kpis",
+            "cards", "tasks", "changes", "night", "space", "parking", "week",
+        ];
+        match key {
+            "style"
+                if !value
+                    .as_str()
+                    .is_some_and(|style| ["handover", "board", "handbook"].contains(&style)) =>
+            {
+                Err(
+                    WatchtowerError::new("invalid_pref", "Invalid style. Nothing was changed.")
+                        .hint("Use handover, board or handbook."),
+                )
+            }
+            "hidden_modules"
+                if !value.as_array().is_some_and(|modules| {
+                    modules
+                        .iter()
+                        .all(|m| m.as_str().is_some_and(|m| MODULES.contains(&m)))
+                }) =>
+            {
+                Err(WatchtowerError::new(
+                    "invalid_pref",
+                    "hidden_modules must contain existing module ids. Nothing was changed.",
+                )
+                .hint(format!(
+                    "Use a list of these ids, or an empty list to show everything: {}.",
+                    MODULES.join(", ")
+                )))
+            }
+            key if !PREFS.contains(&key) => Err(WatchtowerError::new(
                 "invalid_pref",
-                format!("Unknown preference '{key}'."),
-            ));
+                format!("Unknown preference '{key}'. Nothing was changed."),
+            )
+            .hint("Editable preferences: style, hidden_modules.")),
+            _ => Ok(()),
         }
-        Ok(self.store.set_pref(key, value)?)
+    }
+
+    pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
+        self.update_prefs(&[(key, value.clone())]).map(drop)
     }
 
     /// The ids of parked ideas the latest brief has not assessed yet.
@@ -2363,19 +2807,31 @@ impl Watchtower {
             "portfolio_version": self.store.latest_portfolio()?.map(|brief| brief.version).unwrap_or(0),
             "portfolio_due": due["portfolio"]["due"],
         });
-        let id = self.store.start_agent_run(&self.now(), &initial)?;
+        let (id, created) = self.store.start_agent_run(&self.now(), &initial)?;
         let mut status = self.agent_run_response(id)?;
-        status["due"] = due;
-        status["next"] = json!(format!("For every project in due.projects: read `watchtower --json context <id>`, study the repository, and save its card with that context_token. Then read `watchtower --json portfolio context` and save the due brief with its context_token. Record failures with `watchtower --json runs fail {id}`. Finish with `watchtower --json runs finish {id}`, even when nothing was due; only complete confirms a successful run."));
+        status["created"] = json!(created);
+        status["already_running"] = json!(!created);
+        status["due"] = due.clone();
+        status["next"] = due["next"]
+            .as_str()
+            .map(|s| json!(s))
+            .unwrap_or_else(|| json!(format!("watchtower runs finish {id}")));
+        status["instruction"] = json!(format!("Process every project in due.projects with the Skill, then the due portfolio brief. Save documents using the token from their corresponding context. If a step cannot be completed, use runs fail for run {id} with --error describing that failure and --project when it affects one project. Finish with watchtower runs finish {id}; only complete confirms a successful run."));
         Ok(status)
     }
 
     fn require_agent_run(&self, id: i64) -> Result<crate::store::StoredAgentRun> {
-        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower --json runs status` to see the latest run, or `watchtower --json runs start` to begin one."))
+        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower runs status` to see the latest run, or `watchtower runs start` to begin one."))
     }
 
     pub fn run_fail(&self, run_id: i64, project_id: Option<&str>, error: &str) -> Result<Value> {
         let run = self.require_agent_run(run_id)?;
+        let error = error.trim();
+        if run.failures[project_id.unwrap_or("@portfolio")]["error"] == error {
+            let mut response = self.agent_run_response(run_id)?;
+            response["already_recorded"] = json!(true);
+            return Ok(response);
+        }
         if run
             .result
             .as_ref()
@@ -2387,7 +2843,6 @@ impl Watchtower {
             )
             .hint("Start another run to record new work or failures."));
         }
-        let error = error.trim();
         if error.is_empty() || error.chars().count() > 2_000 {
             return Err(WatchtowerError::new(
                 "invalid_run_error",
@@ -2435,7 +2890,7 @@ impl Watchtower {
             }
         }
         Err(WatchtowerError::new("run_conflict", "The run or its project evidence kept changing. No completion was recorded.")
-            .hint(format!("Inspect `watchtower --json runs status` and retry `watchtower --json runs finish {run_id}` after current writes finish.")))
+            .hint(format!("Inspect `watchtower runs status` and retry `watchtower runs finish {run_id}` after current writes finish.")))
     }
 
     fn agent_run_response(&self, run_id: i64) -> Result<Value> {
@@ -2460,7 +2915,7 @@ impl Watchtower {
             .filter_map(|project| project["id"].as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower --json runs status` und `watchtower --json due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler mit `watchtower --json runs fail {}`. Schließe mit `watchtower --json runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
+        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower runs status` und `watchtower due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler für Lauf {} über runs fail mit --error und deiner Fehlerbeschreibung; bei einem Projekt zusätzlich --project mit dessen ID. Schließe mit `watchtower runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
     }
 
     fn pending_run_replies(
@@ -2951,9 +3406,6 @@ impl Watchtower {
         let done_when = task_text(&payload, "done_when", false, 2000)?;
         let source = task_text(&payload, "source_id", false, 1000)?;
         let source_id = (!source.is_empty()).then_some(source);
-        let source_key = source_id
-            .as_ref()
-            .map(|source| json!([projects, source]).to_string());
         let at = self.now();
         let data = json!({
             "projects": projects, "project_snapshots": project_snapshots, "source_id": source_id, "title": title, "why": why,
@@ -2963,7 +3415,7 @@ impl Watchtower {
         });
         let (task, created) = self
             .store
-            .create_tracked_task(source_key.as_deref(), &data)?;
+            .create_tracked_task(Some(&task_source_key(&data)), &data)?;
         Ok(json!({"created": created, "task": task}))
     }
 
@@ -2993,6 +3445,7 @@ impl Watchtower {
         result: &str,
         evidence: &str,
     ) -> Result<Value> {
+        let mut task = self.tracked_task(id)?;
         let target = match status {
             "done" => "review",
             "blocked" => "blocked",
@@ -3006,7 +3459,12 @@ impl Watchtower {
             target == "review",
             4000,
         )?;
-        let mut task = self.tracked_task(id)?;
+        if task["result"] == result
+            && task["result_evidence"] == evidence
+            && (task["status"] == target || (target == "review" && task["status"] == "done"))
+        {
+            return Ok(json!({"task":task,"already_reported":true}));
+        }
         if !active_task(&task) {
             return Err(WatchtowerError::new(
                 "invalid_task_transition",
@@ -3057,12 +3515,10 @@ impl Watchtower {
                 .hint("Confirm done only after an agent report is ready for review. Reopen a completed task before cancelling it."));
         }
         if status == "assigned"
-            && !task["source_id"].is_null()
             && self.store.tasks()?.iter().any(|other| {
                 other["id"] != task["id"]
                     && active_task(other)
-                    && other["source_id"] == task["source_id"]
-                    && other["projects"] == task["projects"]
+                    && task_source_key(other) == task_source_key(&task)
             })
         {
             return Err(WatchtowerError::new(
@@ -3087,7 +3543,7 @@ impl Watchtower {
     fn tracked_task(&self, id: i64) -> Result<Value> {
         self.store.task(id)?.ok_or_else(|| {
             WatchtowerError::new("unknown_task", format!("Task {id} does not exist."))
-                .hint("Use `watchtower --json tasks list` to find the current task ids.")
+                .hint("Use `watchtower tasks list` to find the current task ids.")
         })
     }
 
@@ -3115,6 +3571,20 @@ impl Watchtower {
             .hint("Reload the task and check the latest owner decision before retrying."));
         }
         Ok(json!({"task": task}))
+    }
+}
+
+fn task_source_key(task: &Value) -> String {
+    if task["source_id"].is_string() {
+        json!([task["projects"], task["source_id"]]).to_string()
+    } else {
+        format!(
+            "manual:{}",
+            document_request(&pick(
+                task,
+                &["projects", "title", "why", "evidence", "done_when"]
+            ))
+        )
     }
 }
 

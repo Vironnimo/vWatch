@@ -85,6 +85,11 @@ async fn restore_feedback(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn undo(app: State<'_, AppState>, token: String) -> Reply {
+    work(&app, move |s| s.undo(&token)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn set_task_status(
     app: State<'_, AppState>,
     id: i64,
@@ -146,6 +151,11 @@ async fn remove_idea(app: State<'_, AppState>, id: i64) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn restore_idea(app: State<'_, AppState>, id: i64) -> Reply {
+    work(&app, move |s| s.restore_idea(id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn set_goal(
     app: State<'_, AppState>,
     id: String,
@@ -176,6 +186,11 @@ async fn update_project(
 #[tauri::command(rename_all = "snake_case")]
 async fn remove_project(app: State<'_, AppState>, id: String) -> Reply {
     work(&app, move |s| s.remove_project(&id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn restore_project(app: State<'_, AppState>, id: String) -> Reply {
+    work(&app, move |s| s.restore_project(&id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -307,6 +322,7 @@ pub fn run() {
             set_feedback,
             create_task,
             restore_feedback,
+            undo,
             set_task_status,
             set_warning_ack,
             mark_changes_read,
@@ -315,10 +331,12 @@ pub fn run() {
             set_status,
             add_idea,
             remove_idea,
+            restore_idea,
             set_goal,
             rename_project,
             update_project,
             remove_project,
+            restore_project,
             discover,
             add_projects,
             pick_folder,

@@ -87,7 +87,8 @@ fn handoff_keeps_its_snapshot_until_the_owner_confirms_the_result() {
             "cargo test export: 4 Tests grün; Commit abc123",
         )
         .unwrap();
-    assert_eq!(repeated, report);
+    assert_eq!(repeated["task"], report["task"]);
+    assert_eq!(repeated["already_reported"], true);
     clock.advance(Duration::minutes(2));
     let confirmed = svc.set_task_status(id, "done").unwrap();
     assert_eq!(confirmed["task"]["status"], "done");
@@ -99,7 +100,10 @@ fn handoff_keeps_its_snapshot_until_the_owner_confirms_the_result() {
             .code,
         "invalid_task_transition"
     );
-    assert_eq!(svc.set_task_status(id, "done").unwrap(), confirmed);
+    assert_eq!(
+        svc.set_task_status(id, "done").unwrap()["task"],
+        confirmed["task"]
+    );
     let (reopened_service, _) = service(tmp.path());
     assert_eq!(
         reopened_service.tasks(None).unwrap()["tasks"][0],

@@ -306,6 +306,8 @@ fn repairing_an_older_run_reports_its_own_outcome() {
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     let older = run_id(&svc.run_start(false).unwrap());
+    // A finished incomplete run remains repairable while a later run is active.
+    assert_ne!(svc.run_finish(older).unwrap()["state"], "complete");
     let newer = run_id(&svc.run_start(false).unwrap());
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
@@ -497,11 +499,12 @@ fn simultaneous_starts_return_their_own_run_identity() {
             .map(|handle| handle.join().unwrap())
             .collect::<Vec<_>>()
     });
-    assert_ne!(starts[0]["run_id"], starts[1]["run_id"]);
+    assert_eq!(starts[0]["run_id"], starts[1]["run_id"]);
+    assert_eq!(starts.iter().filter(|s| s["created"] == true).count(), 1);
     for start in starts {
         let id = start["run_id"].as_i64().unwrap();
         assert_eq!(start["run"]["id"], id);
-        assert!(start["next"]
+        assert!(start["instruction"]
             .as_str()
             .unwrap()
             .contains(&format!("runs finish {id}")));

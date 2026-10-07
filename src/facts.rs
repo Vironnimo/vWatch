@@ -50,6 +50,13 @@ fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -> (bool, St
     let mut cmd = Command::new(program);
     cmd.args(args)
         .current_dir(cwd)
+        .envs([
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GCM_INTERACTIVE", "never"),
+            ("GIT_PAGER", "cat"),
+            ("PAGER", "cat"),
+            ("GH_PROMPT_DISABLED", "1"),
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

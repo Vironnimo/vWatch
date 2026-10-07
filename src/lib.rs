@@ -8,7 +8,10 @@
 pub mod app;
 pub mod cards;
 pub mod cli;
+pub mod cli_jobs;
 mod cli_output;
+pub mod cli_paging;
+pub mod cli_usage;
 pub mod facts;
 pub mod service;
 pub mod store;

@@ -1,21 +1,49 @@
-//! Human-facing CLI views. Machine output is selected explicitly with --json.
-
-use serde_json::Value;
+//! Plain output shared by people and agents. Stored content is always data.
+use serde_json::{json, Value};
 
 pub(super) fn human(command: &str, data: &Value) -> String {
     let mut out = String::new();
     match command {
+        "projects.add" if data["added"].is_array() => {
+            let errors = if data["errors"].is_array() {
+                &data["errors"]
+            } else {
+                &data["failed"]
+            };
+            let added = list(&data["added"]);
+            let failed = list(errors);
+            let already = list(&data["already_registered"]).len();
+            let refresh_failed = list(&data["refreshed"])
+                .iter()
+                .filter(|item| item["ok"] != true)
+                .count();
+            if failed.is_empty() && refresh_failed == 0 {
+                line(
+                    &mut out,
+                    0,
+                    &format!(
+                        "{} projects registered; {already} were already present.",
+                        added.len()
+                    ),
+                );
+            } else {
+                line(&mut out, 0, &format!("Error: {} projects registered; {} registrations and {refresh_failed} facts measurements failed. Registered projects remain saved.", added.len(), failed.len()));
+            }
+            field(&mut out, "Registered projects", &data["added"], 0);
+            if !failed.is_empty() {
+                field(&mut out, "Failures", errors, 0);
+            }
+            for item in list(&data["refreshed"]) {
+                refresh_item(&mut out, item, 0);
+            }
+        }
         "status" => {
             line(
                 &mut out,
                 0,
-                &format!("Watchtower {}", text(&data["version"])),
-            );
-            line(
-                &mut out,
-                0,
                 &format!(
-                    "{} Projekte, davon {} mit Karte.",
+                    "Watchtower {}: {} projects, {} with a card.",
+                    text(&data["version"]),
                     text(&data["projects"]),
                     text(&data["with_card"])
                 ),
@@ -23,273 +51,502 @@ pub(super) fn human(command: &str, data: &Value) -> String {
             fields(
                 &mut out,
                 data,
-                &["data_dir", "database", "exe", "skill_dir"],
+                &[
+                    "now",
+                    "data_dir",
+                    "instance_source",
+                    "database",
+                    "exe",
+                    "skill_dir",
+                    "logs",
+                ],
                 0,
             );
             if data["projects"] == 0 {
-                line(
-                    &mut out,
-                    0,
-                    "Füge ein Projekt im Fenster oder mit watchtower projects add <Ordner> hinzu.",
-                );
+                line(&mut out, 0, "No projects are registered. Add the existing project folder with projects add.");
             }
         }
-        "projects.list" => {
-            let projects = list(&data["projects"]);
-            line(
-                &mut out,
-                0,
-                &format!("{} Projekte registriert.", projects.len()),
-            );
-            for project in projects {
-                project_details(&mut out, project, 0);
-                line(
-                    &mut out,
-                    1,
-                    if project["has_card"] == true {
-                        "Karte vorhanden"
-                    } else {
-                        "Noch keine Karte"
-                    },
-                );
-                fields(
-                    &mut out,
-                    project,
-                    &["card_updated_at", "facts_collected_at"],
-                    1,
-                );
-            }
+        "projects.list" | "projects.removed" | "projects.trash" => table(
+            &mut out,
+            list(&data["projects"]),
+            if command == "projects.list" {
+                "registered projects, including archived projects"
+            } else {
+                "removed projects"
+            },
+            "oldest registration first",
+            &["id", "name", "status", "has_card"],
+        ),
+        "projects.show" => {
+            line(&mut out, 0, "Project record and saved history.");
+            tree(&mut out, &data["project"], 0);
         }
         "projects.add" | "projects.rename" | "projects.update" | "projects.status"
-        | "projects.goal" => {
-            let p = &data["project"];
-            let action = match command {
-                "projects.add" => "Projekt registriert.",
-                "projects.rename" => "Projekt umbenannt. Karten und Historie bleiben erhalten.",
-                "projects.update" if data["changed"] == false => "Projekt unverändert.",
-                "projects.update" => "Projekt aktualisiert. Karten und Historie bleiben erhalten.",
-                "projects.status" => "Projektstatus gespeichert.",
-                "projects.goal" if !present(&p["goal"]) => "Projektziel entfernt.",
-                _ => "Projektziel gespeichert.",
+        | "projects.goal" | "projects.restore" => {
+            let refresh = if data["facts_refresh"].is_object() {
+                &data["facts_refresh"]
+            } else {
+                &data["project"]["facts"]
             };
-            line(&mut out, 0, action);
-            project_details(&mut out, p, 0);
-            if present(&p["warning"]) {
-                field(&mut out, "Warnung", &p["warning"], 0);
+            let action = match command {
+                "projects.add"
+                    if data["project"]["already_exists"] == true
+                        || data["already_exists"] == true =>
+                {
+                    "Project already registered"
+                }
+                "projects.add" => "Project registered",
+                "projects.rename" => "Project renamed; its ID and saved history are unchanged",
+                "projects.update" if data["changed"] == false => "Project unchanged",
+                "projects.update" => "Project updated; its ID and saved history are unchanged",
+                "projects.status" => "Project status saved",
+                "projects.restore" if data["already_active"] == true => "Project already active",
+                "projects.restore" => "Project restored with its saved history",
+                _ if data["project"]["goal"].is_null() || data["project"]["goal"] == "" => {
+                    "Project goal cleared"
+                }
+                _ => "Project goal saved",
+            };
+            if refresh["ok"] == false {
+                line(&mut out, 0, &format!("Error: {action}, but facts could not be refreshed. The project change remains saved."));
+            } else {
+                line(&mut out, 0, &format!("{action}."));
             }
-            if !p["facts"].is_null() {
-                refresh_item(&mut out, &p["facts"], 0);
-            }
-            if !data["facts_refresh"].is_null() {
-                refresh_item(&mut out, &data["facts_refresh"], 0);
+            tree_except(&mut out, &data["project"], &["facts"], 0);
+            if refresh.is_object() {
+                refresh_item(&mut out, refresh, 0);
             }
         }
-        "projects.remove" => line(
-            &mut out,
-            0,
-            &format!(
-                "Projekt {} und seine gespeicherten Karten entfernt.",
-                text(&data["removed"])
-            ),
-        ),
-        "projects.discover" => {
-            field(&mut out, "Durchsuchter Ordner", &data["folder"], 0);
-            let found = list(&data["candidates"]);
-            line(
-                &mut out,
-                0,
-                &format!("{} neue Projektordner gefunden.", found.len()),
-            );
-            for p in found {
-                line(
-                    &mut out,
-                    0,
-                    &format!(
-                        "- {}{}",
-                        text(&p["name"]),
-                        if p["recommended"] == true {
-                            " (empfohlen)"
-                        } else {
-                            ""
-                        }
-                    ),
-                );
-                fields(&mut out, p, &["path", "suggested_id", "last_commit"], 1);
-            }
-            field(&mut out, "Bereits registriert", &data["already_watched"], 0);
-        }
-        "facts.refresh" => {
-            let refreshed = list(&data["refreshed"]);
+        "projects.remove" => {
             line(
                 &mut out,
                 0,
                 &format!(
-                    "Faktenmessung für {} Projekte abgeschlossen.",
-                    refreshed.len()
+                    "Project {} {} from the watch list. Its saved data can be restored.",
+                    text(&data["removed"]),
+                    if data["already_removed"] == true {
+                        "already removed"
+                    } else {
+                        "removed"
+                    }
                 ),
             );
-            for item in refreshed {
+            tree(&mut out, &data["project"], 0);
+        }
+        "projects.visit" => {
+            line(&mut out, 0, "Project visit recorded.");
+            tree(&mut out, data, 0);
+        }
+        "projects.discover" => {
+            table(
+                &mut out,
+                list(&data["candidates"]),
+                "unregistered repositories in the searched folders",
+                "selected repository first, then newest commit first",
+                &["suggested_id", "name", "last_commit", "recommended", "path"],
+            );
+            field(&mut out, "Searched folder", &data["folder"], 0);
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "Note: {} already registered repositories were excluded.",
+                    text(&data["already_watched"])
+                ),
+            );
+        }
+        "facts.refresh" => {
+            let rows = list(&data["refreshed"]);
+            let failed = rows.iter().filter(|row| row["ok"] != true).count();
+            if failed == 0 {
+                line(
+                    &mut out,
+                    0,
+                    &format!("Facts refreshed for {} projects.", rows.len()),
+                );
+            } else {
+                line(&mut out, 0, &format!("Error: facts refreshed for {} of {} projects; {failed} failed. Successful measurements remain saved.", rows.len()-failed, rows.len()));
+            }
+            for item in rows {
                 refresh_item(&mut out, item, 0);
             }
         }
-        "facts.show" => facts(&mut out, &data["facts"], 0),
-        "due" => due(&mut out, data, 0),
-        "context" => {
-            line(&mut out, 0, "Projektkontext");
-            project_details(&mut out, &data["project"], 0);
-            facts(&mut out, &data["facts"], 0);
-            if data["previous_card"].is_null() {
-                line(&mut out, 0, "Noch keine Karte vorhanden.");
-            } else {
-                document(
+        "facts.show" => {
+            line(
+                &mut out,
+                0,
+                if data["facts"]["ok"] == false {
+                    "Stored facts: the latest measurement failed."
+                } else {
+                    "Stored facts from the latest measurement."
+                },
+            );
+            tree(&mut out, &data["facts"], 0);
+        }
+        "due" => due(&mut out, data),
+        "context" | "portfolio.context" => {
+            line(
+                &mut out,
+                0,
+                if command == "context" {
+                    "Project context for writing its card."
+                } else {
+                    "Portfolio context for writing the brief."
+                },
+            );
+            field(&mut out, "Context token", &data["context_token"], 0);
+            if command == "portfolio.context" {
+                line(
                     &mut out,
-                    &data["previous_card"],
-                    "card",
-                    "Bisherige Karte",
                     0,
+                    "Note: archived and removed projects are excluded from the portfolio.",
                 );
             }
-            fields(
-                &mut out,
-                data,
-                &[
-                    "since_previous_card",
-                    "new_fields",
-                    "feedback",
-                    "feedback_summary",
-                    "tasks",
-                    "warning_acknowledgements",
-                    "context_token",
-                ],
-                0,
-            );
-            line(&mut out, 0, &format!("Karte speichern: watchtower card put {} --file <Karte.json> --context-token <Kontext-Token>", text(&data["project"]["id"])));
+            tree_except(&mut out, data, &["context_token"], 0);
         }
-        "card.show" => document(&mut out, data, "card", "Projektkarte", 0),
-        "portfolio.show" => document(&mut out, data, "portfolio", "Portfolio-Brief", 0),
-        "card.put" | "portfolio.put" => {
-            let name = if command == "card.put" {
-                "Karte"
+        "card.show" | "portfolio.show" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} version {}.",
+                    if command == "card.show" {
+                        "Project card"
+                    } else {
+                        "Portfolio brief"
+                    },
+                    text(&data["version"])
+                ),
+            );
+            tree(&mut out, data, 0);
+        }
+        "card.put" | "portfolio.put" | "card.restore" | "portfolio.restore" => {
+            let subject = if command.starts_with("card.") {
+                "Card"
             } else {
-                "Portfolio-Brief"
+                "Portfolio brief"
             };
             if data["dry_run"] == true {
                 line(
                     &mut out,
                     0,
-                    &format!("{name} geprüft. Probelauf: nichts gespeichert."),
+                    &format!("{subject} is valid. Dry run: nothing was saved."),
+                );
+            } else if data["already_saved"] == true || data["saved"] == false {
+                line(
+                    &mut out,
+                    0,
+                    &format!("{subject} unchanged; no version was added."),
                 );
             } else {
                 line(
                     &mut out,
                     0,
-                    &format!("{name} gespeichert, Version {}.", text(&data["version"])),
+                    &format!("{subject} saved as version {}.", text(&data["version"])),
                 );
             }
-            fields(
+            if let Some(token) = data.get("context_token") {
+                field(&mut out, "Context token", token, 0);
+            }
+            tree_except(
                 &mut out,
                 data,
-                &[
-                    "project",
-                    "changed_fields",
-                    "unfilled_fields",
-                    "warnings",
-                    "items",
-                ],
+                &["saved", "dry_run", "already_saved", "context_token"],
                 0,
             );
         }
-        "portfolio.context" => {
-            line(&mut out, 0, "Kontext für den Portfolio-Brief");
-            fields(
-                &mut out,
-                data,
-                &["today", "review_week", "owner_last_opened"],
-                0,
-            );
-            for p in list(&data["projects"]) {
-                project_details(&mut out, p, 0);
-                field(&mut out, "Fakten", &p["facts"], 1);
-                if p["card"].is_null() {
-                    line(&mut out, 1, "Noch keine Karte vorhanden.");
-                } else {
-                    field(&mut out, "Karte", &p["card"], 1);
-                }
-                field(
-                    &mut out,
-                    "Bewusst bestätigte Hinweise",
-                    &p["warning_acknowledgements"],
-                    1,
-                );
-            }
-            if data["previous_portfolio"].is_null() {
-                line(&mut out, 0, "Noch kein Portfolio-Brief vorhanden.");
-            } else {
-                document(
-                    &mut out,
-                    &data["previous_portfolio"],
-                    "portfolio",
-                    "Bisheriger Portfolio-Brief",
-                    0,
-                );
-            }
-            fields(
-                &mut out,
-                data,
-                &[
-                    "owner_ideas",
-                    "feedback",
-                    "feedback_summary",
-                    "tasks",
-                    "context_token",
-                ],
-                0,
-            );
-            line(&mut out, 0, "Brief speichern: watchtower portfolio put --file <Brief.json> --context-token <Kontext-Token>");
+        "card.history" | "portfolio.history" => {
+            line(&mut out, 0, "Saved document versions, oldest first.");
+            field(&mut out, "Context token", &data["context_token"], 0);
+            tree_except(&mut out, data, &["context_token"], 0);
         }
-        "feedback" => collection(&mut out, "Rückmeldungen", &data["feedback"]),
-        "ideas.list" => collection(&mut out, "Geparkte Ideen", &data["ideas"]),
-        "ideas.add" => {
-            line(&mut out, 0, "Idee geparkt.");
-            tree(&mut out, &data["idea"], 0);
-        }
-        "ideas.remove" => line(
+        "feedback" | "feedback.list" => collection(
             &mut out,
-            0,
-            &format!("Idee {} entfernt.", text(&data["removed"])),
+            "feedback entries",
+            "newest feedback first",
+            &data["feedback"],
         ),
-        "runs.start" | "runs.status" | "runs.fail" | "runs.finish" => run(&mut out, command, data),
-        "tasks.list" => collection(&mut out, "Aufträge", &data["tasks"]),
-        "tasks.report" => {
+        "feedback.set" | "feedback.clear" | "feedback.restore" => {
             line(
                 &mut out,
                 0,
-                if data["task"]["status"] == "review" {
-                    "Ergebnis gemeldet. Deine Bestätigung steht noch aus."
+                match command {
+                    "feedback.clear" => "Feedback cleared.",
+                    "feedback.restore" => "Feedback restored.",
+                    _ => "Feedback saved.",
+                },
+            );
+            tree(&mut out, data, 0);
+        }
+        "ideas.list" | "ideas.removed" | "ideas.trash" => collection(
+            &mut out,
+            if command == "ideas.list" {
+                "parked ideas"
+            } else {
+                "removed ideas"
+            },
+            "oldest ID first",
+            &data["ideas"],
+        ),
+        "ideas.add" | "ideas.restore" => {
+            line(
+                &mut out,
+                0,
+                if data["idea"]["already_exists"] == true || data["already_active"] == true {
+                    "Idea already present."
+                } else if command == "ideas.add" {
+                    "Idea saved."
                 } else {
-                    "Blockierung gemeldet."
+                    "Idea restored."
+                },
+            );
+            tree(&mut out, &data["idea"], 0);
+        }
+        "ideas.remove" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "Idea {} {}; it can be restored.",
+                    text(&data["removed"]),
+                    if data["already_removed"] == true {
+                        "already removed"
+                    } else {
+                        "removed"
+                    }
+                ),
+            );
+            tree(&mut out, &data["idea"], 0);
+        }
+        "runs.start" | "runs.status" | "runs.fail" | "runs.finish" => run(&mut out, command, data),
+        "tasks.list" => table(
+            &mut out,
+            list(&data["tasks"]),
+            "tasks matching the selection, including completed and cancelled tasks",
+            "newest ID first",
+            &["id", "status", "revision", "title", "projects"],
+        ),
+        "tasks.create" | "tasks.show" | "tasks.report" | "tasks.confirm" | "tasks.reopen"
+        | "tasks.cancel" => {
+            line(
+                &mut out,
+                0,
+                match command {
+                    "tasks.create" if data["created"] == false => "Task already exists.",
+                    "tasks.create" => "Task created.",
+                    "tasks.report" if data["already_reported"] == true && data["task"]["status"] == "done" => "Task result was already reported and confirmed by the user. Current state: done.",
+                    "tasks.report" if data["already_reported"] == true && data["task"]["status"] == "review" => "Task result was already reported. Current state: review; the user's confirmation is still required.",
+                    "tasks.report" if data["already_reported"] == true && data["task"]["status"] == "blocked" => "Task blockage was already reported. Current state: blocked.",
+                    "tasks.report" if data["task"]["status"] == "review" => {
+                        "Task result reported; the user's confirmation is still required."
+                    }
+                    "tasks.report" => "Task blockage reported.",
+                    "tasks.confirm" => "Task result confirmed.",
+                    "tasks.reopen" => "Task reopened.",
+                    "tasks.cancel" => "Task cancelled.",
+                    _ => "Task record, result and history.",
                 },
             );
             tree(&mut out, &data["task"], 0);
+        }
+        "warnings.list" | "warnings.acknowledge" | "warnings.clear" => {
+            line(
+                &mut out,
+                0,
+                match command {
+                    "warnings.acknowledge" => {
+                        "Warning acknowledgement saved; measured facts remain visible."
+                    }
+                    "warnings.clear" => "Warning acknowledgement cleared.",
+                    _ => "Measured warnings and deliberate acknowledgements.",
+                },
+            );
+            tree(&mut out, data, 0);
+        }
+        "changes.show" | "changes.read" => {
+            line(
+                &mut out,
+                0,
+                if command == "changes.read" {
+                    "Changes marked as read."
+                } else {
+                    "Changes since the explicitly acknowledged snapshot."
+                },
+            );
+            tree(&mut out, &data["changes"], 0);
+        }
+        "settings.show" | "settings.update" => {
+            line(
+                &mut out,
+                0,
+                if command == "settings.update" {
+                    "Settings saved."
+                } else {
+                    "Watchtower settings."
+                },
+            );
+            tree(&mut out, data, 0);
+        }
+        "overview" => overview(&mut out, data),
+        "undo" => {
+            line(
+                &mut out,
+                0,
+                if data["changed"] == false {
+                    "Change already reverted."
+                } else {
+                    "Change reverted."
+                },
+            );
+            if let Some(note) = data["note"].as_str() {
+                line(&mut out, 0, &format!("Note: {}", escaped(note)));
+            }
+            fields(&mut out, data, &["target", "current", "notes"], 0);
+        }
+        "usage" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} recorded calls in the selected usage period.",
+                    text(&data["calls"])
+                ),
+            );
+            line(&mut out, 0, "Note: command shapes contain no argument values. Repeated shapes do not prove repeated effects.");
+            if data["older_events_omitted"] == true {
+                line(
+                    &mut out,
+                    0,
+                    "Note: older log events are omitted; these counts cover the retained events.",
+                );
+            }
+            fields(&mut out, data, &["since", "log", "invalid_log_lines"], 0);
+            table(
+                &mut out,
+                list(&data["commands"]),
+                "command shapes",
+                "command name order",
+                &[
+                    "command",
+                    "calls",
+                    "failed",
+                    "invalid",
+                    "unknown",
+                    "not_finished",
+                    "large_outputs",
+                ],
+            );
+            fields(
+                &mut out,
+                data,
+                &[
+                    "repeated_command_shapes",
+                    "list_then_change",
+                    "show_after_change",
+                    "invalid_call_flags",
+                    "parent_processes",
+                    "notes",
+                ],
+                0,
+            );
+        }
+        "jobs.list" => table(
+            &mut out,
+            list(&data["jobs"]),
+            "saved jobs in this instance",
+            "newest first",
+            &["token", "state", "command", "created_at"],
+        ),
+        "jobs.status" | "jobs.wait" => {
+            let job = &data["job"];
+            line(&mut out, 0, match job["state"].as_str() {
+                Some("running") => "Not finished: the command is still running; it has not returned a result.",
+                Some("completed") if data["result"]["exit_code"] == 0 => "Command returned successfully; its recorded result is available.",
+                Some("completed") => "Error: the command returned a failure; its recorded result is available.",
+                _ => "Error: no completed result or active worker could be confirmed; the outcome is unknown. Changes can have happened.",
+            });
+            tree(&mut out, job, 0);
+            fields(&mut out, &data["result"], &["exit_code"], 0);
+            if let Some(next) = data["next"].as_str().filter(|value| safe_command(value)) {
+                line(&mut out, 0, &format!("Next: {next}"));
+            }
+        }
+        "activity" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} latest recorded calls of {} retained calls, newest first.",
+                    list(&data["activity"]).len(),
+                    text(&data["total_recorded_calls"])
+                ),
+            );
+            line(&mut out, 0, "Note: a command result does not confirm a complete daily run. Unknown means the result was not recorded; changes can still have happened.");
+            if data["older_events_omitted"] == true {
+                line(&mut out, 0, "Note: older log events are omitted.");
+            }
+            table(
+                &mut out,
+                list(&data["activity"]),
+                "recent calls (at most 20)",
+                "newest first",
+                &["at", "command", "targets", "outcome", "duration_ms"],
+            );
+            fields(&mut out, data, &["invalid_log_lines"], 0);
+            line(&mut out, 0, "For a stopped command, inspect its job or current project, document or run before repeating a write.");
         }
         "schema.card" | "schema.portfolio" => {
             line(
                 &mut out,
                 0,
                 if command == "schema.card" {
-                    "Felder einer Projektkarte"
+                    "Project card fields and limits."
                 } else {
-                    "Felder eines Portfolio-Briefs"
+                    "Portfolio brief fields and limits."
                 },
             );
             line(
                 &mut out,
                 0,
-                "Pflichtfelder sind markiert. Feldnamen werden beim Schreiben exakt so verwendet.",
+                "Use the exact field names below in the document. Required fields are marked.",
             );
             schema_fields(&mut out, &data["schema"], "", 0);
         }
-        _ => tree(&mut out, data, 0),
+        _ => {
+            line(&mut out, 0, "Command result.");
+            tree(&mut out, data, 0);
+        }
+    }
+    if command == "projects.list" && data["query"].is_string() {
+        line(
+            &mut out,
+            0,
+            "Note: only projects matching the supplied query are shown.",
+        );
+        field(&mut out, "Query", &data["query"], 0);
+    }
+    if matches!(command, "context" | "portfolio.context") {
+        if let Some(instruction) = data["next"]
+            .as_str()
+            .filter(|value| !value.starts_with("watchtower "))
+        {
+            line(&mut out, 0, &escaped(instruction));
+        }
+    }
+    if let Some(undo) = data
+        .get("undo")
+        .or_else(|| data.get("project").and_then(|v| v.get("undo")))
+        .or_else(|| data.get("task").and_then(|v| v.get("undo")))
+        .or_else(|| data.get("idea").and_then(|v| v.get("undo")))
+        .and_then(Value::as_str)
+        .filter(|value| safe_command(value))
+    {
+        line(&mut out, 0, &format!("Undo: {undo}"));
+    }
+    if matches!(command, "due" | "runs.start" | "undo") {
+        if let Some(next) = data["next"].as_str().filter(|value| safe_command(value)) {
+            line(&mut out, 0, &format!("Next: {next}"));
+        }
     }
     out.trim_end().to_owned()
 }
@@ -298,330 +555,284 @@ fn list(value: &Value) -> &[Value] {
     value.as_array().map(Vec::as_slice).unwrap_or(&[])
 }
 
-fn present(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => o.values().any(present),
-        _ => true,
+/// A heading or table cell never introduces a line or terminal command.
+fn escaped(value: &str) -> String {
+    let mut out = String::new();
+    for c in value.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if c.is_control()
+                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}') =>
+            {
+                out.push_str(&format!("\\u{{{:x}}}", c as u32))
+            }
+            _ => out.push(c),
+        }
     }
+    out
 }
-
 fn text(value: &Value) -> String {
     match value {
-        Value::String(s) => s.clone(),
+        Value::String(s) => {
+            if s.is_empty() {
+                "-".into()
+            } else {
+                escaped(s)
+            }
+        }
         Value::Number(n) => n.to_string(),
-        Value::Bool(true) => "ja".into(),
-        Value::Bool(false) => "nein".into(),
-        Value::Null => "unbekannt".into(),
-        _ => String::new(),
+        Value::Bool(b) => if *b { "yes" } else { "no" }.into(),
+        Value::Null => "-".into(),
+        Value::Array(items) if items.iter().all(|v| !v.is_object() && !v.is_array()) => {
+            items.iter().map(text).collect::<Vec<_>>().join(", ")
+        }
+        _ => "-".into(),
     }
 }
-
 fn line(out: &mut String, depth: usize, content: &str) {
-    for part in content.lines() {
-        out.push_str(&"  ".repeat(depth));
-        out.push_str(part);
-        out.push('\n');
-    }
+    out.push_str(&"  ".repeat(depth));
+    out.push_str(content);
+    out.push('\n');
 }
-
 fn fields(out: &mut String, data: &Value, keys: &[&str], depth: usize) {
     for key in keys {
-        field_key(out, key, &data[*key], depth);
-    }
-}
-
-fn field_key(out: &mut String, key: &str, value: &Value, depth: usize) {
-    if !present(value)
-        || matches!(
-            key,
-            "ok" | "fingerprint" | "dirty_fingerprint" | "identity_revision" | "revision" | "next"
-        )
-    {
-        return;
-    }
-    if matches!(
-        key,
-        "changes" | "new_fields" | "changed_fields" | "unfilled_fields" | "changed_since_brief"
-    ) && value.is_array()
-        && list(value).iter().all(Value::is_string)
-    {
-        line(out, depth, &format!("{}:", label(key)));
-        for name in list(value).iter().filter_map(Value::as_str) {
-            let parts = name
-                .split('.')
-                .map(|part| label(part.trim_end_matches("[]")))
-                .collect::<Vec<_>>();
-            line(out, depth + 1, &format!("- {}", parts.join(" / ")));
-        }
-        return;
-    }
-    if let Some(raw) = value.as_str() {
-        if matches!(
-            key,
-            "status"
-                | "state"
-                | "phase"
-                | "value"
-                | "reason"
-                | "problem"
-                | "verdict"
-                | "severity"
-                | "effort"
-                | "kind"
-                | "type"
-        ) {
-            line(out, depth, &format!("{}: {}", label(key), meaning(raw)));
-            return;
+        if let Some(value) = data.get(*key) {
+            field(out, &label(key), value, depth);
         }
     }
-    field(out, &label(key), value, depth);
 }
-
 fn field(out: &mut String, title: &str, value: &Value, depth: usize) {
-    if !present(value) {
-        return;
-    }
+    let title = escaped(title);
     match value {
-        Value::Object(_) | Value::Array(_) => {
+        Value::Object(map) if !map.is_empty() => {
             line(out, depth, &format!("{title}:"));
             tree(out, value, depth + 1);
+        }
+        Value::Array(items) if !items.is_empty() => {
+            line(out, depth, &format!("{title}: {} entries", items.len()));
+            tree(out, value, depth + 1);
+        }
+        Value::Object(_) | Value::Array(_) => line(out, depth, &format!("{title}: none")),
+        Value::String(s) if s.contains('\n') => {
+            line(out, depth, &format!("{title}:"));
+            for part in s.split('\n') {
+                line(out, depth + 1, &escaped(part));
+            }
         }
         _ => line(out, depth, &format!("{title}: {}", text(value))),
     }
 }
-
-/// Nested documents retain all content, using labels and list items rather than serialization.
 fn tree(out: &mut String, value: &Value, depth: usize) {
+    tree_except(out, value, &[], depth);
+}
+fn tree_except(out: &mut String, value: &Value, excluded: &[&str], depth: usize) {
     match value {
         Value::Object(map) => {
             for (key, value) in map {
-                field_key(out, key, value, depth);
+                // Service recipes can contain placeholders. The operating Skill owns
+                // recipes; they are not executable continuations of this output.
+                if excluded.contains(&key.as_str())
+                    || matches!(key.as_str(), "next" | "repair_task" | "undo")
+                {
+                    continue;
+                }
+                field(out, &label(key), value, depth);
             }
         }
         Value::Array(items) => {
             for item in items {
-                if item.is_object() {
-                    let heading_key = ["title", "name", "text", "term", "what", "path", "id"]
-                        .into_iter()
-                        .find(|k| present(&item[*k]));
-                    let heading = heading_key
-                        .map(|k| text(&item[k]))
-                        .unwrap_or_else(|| "Eintrag".into());
-                    line(out, depth, &format!("- {heading}"));
-                    for (key, value) in item.as_object().expect("object checked") {
-                        if Some(key.as_str()) != heading_key {
-                            field_key(out, key, value, depth + 1);
-                        }
-                    }
+                if let Value::Object(map) = item {
+                    let keys: Vec<_> = [
+                        "id", "item_id", "title", "name", "text", "term", "what", "path",
+                    ]
+                    .into_iter()
+                    .filter(|key| {
+                        map.get(*key)
+                            .is_some_and(|v| v.is_string() || v.is_number())
+                    })
+                    .take(2)
+                    .collect();
+                    let heading = keys
+                        .iter()
+                        .map(|key| text(&item[*key]))
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    line(
+                        out,
+                        depth,
+                        &format!(
+                            "- {}",
+                            if heading.is_empty() {
+                                "Entry"
+                            } else {
+                                &heading
+                            }
+                        ),
+                    );
+                    tree_except(out, item, &keys, depth + 1);
                 } else if item.is_array() {
-                    tree(out, item, depth);
-                } else if present(item) {
+                    tree(out, item, depth + 1);
+                } else {
                     line(out, depth, &format!("- {}", text(item)));
                 }
             }
         }
-        _ => line(out, depth, &text(value)),
+        _ => line(out, depth.max(1), &text(value)),
     }
 }
-
-fn collection(out: &mut String, title: &str, value: &Value) {
-    line(out, 0, &format!("{title}: {}", list(value).len()));
-    tree(out, value, 0);
-}
-
-fn project_title(project: &Value) -> String {
-    if project["name"] == project["id"] || !present(&project["name"]) {
-        text(&project["id"])
-    } else {
-        format!("{} (ID: {})", text(&project["name"]), text(&project["id"]))
-    }
-}
-
-fn project_details(out: &mut String, project: &Value, depth: usize) {
-    line(out, depth, &project_title(project));
-    fields(
-        out,
-        project,
-        &["path", "status", "status_note", "goal", "goal_due"],
-        depth + 1,
-    );
-}
-
-fn refresh_item(out: &mut String, item: &Value, depth: usize) {
-    if item["ok"] == true {
-        line(
-            out,
-            depth,
-            &format!(
-                "{}: Fakten {}.",
-                text(&item["id"]),
-                if item["changed"] == true {
-                    "aktualisiert"
-                } else {
-                    "unverändert"
-                }
-            ),
-        );
-    } else {
-        line(
-            out,
-            depth,
-            &format!(
-                "Warnung für {}: Fakten konnten nicht gemessen werden.",
-                text(&item["id"])
-            ),
-        );
-        if let Some(error) = item["error"].as_str() {
-            line(out, depth + 1, meaning(error));
-        } else {
-            field(out, "Fehler", &item["error"], depth + 1);
-        }
-    }
-}
-
-fn facts(out: &mut String, facts: &Value, depth: usize) {
+fn collection(out: &mut String, scope: &str, order: &str, value: &Value) {
     line(
         out,
-        depth,
-        &if facts["project"].is_null() {
-            "Gemessene Fakten".into()
-        } else {
-            format!("Fakten für {}", text(&facts["project"]))
-        },
-    );
-    field_key(out, "collected_at", &facts["collected_at"], depth + 1);
-    if facts["ok"] == false {
-        line(out, depth + 1, "Faktenmessung fehlgeschlagen.");
-        if let Some(error) = facts["error"].as_str() {
-            line(out, depth + 1, meaning(error));
-        } else {
-            field_key(out, "error", &facts["error"], depth + 1);
-        }
-        return;
-    }
-    fields(
-        out,
-        facts,
-        &[
-            "branch",
-            "head",
-            "last_work",
-            "has_remote",
-            "remotes",
-            "upstream",
-            "ahead",
-            "behind",
-            "unpushed_since",
-            "dirty",
-            "commits",
-            "worktrees",
-            "branches",
-            "ci",
-            "release",
-            "night",
-            "collisions",
-            "space",
-        ],
-        depth + 1,
-    );
-}
-
-fn due(out: &mut String, data: &Value, depth: usize) {
-    let projects = list(&data["projects"]);
-    line(
-        out,
-        depth,
+        0,
         &format!(
-            "{} Projekte brauchen eine neue Karte; {} sind aktuell.",
-            projects.len(),
-            list(&data["up_to_date"]).len()
+            "{} {scope}, {order}; all matching entries.",
+            list(value).len()
         ),
     );
-    for p in projects {
-        line(
-            out,
-            depth,
-            &format!(
-                "- {}: {}",
-                project_title(p),
-                meaning(p["reason"].as_str().unwrap_or("unknown"))
-            ),
-        );
-        fields(out, p, &["changes", "new_fields"], depth + 1);
+    tree(out, value, 0);
+}
+fn cell(value: &Value, max: usize) -> String {
+    let value = text(value);
+    if value.chars().count() > max {
+        format!("{}...", value.chars().take(max - 3).collect::<String>())
+    } else {
+        value
     }
-    for p in list(&data["problems"]) {
-        line(
+}
+fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[&str]) {
+    line(
+        out,
+        0,
+        &format!("{} {scope}, {order}; all matching rows.", rows.len()),
+    );
+    if rows.is_empty() {
+        return;
+    }
+    let mut cells = vec![columns
+        .iter()
+        .map(|key| key.to_uppercase())
+        .collect::<Vec<_>>()];
+    cells.extend(rows.iter().map(|row| {
+        columns
+            .iter()
+            .map(|key| {
+                if matches!(*key, "id" | "suggested_id" | "path" | "token") {
+                    text(&row[*key])
+                } else {
+                    cell(&row[*key], 72)
+                }
+            })
+            .collect::<Vec<_>>()
+    }));
+    let widths: Vec<_> = (0..columns.len())
+        .map(|i| {
+            cells
+                .iter()
+                .map(|row| row[i].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    for (row_index, values) in cells.iter().enumerate() {
+        let row = values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                if i + 1 == values.len() {
+                    value.clone()
+                } else {
+                    format!("{value}{}", " ".repeat(widths[i] - value.chars().count()))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        line(out, usize::from(row_index != 0), &row);
+    }
+}
+fn refresh_item(out: &mut String, item: &Value, depth: usize) {
+    let state = if item["ok"] == true {
+        if item["changed"] == true {
+            "updated"
+        } else {
+            "unchanged"
+        }
+    } else if item["ok"] == false {
+        "failed"
+    } else {
+        "unknown"
+    };
+    line(
+        out,
+        depth + 1,
+        &format!("{}: facts {state}.", text(&item["id"])),
+    );
+    fields(
+        out,
+        item,
+        &["error", "warning", "warnings", "hint"],
+        depth + 2,
+    );
+}
+fn due(out: &mut String, data: &Value) {
+    let projects = list(&data["projects"]);
+    let problems = list(&data["problems"]);
+    line(
+        out,
+        0,
+        &format!(
+            "{}{} projects need a card; {} are current; {} have a facts problem.",
+            if problems.is_empty() { "" } else { "Error: " },
+            projects.len(),
+            list(&data["up_to_date"]).len(),
+            problems.len()
+        ),
+    );
+    line(out, 0, "Note: archived and removed projects are excluded; registered projects are in registration order.");
+    if !problems.is_empty() {
+        line(out, 0, "Note: results for the other projects remain available. Continue those projects and resolve or report the facts problems before completing the daily run.");
+    }
+    fields(out, data, &["today"], 0);
+    if !projects.is_empty() {
+        table(
             out,
-            depth,
-            &format!(
-                "Warnung für {}: {}",
-                text(&p["id"]),
-                meaning(p["problem"].as_str().unwrap_or("unknown"))
-            ),
+            projects,
+            "due projects",
+            "oldest registration first",
+            &["id", "name", "reason"],
         );
-        fields(out, p, &["path", "error"], depth + 1);
+        for project in projects {
+            if !project["changes"].is_null() || !project["new_fields"].is_null() {
+                field(out, "Project", &project["id"], 0);
+                fields(out, project, &["changes", "new_fields"], 1);
+            }
+        }
+    }
+    if !problems.is_empty() {
+        field(out, "Facts problems", &data["problems"], 0);
     }
     if data["portfolio"]["due"] == true {
         line(
             out,
-            depth,
+            0,
             &format!(
-                "Portfolio-Brief fällig: {}.",
-                meaning(data["portfolio"]["reason"].as_str().unwrap_or("unknown"))
+                "Portfolio brief is due: {}.",
+                text(&data["portfolio"]["reason"])
             ),
         );
+    } else if data["portfolio"]["due"] == false {
+        line(out, 0, "Portfolio brief is current.");
     } else {
-        line(out, depth, "Portfolio-Brief ist aktuell.");
+        line(
+            out,
+            0,
+            "Note: whether the portfolio brief is due is unknown.",
+        );
     }
 }
-
-fn document(out: &mut String, data: &Value, key: &str, title: &str, depth: usize) {
-    line(
-        out,
-        depth,
-        &format!("{title}, Version {}", text(&data["version"])),
-    );
-    fields(out, data, &["project", "created_at"], depth + 1);
-    let keys = if key == "card" {
-        &[
-            "headline",
-            "one_liner",
-            "phase",
-            "phase_evidence",
-            "stack",
-            "personality",
-            "reentry",
-            "waiting_on_you",
-            "open_ends",
-            "suggestions",
-            "recent_changes",
-            "milestones",
-            "features",
-            "vision",
-            "health_notes",
-            "decisions",
-            "cross_project_hints",
-            "handbook",
-        ][..]
-    } else {
-        &[
-            "greeting",
-            "focus",
-            "attention_note",
-            "patterns",
-            "synergies",
-            "new_apps",
-            "park_or_revive",
-            "idea_checks",
-            "week_review",
-        ][..]
-    };
-    fields(out, &data[key], keys, depth + 1);
-}
-
 fn run(out: &mut String, command: &str, data: &Value) {
     let run = if data["run"].is_object() {
         &data["run"]
@@ -629,83 +840,198 @@ fn run(out: &mut String, command: &str, data: &Value) {
         &data["latest"]
     };
     if run.is_null() {
-        line(out, 0, "Noch kein Agentenlauf erfasst.");
+        line(out, 0, "No agent run has been recorded.");
     } else {
+        let state = run["state"].as_str().unwrap_or("unknown");
         let action = match command {
-            "runs.start" => "gestartet",
-            "runs.fail" => "Fehler erfasst",
-            "runs.finish" => "beendet",
-            _ => "Status",
+            "runs.start" => "started or resumed",
+            "runs.fail" if data["already_recorded"] == true => {
+                "failure was already recorded; current state"
+            }
+            "runs.fail" => "failure recorded",
+            "runs.finish" => "finished",
+            _ => "status",
         };
         line(
             out,
             0,
             &format!(
-                "Agentenlauf {} {action}: {}.",
-                text(&run["id"]),
-                meaning(run["state"].as_str().unwrap_or("unknown"))
-            ),
-        );
-        fields(out, run, &["started_at", "finished_at"], 0);
-        let counts = &run["counts"];
-        line(
-            out,
-            0,
-            &format!(
-                "Projekte: {} aktuell, {} offen, {} fehlgeschlagen.",
-                text(&counts["current"]),
-                text(&counts["pending"]),
-                text(&counts["failed"])
-            ),
-        );
-        for project in list(&run["projects"]) {
-            line(
-                out,
-                0,
-                &format!(
-                    "- {}: {}",
-                    project_title(project),
-                    meaning(project["status"].as_str().unwrap_or("unknown"))
-                ),
-            );
-            fields(
-                out,
-                project,
-                &["reason", "error", "pending_owner_replies"],
-                1,
-            );
-        }
-        field(out, "Portfolio-Brief", &run["portfolio"], 0);
-    }
-    if !data["due"].is_null() {
-        due(out, &data["due"], 0);
-    }
-    if data["last_successful"].is_null() {
-        line(out, 0, "Noch kein vollständig erfolgreicher Lauf.");
-    } else {
-        field(
-            out,
-            "Letzter erfolgreicher Lauf",
-            &data["last_successful"],
-            0,
-        );
-    }
-    fields(out, data, &["pending_owner_replies", "repair_task"], 0);
-    if command == "runs.status" {
-        field(out, "Bisherige Läufe", &data["history"], 0);
-    }
-    if command == "runs.start" {
-        line(
-            out,
-            0,
-            &format!(
-                "Nach der Bearbeitung abschließen: watchtower runs finish {}",
+                "{}Agent run {} {action}: {state}.",
+                if (command == "runs.finish" && state != "complete")
+                    || (command == "runs.start" && !list(&data["due"]["problems"]).is_empty())
+                {
+                    "Error: "
+                } else {
+                    ""
+                },
                 text(&run["id"])
             ),
         );
+        if state != "complete" {
+            line(
+                out,
+                0,
+                "Note: this run does not confirm a complete daily update.",
+            );
+        }
+        if let Some(instruction) = data["instruction"].as_str() {
+            line(out, 0, &escaped(instruction));
+        }
+        tree(out, run, 0);
+    }
+    if data["due"].is_object() {
+        due(out, &data["due"]);
+    }
+    field(out, "Last successful run", &data["last_successful"], 0);
+    fields(out, data, &["pending_owner_replies"], 0);
+    if command == "runs.status" {
+        line(
+            out,
+            0,
+            "Note: history contains at most the 20 latest runs, newest first.",
+        );
+        field(out, "Run history", &data["history"], 0);
     }
 }
-
+fn overview(out: &mut String, data: &Value) {
+    let projects = list(&data["projects"]);
+    let failed = list(&data["refreshed"])
+        .iter()
+        .filter(|row| row["ok"] != true)
+        .count();
+    if failed > 0 {
+        line(out, 0, &format!("Error: overview contains {failed} failed facts measurements; successful measurements remain saved."));
+    } else {
+        line(
+            out,
+            0,
+            &format!(
+                "Watchtower overview: {} registered projects, including archived projects.",
+                projects.len()
+            ),
+        );
+    }
+    line(out, 0, "Note: this is a summary. projects show reads the complete project record; portfolio show reads the complete brief.");
+    fields(
+        out,
+        data,
+        &["now", "previous_visit", "portfolio_updated_at"],
+        0,
+    );
+    field(out, "Portfolio brief", &data["portfolio"], 0);
+    for project in projects {
+        line(
+            out,
+            0,
+            &format!(
+                "- {} | {} [{}]",
+                text(&project["id"]),
+                text(&project["name"]),
+                text(&project["status"])
+            ),
+        );
+        fields(
+            out,
+            project,
+            &[
+                "status_note",
+                "goal",
+                "goal_due",
+                "facts_collected_at",
+                "card_updated_at",
+            ],
+            1,
+        );
+        line(
+            out,
+            1,
+            &format!(
+                "Card state: {}",
+                if project["card"].is_null() {
+                    "missing"
+                } else if project["card_outdated"] == true {
+                    "outdated"
+                } else {
+                    "current"
+                }
+            ),
+        );
+        fields(
+            out,
+            &project["card"],
+            &[
+                "headline",
+                "phase",
+                "reentry",
+                "waiting_on_you",
+                "open_ends",
+            ],
+            1,
+        );
+        let facts = &project["facts"];
+        if facts.is_null() {
+            line(out, 1, "Facts: not measured.");
+        } else if facts["ok"] == false {
+            line(out, 1, "Facts: last measurement failed.");
+            fields(out, facts, &["error"], 2);
+        } else {
+            line(
+                out,
+                1,
+                &format!(
+                    "Facts: {} uncommitted files; {} unpushed commits; remote {}; CI {}.",
+                    text(&facts["dirty"]["files"]),
+                    text(&facts["ahead"]),
+                    text(&facts["has_remote"]),
+                    text(&facts["ci"]["state"])
+                ),
+            );
+        }
+        let warnings: Vec<_> = list(&project["warnings"]).iter().map(|warning| json!({"key":warning["key"],"severity":warning["severity"],"title":warning["title"],"acknowledged":warning["acknowledged"],"note":warning["note"]})).collect();
+        if !warnings.is_empty() {
+            field(out, "Warnings", &Value::Array(warnings), 1);
+        }
+    }
+    let tasks: Vec<_> = list(&data["tasks"])
+        .iter()
+        .filter(|task| {
+            matches!(
+                task["status"].as_str(),
+                Some("assigned" | "blocked" | "review")
+            )
+        })
+        .cloned()
+        .collect();
+    line(out, 0, "Note: the task summary includes assigned, blocked and review tasks; tasks list also includes completed and cancelled tasks.");
+    table(
+        out,
+        &tasks,
+        "open tasks",
+        "newest ID first",
+        &["id", "status", "title", "projects"],
+    );
+    field(out, "Unacknowledged changes", &data["changes"]["total"], 0);
+    line(
+        out,
+        0,
+        &format!(
+            "Parked ideas: {}; ideas list reads them in full.",
+            list(&data["ideas"]).len()
+        ),
+    );
+    field(
+        out,
+        "Latest daily run state",
+        &data["run_status"]["state"],
+        0,
+    );
+    field(
+        out,
+        "Last successful daily run",
+        &data["run_status"]["last_successful"],
+        0,
+    );
+}
 fn schema_fields(out: &mut String, schema: &Value, prefix: &str, depth: usize) {
     if let Some(properties) = schema["properties"].as_object() {
         for (key, value) in properties {
@@ -720,9 +1046,10 @@ fn schema_fields(out: &mut String, schema: &Value, prefix: &str, depth: usize) {
                 out,
                 depth,
                 &format!(
-                    "{path}: {}; {}",
+                    "{}: {}; {}",
+                    escaped(&path),
                     schema_description(value),
-                    if required { "Pflichtfeld" } else { "optional" }
+                    if required { "required" } else { "optional" }
                 ),
             );
             if inner["type"] == "object" {
@@ -735,367 +1062,74 @@ fn schema_fields(out: &mut String, schema: &Value, prefix: &str, depth: usize) {
                     line(
                         out,
                         depth + 1,
-                        &format!("Pro Eintrag: {}", schema_description(&inner["items"])),
+                        &format!("Per entry: {}", schema_description(&inner["items"])),
                     );
                 }
             }
         }
     }
 }
-
 fn schema_description(schema: &Value) -> String {
     let inner = list(&schema["anyOf"]).first().unwrap_or(schema);
-    let ty = match inner["type"].as_str() {
-        Some("string") => "Text",
-        Some("integer") => "Ganzzahl",
-        Some("object") => "Feldgruppe",
-        Some("array") => "Liste",
-        _ => "Wert",
-    };
-    let mut limits = vec![ty.to_owned()];
+    let mut limits = vec![text(&inner["type"])];
     if !schema["anyOf"].is_null() {
-        limits.push("darf leer sein (null)".into());
+        limits.push("nullable".into());
     }
     for (field, name) in [
-        ("minLength", "Mindestlänge"),
-        ("maxLength", "Höchstlänge"),
-        ("maxItems", "Höchstzahl der Einträge"),
-        ("minimum", "Minimum"),
-        ("maximum", "Maximum"),
+        ("minLength", "minimum characters"),
+        ("maxLength", "maximum characters"),
+        ("maxItems", "maximum entries"),
+        ("minimum", "minimum"),
+        ("maximum", "maximum"),
     ] {
         if !inner[field].is_null() {
-            limits.push(format!(
-                "{name}: {}{}",
-                text(&inner[field]),
-                if field.ends_with("Length") {
-                    " Zeichen"
-                } else {
-                    ""
-                }
-            ));
+            limits.push(format!("{name}: {}", text(&inner[field])));
         }
     }
     if !inner["enum"].is_null() {
-        limits.push(format!(
-            "Werte: {}",
-            list(&inner["enum"])
-                .iter()
-                .map(text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+        limits.push(format!("values: {}", text(&inner["enum"])));
     }
     if inner["format"] == "date" {
-        limits.push("Datum JJJJ-MM-TT".into());
+        limits.push("ISO date YYYY-MM-DD".into());
     } else if let Some(pattern) = inner["pattern"].as_str() {
-        limits.push(format!("Muster: {pattern}"));
+        limits.push(format!("pattern: {}", escaped(pattern)));
     }
     if let Some(description) = inner["description"].as_str() {
-        let words = description
-            .strip_prefix("At most ")
-            .and_then(|s| s.strip_suffix(" words."));
-        limits.push(
-            words
-                .map(|n| format!("höchstens {n} Wörter"))
-                .unwrap_or_else(|| description.into()),
-        );
+        limits.push(escaped(description));
     }
     limits.join("; ")
 }
-
-fn meaning(value: &str) -> &str {
-    match value {
-        "active" => "aktiv",
-        "parked" => "geparkt",
-        "done" => "erledigt",
-        "archived" => "archiviert",
-        "cooling" => "wenig Aktivität",
-        "dormant" => "ruhend",
-        "maintenance" => "Wartung",
-        "running" => "läuft",
-        "stalled" => "festgefahren",
-        "failed" => "fehlgeschlagen",
-        "complete" => "vollständig abgeschlossen",
-        "incomplete" => "unvollständig",
-        "current" => "aktuell",
-        "pending" => "offen",
-        "unknown" => "unbekannt",
-        "assigned" => "vergeben",
-        "review" => "wartet auf deine Bestätigung",
-        "blocked" => "blockiert",
-        "cancelled" => "abgebrochen",
-        "green" => "erfolgreich",
-        "red" => "fehlgeschlagen",
-        "none" => "nicht vorhanden",
-        "skipped" => "nicht abgefragt",
-        "up" => "gut",
-        "down" => "abgelehnt",
-        "later" => "später",
-        "answered" => "Antwort erhalten",
-        "dismissed" => "verworfen",
-        "no_card" => "noch keine Karte",
-        "changed" => "Repository geändert",
-        "ci_changed" => "CI-Status geändert",
-        "status_changed" => "Projektvorgaben geändert",
-        "new_fields" => "neue Kartenfelder fehlen",
-        "stale" => "Karte oder Brief veraltet",
-        "no_portfolio" | "missing" => "noch kein Brief",
-        "new_day" => "neuer Tagesbrief",
-        "owner_idea" => "neue Idee von dir",
-        "cards_changed" => "Karten geändert",
-        "cards_will_change" => "Karten werden aktualisiert",
-        "new_ideas" => "neue Ideen",
-        "week_review" => "Wochenrückblick fällig",
-        "owner_ideas" => "Ideen zu bewerten",
-        "path_missing" => "Projektordner nicht gefunden",
-        "not_a_git_repository" => "Ordner ist kein Git-Repository",
-        "git_status_failed" => "Git-Status konnte nicht gelesen werden",
-        "facts_missing" => "Fakten fehlen",
-        "agent_failed" => "Agent hat einen Fehler gemeldet",
-        "project_archived" => "Projekt archiviert",
-        "project_removed" => "Projekt entfernt",
-        "info" => "Hinweis",
-        "warn" => "Warnung",
-        "risk" => "Risiko",
-        "park" => "parken",
-        "revive" => "wieder aufnehmen",
-        "finish" => "fertigstellen",
-        "archive" => "archivieren",
-        "build" => "umsetzen",
-        "fold_in" => "in bestehendes Projekt aufnehmen",
-        "drop" => "verwerfen",
-        "15min" => "15 Minuten",
-        "1h" => "1 Stunde",
-        "half-day" => "ein halber Tag",
-        "day+" => "mindestens ein Tag",
-        "S" => "klein",
-        "M" => "mittel",
-        "L" => "groß",
-        "next" => "nächster Schritt",
-        "feature" => "Funktion",
-        "cleanup" => "Aufräumen",
-        "other" => "Sonstiges",
-        "suggestion" => "Vorschlag",
-        "question" => "Frage",
-        "focus" => "Fokus",
-        "pattern" => "Muster",
-        "synergy" => "Synergie",
-        "new_app" => "App-Idee",
-        "verdict" => "Empfehlung",
-        _ => value,
-    }
+fn safe_command(command: &str) -> bool {
+    command.starts_with("watchtower ")
+        && !command.chars().any(char::is_control)
+        && !command.contains(['<', '>'])
 }
-
 fn label(key: &str) -> String {
-    let label = match key {
+    let value = match key {
         "id" => "ID",
-        "name" => "Name",
-        "path" => "Ordner",
-        "project" => "Projekt",
-        "projects" => "Projekte",
-        "status" => "Status",
-        "status_note" => "Deine Vorgabe",
-        "goal" => "Dein Ziel",
-        "goal_due" => "Zieldatum",
-        "version" => "Version",
-        "initial_version" => "Version zu Beginn",
-        "card_version" => "Kartenversion",
-        "data_dir" => "Datenordner",
-        "database" => "Datenbank",
-        "exe" => "Programm",
-        "skill_dir" => "Agenten-Skill",
-        "card_updated_at" => "Karte aktualisiert",
-        "facts_collected_at" | "collected_at" => "Fakten gemessen",
-        "created_at" | "added_at" => "Erstellt",
-        "updated_at" => "Aktualisiert",
-        "started_at" => "Begonnen",
-        "finished_at" => "Beendet",
-        "reported_at" => "Gemeldet",
-        "completed_at" => "Abgeschlossen",
-        "at" => "Zeitpunkt",
-        "today" => "Heute",
-        "suggested_id" => "Vorgeschlagene ID",
-        "last_commit" => "Letzter Commit",
-        "branch" => "Branch",
-        "head" => "Commit",
-        "last_work" => "Zuletzt bearbeitet",
-        "has_remote" => "Remote vorhanden",
-        "remotes" => "Remotes",
-        "upstream" => "Vergleichsbranch",
-        "ahead" => "Commits voraus",
-        "behind" => "Commits zurück",
-        "unpushed_since" => "Ungepusht seit",
-        "dirty" | "uncommitted" => "Nicht committete Änderungen",
-        "unpushed" => "Nicht gepushte Commits",
-        "docs" => "Projektdokumentation",
-        "side_branches" => "Weitere Branches und Worktrees",
-        "readable" => "Lesbarkeit des Projektordners",
-        "files" => "Dateien",
-        "modified" => "Geändert",
-        "untracked" => "Nicht erfasst",
-        "deleted" => "Gelöscht",
-        "lines_added" => "Zeilen hinzugefügt",
-        "lines_removed" => "Zeilen entfernt",
-        "oldest_change" => "Älteste Änderung",
-        "newest_change" => "Neueste Änderung",
-        "commits" => "Commits",
-        "total" => "Insgesamt",
-        "first" => "Erster",
-        "last" => "Letzter",
-        "last_7d" => "Letzte 7 Tage",
-        "last_30d" => "Letzte 30 Tage",
-        "last_90d" => "Letzte 90 Tage",
-        "weekly" => "Commits je Woche, älteste zuerst",
-        "worktrees" => "Weitere Worktrees",
-        "count" => "Anzahl",
-        "prunable" => "Verwaist",
-        "items" => "Einträge",
-        "dirty_files" => "Nicht committete Dateien",
-        "branches" => "Branches",
-        "merged_count" => "Zusammengeführte Branches",
-        "unmerged" => "Nicht zusammengeführte Branches",
-        "unmerged_branches" => "Nicht zusammengeführte Branches",
-        "extra_worktrees" => "Weitere Worktrees",
+        "item_id" => "Item ID",
         "ci" => "CI",
-        "state" => "Zustand",
-        "workflow" => "Workflow",
-        "workflows" => "Workflows",
-        "failing" => "Fehlgeschlagen",
-        "conclusion" => "Ergebnis",
-        "url" => "Adresse",
-        "repo" => "Repository",
-        "release" => "Release",
-        "tag" => "Tag",
-        "date" => "Datum",
-        "commits_since" => "Commits seitdem",
-        "night" => "Seit gestern Abend",
-        "since" => "Seit",
-        "reverts" => "Rücknahmen",
-        "uncommitted_touched" => "Nicht committete Dateien bearbeitet",
-        "collisions" => "Überschneidungen",
-        "a" => "Erste Arbeitslinie",
-        "b" => "Zweite Arbeitslinie",
-        "space" => "Wiederherstellbare Build-Dateien",
-        "total_bytes" => "Bytes insgesamt",
-        "bytes" => "Bytes",
-        "dirs" => "Ordner",
-        "measured_on" => "Gemessen am",
-        "one_liner" => "Kurzbeschreibung",
-        "headline" => "Aktueller Stand",
-        "stack" => "Technik",
-        "phase" => "Phase",
-        "phase_evidence" => "Begründung der Phase",
-        "personality" => "Charakter",
-        "recent_changes" => "Letzte Änderungen",
-        "milestones" => "Meilensteine",
-        "features" => "Funktionen",
-        "open_ends" => "Offene Enden",
-        "waiting_on_you" => "Fragen an dich",
-        "vision" => "Vision",
-        "statement" => "Zielbild",
-        "progress_note" => "Fortschritt",
-        "progress_pct" => "Fortschritt in Prozent",
-        "reentry" => "Wiedereinstieg",
-        "next_step" => "Nächster Schritt",
-        "effort" => "Aufwand",
-        "why" => "Warum",
-        "done_when" => "Fertig, wenn",
-        "health_notes" => "Zustand und Risiken",
-        "decisions" => "Entscheidungen",
-        "suggestions" => "Vorschläge",
-        "cross_project_hints" => "Hinweise zu anderen Projekten",
-        "handbook" => "Handbuch",
-        "run" => "Starten und nutzen",
-        "what" => "Wofür",
-        "how" => "Befehl oder Adresse",
-        "folder" => "Ordner",
-        "installed" => "Installierte Anwendung",
-        "open" => "Öffnen",
-        "architecture" => "Aufbau",
-        "places" => "Wichtige Stellen",
-        "read_first" => "Zuerst lesen",
-        "needs" => "Voraussetzungen",
-        "terms" => "Begriffe",
-        "term" => "Begriff",
-        "meaning" => "Bedeutung",
-        "title" => "Titel",
-        "detail" => "Details",
-        "source" => "Quelle",
-        "source_id" => "Ursprünglicher Eintrag",
-        "age_days" => "Alter in Tagen",
-        "options" => "Antwortmöglichkeiten",
-        "answer" => "Antwort",
-        "effect" => "Auswirkung",
-        "type" => "Art",
-        "kind" => "Art",
-        "evidence" => "Beleg",
-        "greeting" => "Überblick",
-        "focus" => "Heute wichtig",
-        "patterns" => "Muster",
-        "synergies" => "Verbindungen",
-        "new_apps" => "Neue App-Ideen",
-        "pitch" => "Idee",
-        "because" => "Begründung",
-        "park_or_revive" => "Parken oder wieder aufnehmen",
-        "verdict" => "Empfehlung",
-        "attention_note" => "Deine Aufmerksamkeit",
-        "idea_checks" => "Bewertung deiner Ideen",
-        "idea" => "Idee",
-        "fits" => "Passende Projekte",
-        "week_review" => "Wochenrückblick",
-        "week" => "Woche",
-        "done" => "Erledigt",
-        "stalled" => "Stecken geblieben",
-        "time_note" => "Zeitaufwand",
-        "severity" => "Dringlichkeit",
-        "feedback" => "Deine Rückmeldungen",
-        "feedback_summary" => "Bisherige Bewertungen",
-        "value" => "Bewertung oder Antwort",
-        "note" => "Notiz",
-        "snoozed_until" => "Zurückgestellt bis",
-        "item" => "Bewerteter Eintrag",
-        "up" => "Gut",
-        "down" => "Abgelehnt",
-        "later" => "Später",
-        "warning_acknowledgements" => "Bewusst bestätigte Hinweise",
-        "warning_acks" => "Bewusst bestätigte Hinweise",
-        "key" => "Hinweis",
-        "basis" => "Grundlage",
-        "comparison" => "Vergleich",
-        "tasks" => "Aufträge",
-        "project_snapshots" => "Projekte bei Auftragserteilung",
-        "result" => "Ergebnis",
-        "result_evidence" => "Ergebnisbeleg",
-        "history" => "Verlauf",
-        "actor" => "Gemeldet durch",
-        "owner_ideas" => "Deine geparkten Ideen",
-        "checked" => "Bewertet",
-        "review_week" => "Rückblick auf die Woche",
-        "from" => "Von",
-        "to" => "Bis",
-        "due" => "Fällig",
-        "owner_last_opened" => "Zuletzt von dir geöffnet",
-        "outdated" => "Veraltet",
-        "changed_since_brief" => "Seit dem Brief geändert",
-        "commits_review_week" => "Commits in der Rückblickwoche",
-        "context_token" => "Kontext-Token zum Speichern",
-        "since_previous_card" => "Seit der bisherigen Karte",
-        "days" => "Tage",
-        "commit_count" => "Commits",
-        "new_fields" => "Neue auszufüllende Felder",
-        "changed_fields" => "Geänderte Felder",
-        "unfilled_fields" => "Noch nicht ausgefüllte Felder",
-        "warnings" => "Warnungen",
-        "warning" => "Warnung",
-        "reason" | "problem" => "Grund",
-        "error" => "Fehler",
-        "code" => "Fehlercode",
-        "message" => "Meldung",
-        "hint" => "Hinweis",
-        "changes" => "Änderungen",
-        "pending_owner_replies" => "Noch zu verarbeitende Antworten von dir",
-        "repair_task" => "Auftrag zum Fortsetzen",
-        _ => return key.replace('_', " "),
+        "url" => "URL",
+        "context_token" => "Context token",
+        "has_card" => "Card available",
+        "one_liner" => "One-line description",
+        "waiting_on_you" => "Questions for the user",
+        "owner_ideas" => "The user's parked ideas",
+        "status_note" => "The user's status instruction",
+        "goal" => "The user's goal",
+        "goal_due" => "Goal due date",
+        "owner_last_opened" => "Last opened by the user",
+        "pending_owner_replies" => "User replies awaiting incorporation",
+        _ => {
+            return {
+                let words = key.replace('_', " ");
+                let mut chars = words.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().chain(chars).collect(),
+                    None => String::new(),
+                }
+            }
+        }
     };
-    label.into()
+    value.into()
 }

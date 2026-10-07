@@ -8,6 +8,10 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 use serde_json::Value;
 
+mod undo;
+use undo::OwnerScope;
+pub use undo::OwnerUndo;
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects(
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
@@ -37,6 +41,13 @@ CREATE TABLE IF NOT EXISTS agent_runs(
 CREATE TABLE IF NOT EXISTS tasks(
   id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL, source_key TEXT,
   revision INTEGER NOT NULL DEFAULT 1, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS document_requests(
+  scope TEXT NOT NULL, expected TEXT NOT NULL, request TEXT NOT NULL, after_token TEXT NOT NULL,
+  version INTEGER NOT NULL, PRIMARY KEY(scope, expected));
+CREATE TABLE IF NOT EXISTS owner_undo(
+  token TEXT PRIMARY KEY, scope TEXT NOT NULL, before_data TEXT NOT NULL, after_data TEXT NOT NULL,
+  versions TEXT NOT NULL, created_at TEXT NOT NULL, undone_at TEXT, undone_versions TEXT);
+CREATE TABLE IF NOT EXISTS owner_field_versions(field TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_active_source ON tasks(source_key)
   WHERE source_key IS NOT NULL AND status IN ('assigned', 'blocked', 'review');
 ";
@@ -62,10 +73,18 @@ pub struct Project {
     /// Changes only when the registered name or folder changes.
     #[serde(skip_serializing)]
     pub identity_revision: i64,
+    pub removed_at: Option<String>,
+}
+
+pub enum ProjectRegistration {
+    Added,
+    Existing,
+    IdTaken,
+    PathTaken(String),
 }
 
 pub enum ProjectUpdate {
-    Updated,
+    Updated(Value),
     Conflict,
     PathTaken(String),
 }
@@ -142,7 +161,8 @@ pub struct Store {
 }
 
 pub enum GuardedWrite {
-    Saved(i64),
+    Saved(i64, String),
+    Replayed(i64, String),
     Conflict,
     ItemConflict(Vec<String>),
 }
@@ -193,6 +213,7 @@ fn project(row: &Row) -> Result<Project> {
         goal: row.get("goal")?,
         goal_due: row.get("goal_due")?,
         identity_revision: row.get("identity_revision")?,
+        removed_at: row.get("removed_at")?,
     })
 }
 
@@ -215,6 +236,8 @@ impl Store {
             ("projects", "previous_opened_at", "TEXT"),
             ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
             ("projects", "goal_due", "TEXT"),
+            ("projects", "removed_at", "TEXT"),
+            ("ideas", "removed_at", "TEXT"),
             (
                 "projects",
                 "identity_revision",
@@ -244,7 +267,7 @@ impl Store {
     // projects
     pub fn projects(&self) -> Result<Vec<Project>> {
         self.with(|db| {
-            db.prepare("SELECT * FROM projects ORDER BY added_at, id")?
+            db.prepare("SELECT * FROM projects WHERE removed_at IS NULL ORDER BY added_at, id")?
                 .query_map([], project)?
                 .collect()
         })
@@ -252,58 +275,96 @@ impl Store {
 
     pub fn project(&self, id: &str) -> Result<Option<Project>> {
         self.with(|db| {
-            db.query_row("SELECT * FROM projects WHERE id = ?1", [id], project)
-                .optional()
-        })
-    }
-
-    pub fn add_project(&self, id: &str, name: &str, path: &str, at: &str) -> Result<()> {
-        self.with(|db| {
-            db.execute(
-                "INSERT INTO projects(id, name, path, added_at) VALUES(?1, ?2, ?3, ?4)",
-                params![id, name, path, at],
+            db.query_row(
+                "SELECT * FROM projects WHERE id = ?1 AND removed_at IS NULL",
+                [id],
+                project,
             )
-            .map(drop)
+            .optional()
         })
     }
 
-    /// Update both fields together; never overwrite a concurrent project edit.
+    pub fn add_project(
+        &self,
+        id: &str,
+        name: &str,
+        path: &str,
+        at: &str,
+    ) -> Result<ProjectRegistration> {
+        self.with(|db| {
+            let tx =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let projects = tx
+                .prepare("SELECT * FROM projects")?
+                .query_map([], project)?
+                .collect::<Result<Vec<_>>>()?;
+            if let Some(existing) = projects.iter().find(|p| same_path(&p.path, path)) {
+                return Ok(
+                    if existing.id == id && existing.name == name && existing.removed_at.is_none() {
+                        ProjectRegistration::Existing
+                    } else {
+                        ProjectRegistration::PathTaken(existing.id.clone())
+                    },
+                );
+            }
+            if projects.iter().any(|p| p.id == id) {
+                return Ok(ProjectRegistration::IdTaken);
+            }
+            tx.execute(
+                "INSERT INTO projects(id,name,path,added_at) VALUES(?1,?2,?3,?4)",
+                params![id, name, path, at],
+            )?;
+            tx.commit()?;
+            Ok(ProjectRegistration::Added)
+        })
+    }
+
+    /// Update identity fields and record their undo in the same transaction.
     pub fn update_project(
         &self,
         before: &Project,
         name: &str,
         path: &str,
+        fields: Vec<String>,
+        at: &str,
     ) -> Result<ProjectUpdate> {
-        self.with(|db| {
-            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
-            let current = tx.query_row("SELECT * FROM projects WHERE id = ?1", [&before.id], project).optional()?;
+        let mut outcome = None;
+        let receipt = self.owner_change(OwnerScope::Project { id: before.id.clone(), fields }, at, |db| {
+            let current = db.query_row("SELECT * FROM projects WHERE id = ?1 AND removed_at IS NULL", [&before.id], project).optional()?;
             if current.is_none_or(|p| p.name != before.name || p.path != before.path || p.identity_revision != before.identity_revision) {
-                return Ok(ProjectUpdate::Conflict);
+                outcome = Some(ProjectUpdate::Conflict);
+                return Ok(());
             }
-            let projects = tx.prepare("SELECT * FROM projects WHERE id != ?1")?
+            let projects = db.prepare("SELECT * FROM projects WHERE id != ?1")?
                 .query_map([&before.id], project)?.collect::<Result<Vec<_>>>()?;
             if let Some(other) = projects.iter().find(|p| same_path(&p.path, path)) {
-                return Ok(ProjectUpdate::PathTaken(other.id.clone()));
+                outcome = Some(ProjectUpdate::PathTaken(other.id.clone()));
+                return Ok(());
             }
-            tx.execute("UPDATE projects SET name = ?2, path = ?3, identity_revision = identity_revision + 1 WHERE id = ?1", params![before.id, name, path])?;
+            db.execute("UPDATE projects SET name = ?2, path = ?3, identity_revision = identity_revision + 1 WHERE id = ?1", params![before.id, name, path])?;
             if before.path != path {
-                // A failed refresh must not leave facts from the former folder visible.
-                tx.execute("DELETE FROM facts WHERE project_id = ?1", [&before.id])?;
+                db.execute("DELETE FROM facts WHERE project_id = ?1", [&before.id])?;
             }
-            tx.commit()?;
-            Ok(ProjectUpdate::Updated)
+            Ok(())
+        })?;
+        Ok(outcome.unwrap_or(ProjectUpdate::Updated(receipt)))
+    }
+
+    pub fn set_status(
+        &self,
+        id: &str,
+        status: &str,
+        note: Option<&str>,
+        at: &str,
+    ) -> Result<Value> {
+        self.owner_change(OwnerScope::Project { id:id.into(), fields: std::iter::once("status".into()).chain(note.map(|_| "status_note".into())).collect() },at, |db| {
+            db.execute("UPDATE projects SET status = ?1, status_note = COALESCE(?2,status_note), status_changed_at = ?3 WHERE id = ?4 AND removed_at IS NULL", params![status, note, at, id]).map(drop)
         })
     }
 
-    pub fn set_status(&self, id: &str, status: &str, note: &str, at: &str) -> Result<()> {
-        self.with(|db| {
-            db.execute("UPDATE projects SET status = ?1, status_note = ?2, status_changed_at = ?3 WHERE id = ?4", params![status, note, at, id]).map(drop)
-        })
-    }
-
-    pub fn set_goal(&self, id: &str, goal: &str, due: Option<&str>, at: &str) -> Result<()> {
-        self.with(|db| {
-            db.execute("UPDATE projects SET goal = ?2, goal_due = ?3, status_changed_at = ?4 WHERE id = ?1", params![id, goal, due, at]).map(drop)
+    pub fn set_goal(&self, id: &str, goal: &str, due: Option<&str>, at: &str) -> Result<Value> {
+        self.owner_change(OwnerScope::Project { id:id.into(), fields: vec!["goal".into(),"goal_due".into()] },at, |db| {
+            db.execute("UPDATE projects SET goal = ?2, goal_due = ?3, status_changed_at = ?4 WHERE id = ?1 AND removed_at IS NULL", params![id, goal, due, at]).map(drop)
         })
     }
 
@@ -317,19 +378,27 @@ impl Store {
         })
     }
 
-    pub fn remove_project(&self, id: &str) -> Result<()> {
+    pub fn project_including_removed(&self, id: &str) -> Result<Option<Project>> {
         self.with(|db| {
-            db.execute_batch("BEGIN")?;
-            for sql in [
-                "DELETE FROM projects WHERE id = ?1",
-                "DELETE FROM facts WHERE project_id = ?1",
-                "DELETE FROM cards WHERE project_id = ?1",
-                "DELETE FROM warning_acks WHERE project_id = ?1",
-            ] {
-                db.execute(sql, [id])?;
-            }
-            db.execute_batch("COMMIT")
+            db.query_row("SELECT * FROM projects WHERE id = ?1", [id], project)
+                .optional()
         })
+    }
+
+    pub fn all_projects(&self) -> Result<Vec<Project>> {
+        self.with(|db| {
+            db.prepare("SELECT * FROM projects ORDER BY added_at, id")?
+                .query_map([], project)?
+                .collect()
+        })
+    }
+
+    /// Removal only changes visibility. All identity and history rows remain intact.
+    pub fn set_project_removed(&self, id: &str, at: Option<&str>) -> Result<bool> {
+        self.with(|db| db.execute(
+            "UPDATE projects SET removed_at = ?2, identity_revision = identity_revision + 1 WHERE id = ?1 AND ((?2 IS NULL AND removed_at IS NOT NULL) OR (?2 IS NOT NULL AND removed_at IS NULL))",
+            params![id, at],
+        ).map(|n| n > 0))
     }
 
     // facts
@@ -356,7 +425,7 @@ impl Store {
         self.with(|db| {
             db.execute(
                 "INSERT INTO facts(project_id, collected_at, fingerprint, data)
-                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND path = ?5 AND identity_revision = ?6)
+                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND path = ?5 AND identity_revision = ?6 AND removed_at IS NULL)
                  ON CONFLICT(project_id) DO UPDATE SET collected_at = excluded.collected_at,
                  fingerprint = excluded.fingerprint, data = excluded.data",
                 params![project.id, at, fingerprint, data.to_string(), project.path, project.identity_revision],
@@ -417,6 +486,51 @@ impl Store {
                 db.prepare("SELECT created_at, data FROM cards WHERE project_id = ?1 ORDER BY id")?;
             let rows = stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, json(r.get(1)?))))?;
             rows.collect()
+        })
+    }
+
+    pub fn card_version(&self, id: &str, version: i64) -> Result<Option<StoredCard>> {
+        if version < 1 {
+            return Ok(None);
+        }
+        self.with(|db| db.query_row(
+            "SELECT created_at,fingerprint,head,ci,basis,data,owner_basis FROM cards WHERE project_id=?1 ORDER BY id LIMIT 1 OFFSET ?2",
+            params![id,version-1], |r| Ok(StoredCard {
+                version,created_at:r.get(0)?,fingerprint:r.get(1)?,head:r.get(2)?,ci:r.get(3)?,
+                basis:r.get::<_,Option<String>>(4)?.map(json),data:json(r.get(5)?),owner_basis:r.get::<_,Option<String>>(6)?.map(json)
+            })).optional())
+    }
+
+    pub fn portfolio_history(&self) -> Result<Vec<StoredPortfolio>> {
+        self.with(|db| {
+            db.prepare("SELECT id,created_at,data,basis FROM portfolio ORDER BY id")?
+                .query_map([], |r| {
+                    Ok(StoredPortfolio {
+                        version: r.get(0)?,
+                        created_at: r.get(1)?,
+                        data: json(r.get(2)?),
+                        basis: r.get::<_, Option<String>>(3)?.map(json),
+                    })
+                })?
+                .collect()
+        })
+    }
+
+    pub fn portfolio_version(&self, version: i64) -> Result<Option<StoredPortfolio>> {
+        self.with(|db| {
+            db.query_row(
+                "SELECT id,created_at,data,basis FROM portfolio WHERE id=?1",
+                [version],
+                |r| {
+                    Ok(StoredPortfolio {
+                        version: r.get(0)?,
+                        created_at: r.get(1)?,
+                        data: json(r.get(2)?),
+                        basis: r.get::<_, Option<String>>(3)?.map(json),
+                    })
+                },
+            )
+            .optional()
         })
     }
 
@@ -491,20 +605,36 @@ impl Store {
     }
 
     // feedback
-    pub fn set_feedback(&self, f: &Feedback) -> Result<()> {
-        self.with(|db| {
+    /// Resolve omitted fields from the current reaction while holding the write transaction.
+    /// A rejected resolution leaves both the reaction and its undo history unchanged.
+    pub fn set_feedback(
+        &self,
+        f: &Feedback,
+        resolve: impl FnOnce(Option<Feedback>) -> Option<(String, Option<String>)>,
+    ) -> Result<Option<Value>> {
+        let mut accepted = true;
+        let receipt = self.owner_change(OwnerScope::Feedback { id: f.item_id.clone() }, &f.at, |db| {
+            let current = db.query_row("SELECT * FROM feedback WHERE item_id=?1",[&f.item_id], |row| Ok(Feedback {
+                item_id: row.get("item_id")?, project_id: row.get("project_id")?, title: row.get("title")?,
+                value: row.get("value")?, at: row.get("at")?, note: row.get("note")?,
+                item: row.get::<_,Option<String>>("item")?.map(json), snoozed_until: row.get("snoozed_until")?,
+            })).optional()?;
+            let Some((note, snoozed_until)) = resolve(current) else {
+                accepted = false;
+                return Ok(());
+            };
             db.execute(
                 "INSERT INTO feedback(item_id, project_id, title, value, at, note, item, snoozed_until) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(item_id) DO UPDATE SET project_id = excluded.project_id, title = excluded.title, value = excluded.value,
                  at = excluded.at, note = excluded.note, item = excluded.item, snoozed_until = excluded.snoozed_until",
-                params![f.item_id, f.project_id, f.title, f.value, f.at, f.note, f.item.as_ref().map(Value::to_string), f.snoozed_until],
-            )
-            .map(drop)
-        })
+                params![f.item_id, f.project_id, f.title, f.value, f.at, note, f.item.as_ref().map(Value::to_string), snoozed_until],
+            ).map(drop)
+        })?;
+        Ok(accepted.then_some(receipt))
     }
 
-    pub fn delete_feedback(&self, item_id: &str) -> Result<()> {
-        self.with(|db| {
+    pub fn delete_feedback(&self, item_id: &str, at: &str) -> Result<Value> {
+        self.owner_change(OwnerScope::Feedback { id: item_id.into() }, at, |db| {
             db.execute("DELETE FROM feedback WHERE item_id = ?1", [item_id])
                 .map(drop)
         })
@@ -548,8 +678,8 @@ impl Store {
         note: Option<&str>,
         basis: &Value,
         at: &str,
-    ) -> Result<()> {
-        self.with(|db| {
+    ) -> Result<Value> {
+        self.owner_change(OwnerScope::Warning { id:project.into(), key:key.into() },at, |db| {
             match note {
                 Some(note) => db.execute("INSERT INTO warning_acks(project_id,kind,note,basis,at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(project_id,kind) DO UPDATE SET note=excluded.note,basis=excluded.basis,at=excluded.at",
                     params![project,key,note,basis.to_string(),at]),
@@ -559,28 +689,40 @@ impl Store {
     }
 
     // ideas
-    pub fn add_idea(&self, text: &str, at: &str) -> Result<i64> {
+    pub fn add_idea(&self, text: &str, at: &str) -> Result<(i64, bool)> {
         self.with(|db| {
-            db.execute(
-                "INSERT INTO ideas(text, added_at) VALUES(?1, ?2)",
-                params![text, at],
-            )?;
-            Ok(db.last_insert_rowid())
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let existing = tx.query_row("SELECT id FROM ideas WHERE text = ?1 AND removed_at IS NULL ORDER BY id LIMIT 1", [text], |r| r.get(0)).optional()?;
+            if let Some(id) = existing { return Ok((id, false)); }
+            tx.execute("INSERT INTO ideas(text, added_at) VALUES(?1, ?2)", params![text, at])?;
+            let id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok((id, true))
         })
     }
 
-    /// Whether an idea with this id existed.
-    pub fn remove_idea(&self, id: i64) -> Result<bool> {
-        self.with(|db| {
-            db.execute("DELETE FROM ideas WHERE id = ?1", [id])
-                .map(|n| n > 0)
-        })
+    pub fn idea(&self, id: i64) -> Result<Option<Value>> {
+        self.with(|db| db.query_row("SELECT id,text,added_at,removed_at FROM ideas WHERE id=?1", [id], |r| Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?, "text": r.get::<_, String>(1)?,
+            "added_at": r.get::<_, String>(2)?, "removed_at": r.get::<_, Option<String>>(3)?
+        }))).optional())
+    }
+
+    pub fn set_idea_removed(&self, id: i64, at: Option<&str>) -> Result<bool> {
+        self.with(|db| db.execute(
+            "UPDATE ideas SET removed_at=?2 WHERE id=?1 AND ((?2 IS NULL AND removed_at IS NOT NULL) OR (?2 IS NOT NULL AND removed_at IS NULL))", params![id,at]
+        ).map(|n| n > 0))
+    }
+
+    pub fn removed_ideas(&self) -> Result<Vec<Value>> {
+        self.with(|db| db.prepare("SELECT id,text,added_at,removed_at FROM ideas WHERE removed_at IS NOT NULL ORDER BY id")?
+            .query_map([], |r| Ok(serde_json::json!({"id":r.get::<_,i64>(0)?,"text":r.get::<_,String>(1)?,"added_at":r.get::<_,String>(2)?,"removed_at":r.get::<_,String>(3)?})))?.collect())
     }
 
     /// All parked ideas, oldest first.
     pub fn ideas(&self) -> Result<Vec<Idea>> {
         self.with(|db| {
-            db.prepare("SELECT id, text, added_at FROM ideas ORDER BY id")?
+            db.prepare("SELECT id, text, added_at FROM ideas WHERE removed_at IS NULL ORDER BY id")?
                 .query_map([], |r| {
                     Ok(Idea {
                         id: r.get(0)?,
@@ -633,13 +775,27 @@ fn agent_run(row: &Row) -> Result<StoredAgentRun> {
 }
 
 impl Store {
-    pub fn start_agent_run(&self, at: &str, initial: &Value) -> Result<i64> {
+    pub fn start_agent_run(&self, at: &str, initial: &Value) -> Result<(i64, bool)> {
         self.with(|db| {
-            db.execute(
+            let tx =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let existing = tx
+                .query_row(
+                    "SELECT id FROM agent_runs WHERE finished_at IS NULL ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = existing {
+                return Ok((id, false));
+            }
+            tx.execute(
                 "INSERT INTO agent_runs(started_at, initial) VALUES(?1, ?2)",
                 params![at, initial.to_string()],
             )?;
-            Ok(db.last_insert_rowid())
+            let id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok((id, true))
         })
     }
 
@@ -666,6 +822,7 @@ impl Store {
         self.with(|db| {
             let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
             let mut failures = json(tx.query_row("SELECT failures FROM agent_runs WHERE id = ?1", [id], |row| row.get::<_, String>(0))?);
+            if failures[scope]["error"] == failure["error"] { return Ok(true); }
             let version: i64 = if scope == "@portfolio" {
                 tx.query_row("SELECT COALESCE(MAX(id), 0) FROM portfolio", [], |row| row.get(0))?
             } else {
@@ -753,11 +910,11 @@ fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
     use sha1::{Digest, Sha1};
     let mut basis = serde_json::json!({"scope": scope});
     basis["projects"] = token_rows(db,
-        "SELECT id,name,path,status,status_note,goal,goal_due,added_at,identity_revision FROM projects WHERE (?1 IS NULL AND status != 'archived') OR id = ?1 ORDER BY id", scope)?;
+        "SELECT id,name,path,status,status_note,goal,goal_due,added_at,identity_revision FROM projects WHERE removed_at IS NULL AND ((?1 IS NULL AND status != 'archived') OR id = ?1) ORDER BY id", scope)?;
     basis["cards"] = token_rows(db,
-        "SELECT c.project_id,c.id,c.data FROM cards c JOIN projects p ON p.id=c.project_id WHERE c.id=(SELECT MAX(id) FROM cards WHERE project_id=c.project_id) AND ((?1 IS NULL AND p.status != 'archived') OR p.id=?1) ORDER BY p.id", scope)?;
+        "SELECT c.project_id,c.id,c.data FROM cards c JOIN projects p ON p.id=c.project_id WHERE c.id=(SELECT MAX(id) FROM cards WHERE project_id=c.project_id) AND p.removed_at IS NULL AND ((?1 IS NULL AND p.status != 'archived') OR p.id=?1) ORDER BY p.id", scope)?;
     basis["facts"] = token_rows(db,
-        "SELECT f.project_id,f.fingerprint,f.data FROM facts f JOIN projects p ON p.id=f.project_id WHERE (?1 IS NULL AND p.status != 'archived') OR p.id=?1 ORDER BY p.id", scope)?;
+        "SELECT f.project_id,f.fingerprint,f.data FROM facts f JOIN projects p ON p.id=f.project_id WHERE p.removed_at IS NULL AND ((?1 IS NULL AND p.status != 'archived') OR p.id=?1) ORDER BY p.id", scope)?;
     basis["feedback"] = token_rows(db,
         "SELECT item_id,project_id,value,note,item,at,snoozed_until FROM feedback WHERE ?1 IS NULL OR project_id=?1 OR value IN ('up','later','down') ORDER BY item_id", scope)?;
     if scope.is_none() {
@@ -768,7 +925,7 @@ fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
         )?;
         basis["ideas"] = token_rows(
             db,
-            "SELECT id,text FROM ideas WHERE ?1 IS NULL ORDER BY id",
+            "SELECT id,text FROM ideas WHERE ?1 IS NULL AND removed_at IS NULL ORDER BY id",
             scope,
         )?;
         basis["visit"] = token_rows(
@@ -863,7 +1020,53 @@ fn item_conflicts(
     Ok(conflicts)
 }
 
+/// Receipts and the written document share one transaction. A receipt is usable
+/// only while every context input still equals the state immediately after that write.
+fn replay_document(
+    db: &Connection,
+    scope: Option<&str>,
+    expected: &str,
+    request: &str,
+) -> Result<Option<(i64, String)>> {
+    let receipt = db.query_row(
+        "SELECT version,after_token FROM document_requests WHERE scope=?1 AND expected=?2 AND request=?3",
+        params![scope.unwrap_or("@portfolio"), expected, request],
+        |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)),
+    ).optional()?;
+    match receipt {
+        Some((version, token)) if context_token(db, scope)? == token => Ok(Some((version, token))),
+        _ => Ok(None),
+    }
+}
+
+fn record_document_request(
+    db: &Connection,
+    scope: Option<&str>,
+    expected: &str,
+    request: &str,
+    version: i64,
+) -> Result<String> {
+    let token = context_token(db, scope)?;
+    db.execute("INSERT OR REPLACE INTO document_requests(scope,expected,request,after_token,version) VALUES(?1,?2,?3,?4,?5)",
+        params![scope.unwrap_or("@portfolio"), expected,request,token,version])?;
+    Ok(token)
+}
+
 impl Store {
+    pub fn document_replay(
+        &self,
+        scope: Option<&str>,
+        expected: &str,
+        request: &str,
+    ) -> Result<Option<(i64, String)>> {
+        self.with(|db| {
+            let tx = db.unchecked_transaction()?;
+            let result = replay_document(&tx, scope, expected, request)?;
+            tx.commit()?;
+            Ok(result)
+        })
+    }
+
     pub fn context_token(&self, project: Option<&str>) -> Result<String> {
         self.with(|db| {
             let tx = db.unchecked_transaction()?;
@@ -880,17 +1083,24 @@ impl Store {
         basis: &CardBasis,
         data: &Value,
         expected: &str,
+        request: &str,
     ) -> Result<GuardedWrite> {
         self.with(|db| {
             let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
-            if context_token(&tx, Some(id))? != expected { return Ok(GuardedWrite::Conflict); }
+            if context_token(&tx, Some(id))? != expected {
+                return Ok(match replay_document(&tx, Some(id), expected, request)? {
+                    Some((version, token)) => GuardedWrite::Replayed(version, token),
+                    None => GuardedWrite::Conflict,
+                });
+            }
             let conflicts = item_conflicts(&tx, crate::cards::Kind::Card, Some(id), data)?;
             if !conflicts.is_empty() { return Ok(GuardedWrite::ItemConflict(conflicts)); }
             tx.execute("INSERT INTO cards(project_id,created_at,fingerprint,head,ci,basis,data,owner_basis) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
                 params![id,at,basis.fingerprint,basis.head,basis.ci,basis.parts.to_string(),data.to_string(),basis.owner.map(Value::to_string)])?;
             let version = tx.query_row("SELECT COUNT(*) FROM cards WHERE project_id=?1", [id], |r| r.get(0))?;
+            let after = record_document_request(&tx, Some(id), expected, request, version)?;
             tx.commit()?;
-            Ok(GuardedWrite::Saved(version))
+            Ok(GuardedWrite::Saved(version, after))
         })
     }
 
@@ -900,12 +1110,16 @@ impl Store {
         data: &Value,
         basis: &Value,
         expected: &str,
+        request: &str,
     ) -> Result<GuardedWrite> {
         self.with(|db| {
             let tx =
                 rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
             if context_token(&tx, None)? != expected {
-                return Ok(GuardedWrite::Conflict);
+                return Ok(match replay_document(&tx, None, expected, request)? {
+                    Some((version, token)) => GuardedWrite::Replayed(version, token),
+                    None => GuardedWrite::Conflict,
+                });
             }
             let conflicts = item_conflicts(&tx, crate::cards::Kind::Portfolio, None, data)?;
             if !conflicts.is_empty() {
@@ -916,8 +1130,9 @@ impl Store {
                 params![at, data.to_string(), basis.to_string()],
             )?;
             let version = tx.last_insert_rowid();
+            let after = record_document_request(&tx, None, expected, request, version)?;
             tx.commit()?;
-            Ok(GuardedWrite::Saved(version))
+            Ok(GuardedWrite::Saved(version, after))
         })
     }
 }
@@ -939,7 +1154,7 @@ fn changes_source(db: &Connection) -> Result<Value> {
         "SELECT p.id, p.name, p.status, f.data, c.id, c.data, c.owner_basis
          FROM projects p LEFT JOIN facts f ON f.project_id = p.id
          LEFT JOIN cards c ON c.id = (SELECT MAX(id) FROM cards WHERE project_id = p.id)
-         ORDER BY p.id",
+         WHERE p.removed_at IS NULL ORDER BY p.id",
     )?;
     let projects: Vec<Value> = statement
         .query_map([], |row| {

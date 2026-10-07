@@ -8,11 +8,11 @@ The owner builds about eight software projects at once, mostly through coding ag
 
 Watchtower answers that in a few minutes each morning. It is a local Windows app with a window the owner reads and a native console CLI that agents write through. Both use the same service and database. It serves these situations:
 
-- **Morning overview:** what changed overnight, what is at risk, what to do first today.
-- **Re-entry:** coming back to a project after days or weeks: what it is, how to start and use it, where things are, what happened since the owner last looked.
-- **Decisions:** questions agents could not settle alone, collected in one place, answered with a click or a short reply.
-- **Handoff:** turning a suggestion or open end into a ready-to-paste task for a coding agent.
-- **Learning the owner's taste:** the owner rates suggestions and ideas; agents never bring back what was rejected and adapt to what was welcomed.
+- Morning overview: what changed overnight, what is at risk, what to do first today.
+- Re-entry: coming back to a project after days or weeks: what it is, how to start and use it, where things are, what happened since the owner last looked.
+- Decisions: questions agents could not settle alone, collected in one place, answered with a click or a short reply.
+- Handoff: turning a suggestion or open end into a ready-to-paste task for a coding agent.
+- Learning the owner's taste: the owner rates suggestions and ideas; agents never bring back what was rejected and adapt to what was welcomed.
 
 When you extend Watchtower, start from a situation like these and ask what the owner needs to see or decide in it. New features should make the morning read shorter or a decision easier, not add reading.
 
@@ -20,12 +20,12 @@ When you extend Watchtower, start from a situation like these and ask what the o
 
 Two kinds of data, kept strictly apart:
 
-- **Facts** Watchtower measures itself, read-only, from git (and `gh` for CI): commits and the weekly activity curve, remote and unpushed commits, uncommitted work, extra worktrees, unmerged branches, CI state, releases, overnight work, lines of work that will collide, rebuildable disk space. Exact, free and instant. The window renders them directly.
-- **Interpretation** written by coding agents through the CLI: one **card** per project (headline, phase, re-entry, open ends, questions for the owner, suggestions, handbook, …) and one cross-project **portfolio brief** (today's focus, patterns, synergies, new app ideas, park or revive, assessments of the owner's parked ideas, and once a week a review of the past week). Agents follow the Skill in `skill/watchtower/`.
+- Facts Watchtower measures itself, read-only, from git (and `gh` for CI): commits and the weekly activity curve, remote and unpushed commits, uncommitted work, extra worktrees, unmerged branches, CI state, releases, overnight work, lines of work that will collide, rebuildable disk space. Exact, free and instant. The window renders them directly.
+- Interpretation written by coding agents through the CLI: one card per project (headline, phase, re-entry, open ends, questions for the owner, suggestions, handbook, …) and one cross-project portfolio brief (today's focus, patterns, synergies, new app ideas, park or revive, assessments of the owner's parked ideas, and once a week a review of the past week). Agents follow the Skill in `skill/watchtower/`.
 
-The daily run, done by an agent with the Skill (all commands use `--json`): `watchtower --json runs start` refreshes the facts and returns the due projects, with a reason (`no_card`, `changed`, `ci_changed`, `answered`, `status_changed`, `new_fields`, `stale`) → the agent studies each due repository read-only (`watchtower --json context <id>`, then the repository itself) → `watchtower --json card put --context-token ...` → `watchtower --json portfolio context` → `watchtower --json portfolio put --context-token ...` → `watchtower --json runs finish <id>`. Context tokens guard writes against newer documents, facts and owner instructions. `due` remains an untracked check; it compares a fingerprint of the facts with the one the card was written against, so a daily run only re-analyses what actually changed. Recorded runs preserve failures and the last successful completion.
+The daily run, done by an agent with the Skill: `watchtower runs start` refreshes facts and returns due projects with a reason (`no_card`, `changed`, `ci_changed`, `answered`, `status_changed`, `new_fields`, `stale`) → the agent reads `watchtower context <id>` and studies the repository read-only → `watchtower card put <id> --context-token ...` → `watchtower portfolio context` → `watchtower portfolio put --context-token ...` → `watchtower runs finish <id>`. Agents read ordinary text and follow output or job continuations; programs opt into `--json`. Context tokens guard writes against newer documents, facts and owner instructions. `due` remains an untracked check; it compares measured facts with the card's basis so a daily run only re-analyses what changed. Recorded runs preserve failures and the last successful completion.
 
-The owner's side, written only by the window: which projects to watch, ratings and replies (`feedback`), status (`active`, `parked`, `done`, `archived`) with a note to agents, a goal with a due date, focus items ticked off, parked ideas (the next brief assesses each one in `idea_checks`), window preferences, and visits (used for "new since your last visit" and "since you last opened this project"). Owner changes such as a reply, status, note or goal make the affected card due, so agents react to them in the next run.
+The owner's side is editable in the window or through the CLI on the owner's explicit instruction: watched projects, ratings and replies (`feedback`), status (`active`, `parked`, `done`, `archived`) with a note to agents, a goal with a due date, completed focus items, parked ideas (assessed by `idea_checks`), display preferences and visits. Reading through the CLI does not record a visit or acknowledge changes unless requested. Replies, status, notes and goals make the affected card due so agents react in the next run. A daily observation run never invents these owner decisions.
 
 The window never calls a model and never writes to a repository. It picks up agent writes within seconds by watching the database's data version.
 
@@ -33,36 +33,44 @@ The owner can separately assign a copied task; agent reports (`tasks report`) aw
 
 ## Principles
 
-- **Observe, never act on repositories.** Facts come from read-only git commands. Never add a git command that writes (commit, fetch, push, gc, checkout, …), and never add features that change, back up or clean the owner's repositories. Watchtower shows the state; the owner or their agents act.
-- **Local and private.** Everything stays in one folder on this machine. No telemetry, no network except `gh` for CI state. Cards must not contain credentials; the Skill tells agents so.
-- **Facts are exact, interpretation is honest.** The window shows measured numbers as measured. Agents cite evidence (file, function, fact field) and say when something is stale or uncertain.
-- **Short reading, clear next step.** Word limits in the schemas keep cards readable. Every open end, question and suggestion should lead to a concrete action or decision.
-- **The owner's word wins.** Ratings, replies, status notes and goals are instructions for agents. A rejected idea never returns.
-- **The CLI serves people and agents.** Ordinary commands show readable text. Agents explicitly pass the global `--json` flag for structured output, errors (with `hint`) and schemas; a fresh agent with only the Skill must be able to operate Watchtower without mistakes. Document payloads use `--file` or `--input-json`, never the output flag.
-- **Project identity survives renames.** Names and folder paths are editable; IDs stay stable. Update the existing record so cards, feedback, tasks and history remain attached. Never implement renaming by removing and re-adding a project.
+- Observe, never act on repositories. Facts come from read-only git commands. Never add a git command that writes (commit, fetch, push, gc, checkout, …), and never add features that change, back up or clean the owner's repositories. Watchtower shows the state; the owner or their agents act.
+- Local and private. Everything stays in one folder on this machine. No telemetry, no network except `gh` for CI state. Cards must not contain credentials; the Skill tells agents so.
+- Facts are exact, interpretation is honest. The window shows measured numbers as measured. Agents cite evidence (file, function, fact field) and say when something is stale or uncertain.
+- Short reading, clear next step. Word limits in the schemas keep cards readable. Every open end, question and suggestion leads to a concrete action or decision.
+- The owner's word wins. Ratings, replies, status notes and goals are instructions for agents. A rejected idea never returns.
+- The CLI serves people and agents. Both read ordinary text. Programs explicitly request `--json` for complete structured results, errors and schemas. A fresh agent with only the Skill must be able to finish work and recover from mistakes. Document payloads use `--file` or `--input-json`, never the output flag.
+- Project identity survives renames. Names and folder paths are editable; IDs stay stable. Update the existing record so cards, feedback, tasks and history remain attached. Never implement renaming by removing and re-adding a project.
+- Recovery preserves later work. Removed projects and ideas remain restorable. Document writes use context tokens; owner changes provide guarded undo where supported. An unknown or partial result is not permission to replay a mutation blindly. Report which effects remain saved.
 
 ## Layout
 
 - `src/main.rs` starts the console-only `Watchtower.exe` CLI (`cli.rs`); `src/bin/watchtower-ui.rs` starts the GUI-only `Watchtower-UI.exe` window (`app.rs`). The console process owns stdin, stdout, stderr and its exit status; never route CLI commands through a GUI process or attach a console after startup. The optional `desktop` feature contains the Tauri adapter and dependencies.
 - `src/cli_output.rs` renders readable command output. JSON mode preserves the service result and adds the success/error envelope; never infer JSON mode from redirection or choose it by default.
+- `src/cli_paging.rs` saves immutable text snapshots for bounded continuation. `src/cli_jobs.rs` owns the console deadline and detached workers; its saved result is replayed without rerunning the operation. `src/cli_usage.rs` records local command metadata without argument values or document text.
 - `src/service.rs` (`Watchtower`) owns all behavior: registration, facts refresh, due detection, context, card and portfolio writes (with merge and dry run), feedback, visits, goals, prefs and the window state. `cli.rs` and the Tauri commands in `app.rs` are thin adapters over it; put new behavior here, not in the adapters.
 - `src/facts.rs` measures one repository (`collect`) and computes the fingerprint (`fingerprint` over `basis()`; new informational facts fields stay out of the basis so they do not make cards due). Disk space is measured once a day by `space`, carried over in `service.rs`.
-- `src/cards.rs` defines the agent-written documents (card, portfolio brief) as schema data: field types, word limits, defaults. It validates writes, merges, reports fields a card lacks (`missing_fields` → due reason `new_fields`), and `watchtower --json schema` prints the same definition.
+- `src/cards.rs` defines the agent-written documents (card, portfolio brief) as schema data: field types, word limits, defaults. It validates writes, merges and reports fields a card lacks (`missing_fields` → due reason `new_fields`). `watchtower schema card` and `watchtower schema portfolio` describe the same definition; `--json` exports the schema.
 - `src/store.rs` is the SQLite persistence (WAL). Schema changes go through the migration list; existing databases must keep working.
 - `src/system.rs` owns the folder layout (both executables, `data\`, `skill\watchtower\`), exports the embedded Skill, and the Windows integration (autostart Run key targeting the window, user PATH targeting the folder).
 - `ui/` is the vanilla JS page in the window (`index.html`, `app.js`, `app.css`, no build step). It calls `app.rs` through `window.__TAURI__.core.invoke`. Three styles share one right-hand drawer with each project's full record: "Übergabe" (handover, read top to bottom), "Leitstand" (card grid with a side column) and "Handbuch" (reference sheets). Also: search (Ctrl+K), the decision round (all open questions one after another), "Auftrag kopieren" (a ready-to-paste task for a coding agent), the idea parking lot, the week review, the overnight view and the space overview.
-- `skill/watchtower/` is the Skill: `SKILL.md` (the workflow), `references/card-guide.md` (how to study a project and fill each card field), `references/portfolio-guide.md` (the brief), `references/cli.md` (every command and JSON field). It is embedded with `include_str!` and written next to the exe on start and by `watchtower status`.
-- `tests/`: `service.rs` (behavior contracts through the service), `cli.rs` (readable and JSON CLI output), `process.rs` (real executable streams, exit codes and shell completion), `facts.rs` (git measurements on temporary repositories); shared helpers with a fixed clock in `tests/common/mod.rs`.
+- `skill/watchtower/` is the Skill: `SKILL.md` (the workflow), `references/card-guide.md` (how to study a project and fill each card field), `references/portfolio-guide.md` (the brief), `references/cli.md` (data meanings, owner operations and recovery). It is embedded with `include_str!` and written next to the exe on startup and by `watchtower status`.
+- `tests/`: `service.rs` (service contracts), `cli.rs` (readable and JSON output), `process.rs` (real executable streams, shell completion, deadlines and recovery), `skill_commands.rs` (commands extracted from Skill examples), `facts.rs` (git measurements on temporary repositories); shared helpers use a fixed clock in `tests/common/mod.rs`.
 - `scripts/install.ps1` builds both release executables and installs them to `%LOCALAPPDATA%\Programs\Watchtower`, preserving data and the owner's autostart/PATH choices.
 
 ## Changing contracts
 
-The CLI's JSON output, error codes, due and brief reasons, and the card and portfolio schemas are contracts for agents.
+The CLI's command names, readable outcomes and continuation markers, JSON output, error codes, due/brief reasons and document schemas are contracts.
 
 - Change them deliberately and update the Skill in the same commit: `references/cli.md` must match `cli.rs` and the JSON the service returns; `card-guide.md` and `portfolio-guide.md` must describe every field the schema has.
 - Adding a card field: define it in `cards.rs` with a default, document it in the card guide, render it in the UI. Existing cards then become due with `new_fields`, so the next daily run fills the field everywhere.
 - The portfolio brief is rewritten only when fields it builds on change (`BRIEF_FIELDS` in `service.rs`). Add a card field there only if the brief uses it.
 - Skill text is runtime Agent-facing text: self-contained for a fresh agent that has never seen this repository, no references to its internals, only concepts the agent can observe or act on through the CLI. Keep it concise; every sentence costs every run.
+
+## Agent interface
+
+Read `docs/agent-interface.md` when changing a command, an owner capability, output, recovery or the operating Skill. It maps every Tauri endpoint to a CLI capability or an explicit exclusion, records ideal call sequences, output/deadline budgets, privacy boundaries and the reasons for runtime instructions. Keep that mapping and the Skill aligned with the implementation.
+
+Production agents operate the installed console executable from vBot or Codex shells. Use ordinary text for model reading and JSON only for programmatic parsing. Test against an explicit scratch `WATCHTOWER_HOME` or `--data-dir`; fault switches work only with the isolated-test opt-in described in the interface document. Validate behavior through real processes as well as the service; never claim model evaluations from deterministic tests.
 
 ## Conventions
 
