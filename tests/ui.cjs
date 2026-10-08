@@ -129,31 +129,51 @@ test('legacy effort estimates stay invisible while recommendations and task acti
   assert.match(a.copied.at(-1), /Fertig, wenn: Suggestion delivered/);
 });
 
-test('ideas follow authored priority and expand in place without losing ratings or task actions', async () => {
+test('ideas show the newest proposals globally and expand without losing ratings or task actions', async () => {
   const a = await app();
   a.state.projects[0].card.suggestions = [
     { id: 'first', type: 'next', title: 'First priority', why: 'Highest value' },
     { id: 'feature', type: 'feature', title: 'Later feature', why: 'Useful next', done_when: 'Feature works' },
     { id: 'cleanup', type: 'cleanup', title: 'Third suggestion', why: 'Less urgent' },
+    { id: 'extra1', type: 'feature', title: 'Older known idea' },
+    { id: 'extra2', type: 'feature', title: 'Unknown date idea' },
     { id: 'rejected', type: 'feature', title: 'Rejected suggestion' },
     { id: 'later', type: 'feature', title: 'Postponed suggestion' },
   ];
+  a.state.projects[0].suggestion_first_seen = {
+    first: '2026-10-07T08:00:00Z', feature: '2026-10-08T09:00:00Z',
+    cleanup: '2026-10-01T08:00:00Z', extra1: '2026-10-05T08:00:00Z', extra2: 'invalid',
+  };
+  a.state.projects[0].card_updated_at = '2026-10-09T12:00:00Z';
+  a.state.projects.push({ ...structuredClone(a.state.projects[0]), id: 'other', name: 'Other',
+    suggestion_first_seen: { other1: '2026-10-08T08:00:00Z', other2: '2026-10-06T08:00:00Z' },
+    card: { ...structuredClone(a.state.projects[0].card), suggestions: [
+      { id: 'other1', title: 'Other recent idea' }, { id: 'other2', title: 'Other older idea' },
+    ] },
+  });
   a.state.feedback = { feature: { value: 'up' }, rejected: { value: 'down' }, later: { value: 'later', snoozed_until: '2026-10-14' } };
   a.state.portfolio = { new_apps: [{ id: 'app', title: 'An app idea', pitch: 'Useful separately' }] };
+  a.state.new_app_first_seen = { app: '2026-10-08T10:00:00Z' };
   await a.ui.load(false);
   let markup = a.ui.blockIdeas();
-  assert.match(markup, /2 von 4 Vorschläge/);
+  assert.match(markup, /6 von 8 Vorschläge/);
+  assert.match(markup, /Neueste zuerst/);
   assert.match(markup, /First priority/);
   assert.match(markup, /An app idea/);
-  assert.doesNotMatch(markup, /Later feature|Third suggestion|Rejected suggestion|Postponed suggestion/);
+  assert.match(markup, /Later feature/);
+  assert.doesNotMatch(markup, /Third suggestion|Unknown date idea|Rejected suggestion|Postponed suggestion/);
+  const expectedOrder = ['An app idea', 'Later feature', 'Other recent idea', 'First priority', 'Other older idea', 'Older known idea'];
+  for (let i = 1; i < expectedOrder.length; i++) assert.ok(markup.indexOf(expectedOrder[i - 1]) < markup.indexOf(expectedOrder[i]));
+  assert.match(markup, /datetime="2026-10-08T09:00:00Z"/);
   assert.ok(markup.indexOf('data-expand="ideas"') < markup.indexOf('id="ideas-list"'));
   const toggle = () => a.dispatch('click', { target: { closest: selector => selector === '[data-expand]' ? { dataset: { expand: 'ideas' } } : null } });
   toggle();
   markup = a.ui.blockIdeas();
-  assert.match(markup, /4 Vorschläge/);
-  assert.match(markup, /wieder einen pro Projekt anzeigen/);
-  assert.ok(markup.indexOf('First priority') < markup.indexOf('Later feature'));
+  assert.match(markup, /8 Vorschläge/);
+  assert.match(markup, /nur die 6 neuesten anzeigen/);
+  assert.ok(markup.indexOf('Later feature') < markup.indexOf('First priority'));
   assert.ok(markup.indexOf('Later feature') < markup.indexOf('Third suggestion'));
+  assert.ok(markup.indexOf('Third suggestion') < markup.indexOf('Unknown date idea'));
   assert.match(markup, /data-task="feature"/);
   assert.match(markup, /data-item="feature"[^]*?data-v="up" aria-pressed="true"/);
   assert.doesNotMatch(markup, /Rejected suggestion|Postponed suggestion/);
@@ -161,19 +181,35 @@ test('ideas follow authored priority and expand in place without losing ratings 
   assert.match(a.copied.at(-1), /Fertig, wenn: Feature works/);
   toggle();
   markup = a.ui.blockIdeas();
-  assert.match(markup, /2 von 4 Vorschläge/);
+  assert.match(markup, /6 von 8 Vorschläge/);
   assert.match(markup, /data-task="first"/);
   assert.match(markup, /data-task="app"/);
   assert.match(markup, /data-mod-toggle="ideas" aria-expanded="true"/);
-  assert.doesNotMatch(markup, /Later feature/);
-  a.ui.note('feature');
+  assert.doesNotMatch(markup, /Third suggestion/);
+  a.ui.note('extra2');
   a.ui.render();
-  assert.match(a.ui.blockIdeas(), /data-note-save="feature"/);
+  assert.match(a.ui.blockIdeas(), /data-note-save="extra2"/);
   a.ui.note(null);
   a.ui.openSnooze('cleanup');
   assert.match(a.ui.blockIdeas(), /Third suggestion/);
   assert.match(a.ui.blockIdeas(), /data-snooze-save/);
+  a.ui.openDrawer('sample');
+  const drawer = a.node('#drawer-root').innerHTML;
+  assert.ok(drawer.indexOf('Later feature') < drawer.indexOf('First priority'));
+  assert.ok(drawer.indexOf('Third suggestion') < drawer.indexOf('Unknown date idea'));
   assert.equal(a.calls.filter(c => c.command === 'set_pref' || c.command === 'set_feedback').length, 0);
+});
+
+test('idea timestamp ties and missing history preserve authored order without inventing dates', async () => {
+  const a = await app();
+  a.state.projects[0].card.suggestions = ['first', 'second', 'unknown1', 'unknown2'].map(id => ({ id, title: `Idea ${id}` }));
+  a.state.projects[0].suggestion_first_seen = { first: '2026-10-08T08:00:00Z', second: '2026-10-08T08:00:00Z' };
+  await a.ui.load(false);
+  const markup = a.ui.blockIdeas();
+  const expectedOrder = ['Idea first', 'Idea second', 'Idea unknown1', 'Idea unknown2'];
+  for (let i = 1; i < expectedOrder.length; i++) assert.ok(markup.indexOf(expectedOrder[i - 1]) < markup.indexOf(expectedOrder[i]));
+  assert.equal((markup.match(/<time /g) || []).length, 2);
+  assert.doesNotMatch(markup, /data-expand="ideas"/);
 });
 
 test('previously hidden sections remain reachable and expand without changing other preferences', async () => {

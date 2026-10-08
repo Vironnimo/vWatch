@@ -19,7 +19,7 @@ Copy a task and separately mark it assigned when you hand it to an agent. Watcht
 
 Tasks and ideas show the action, reason and completion criterion without agent estimates of duration or effort. Existing estimates are hidden throughout the window, and new cards and briefs no longer request or store them. Owner-set due dates and measured activity remain available.
 
-The ideas overview follows the agent's priority order and offers all remaining suggestions directly through its list-size control. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
+The ideas overview shows the six newest proposals across projects and new apps first, with all remaining ideas available through its list-size control. Dates come from the first saved appearance of each stable item ID; rewriting or reintroducing an older idea does not make it new. Project drawers use the same ordering. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
 
 ## One folder, two entry points
 

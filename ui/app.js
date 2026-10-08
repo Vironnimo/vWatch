@@ -313,13 +313,15 @@
   function ideaCard(s, projects, projectId, kind) {
     if (noteFor === s.id) return noteForm(s.id, s.title);
     if (hiddenByRating(s.id)) return '';
+    const firstSeen = projectId ? (byId(projectId).suggestion_first_seen || {})[s.id] : (S.new_app_first_seen || {})[s.id];
+    const stamp = firstSeen && Number.isFinite(Date.parse(firstSeen)) ? `<time class="faint" datetime="${esc(firstSeen)}" title="Erstmals vorgeschlagen: ${esc(new Date(firstSeen).toLocaleString('de-DE'))}">vorgeschlagen ${esc(new Date(firstSeen).toLocaleDateString('de-DE'))}</time>` : '';
     return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
       ${myNote(s.id)}
       <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
-      <div class="taskrow">${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when })}</div></div>`;
+      <div class="taskrow">${stamp}${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when })}</div></div>`;
   }
 
   function blockFocus() {
@@ -501,21 +503,19 @@
     return cards.length ? mod('across', 'Quer durch alle Projekte', 'Was man erst sieht, wenn alle nebeneinander liegen', `<div class="cards3">${cards.join('')}</div>`) : '';
   }
 
+  const ideaTime = at => Number.isFinite(Date.parse(at)) ? Date.parse(at) : -Infinity;
+  const newestIdeas = items => [...items].sort((a, b) => ideaTime(b.firstSeen) - ideaTime(a.firstSeen));
   function blockIdeas() {
-    let total = 0, canExpand = false;
-    const fromProjects = visible().flatMap(p => {
-      const list = ((p.card || {}).suggestions || []).filter(s => s.id === noteFor || !hiddenByRating(s.id));
-      total += list.length;
-      canExpand ||= list.length > 1;
-      const first = list.find(x => x.id === noteFor || x.id === snoozeFor) || list[0];
-      return (expanded.ideas ? list : first ? [first] : []).map(s => ideaCard(s, [p.id], p.id, 'Aus dem Projekt'));
-    });
-    const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App')).filter(Boolean);
-    total += apps.length;
-    const cards = [...fromProjects, ...apps].filter(Boolean);
+    const fromProjects = visible().flatMap(p => ((p.card || {}).suggestions || []).map(s => ({ s, project: p.id, firstSeen: (p.suggestion_first_seen || {})[s.id] })));
+    const apps = ((S.portfolio || {}).new_apps || []).map(s => ({ s, project: null, firstSeen: (S.new_app_first_seen || {})[s.id] }));
+    const items = newestIdeas([...fromProjects, ...apps].filter(({ s }) => s.id === noteFor || !hiddenByRating(s.id)));
+    const total = items.length, limit = 6;
+    // Keep an open response form in place even when new ideas arrive ahead of it.
+    const shown = expanded.ideas ? items : items.filter(({ s }, i) => i < limit || s.id === noteFor || s.id === snoozeFor);
+    const cards = shown.map(({ s, project }) => ideaCard(s, project ? [project] : [], project, project ? 'Aus dem Projekt' : 'Neue App'));
     const count = cards.length < total ? `${cards.length} von ${total} Vorschlägen` : `${total} ${total === 1 ? 'Vorschlag' : 'Vorschläge'}`;
-    const control = `<div class="recent-controls"><span class="faint">${count}</span>${canExpand ? `<button class="more" type="button" data-expand="ideas" aria-expanded="${expanded.ideas}" aria-controls="ideas-list">${expanded.ideas ? 'wieder einen pro Projekt anzeigen' : `alle ${total} anzeigen`}</button>` : ''}</div>`;
-    return cards.length ? mod('ideas', 'Ideen', 'Vorschläge aus deinen Projekten und neue App-Ideen', `${control}<div class="cards3" id="ideas-list">${cards.join('')}</div>`) : '';
+    const control = `<div class="recent-controls"><span class="faint">${count}</span>${total > limit ? `<button class="more" type="button" data-expand="ideas" aria-expanded="${expanded.ideas}" aria-controls="ideas-list">${expanded.ideas ? `nur die ${limit} neuesten anzeigen` : `alle ${total} anzeigen`}</button>` : ''}</div>`;
+    return cards.length ? mod('ideas', 'Ideen', 'Neueste zuerst · Vorschläge aus deinen Projekten und neue App-Ideen', `${control}<div class="cards3" id="ideas-list">${cards.join('')}</div>`) : '';
   }
 
   // ideas the owner parks; the next brief says whether and where each one is worth doing
@@ -703,7 +703,7 @@
       body += `<div class="note" style="margin-top:20px">Noch keine Einschätzung. Der nächste Agent-Lauf schreibt sie. Bis dahin siehst du nur die Git-Fakten.</div>`;
     } else {
       const v = c.vision || {};
-      const suggestions = c.suggestions.map(sg => ideaCard(sg, [], p.id)).filter(Boolean).join('');
+      const suggestions = newestIdeas(c.suggestions.map(s => ({ s, firstSeen: (p.suggestion_first_seen || {})[s.id] }))).map(({ s }) => ideaCard(s, [], p.id)).filter(Boolean).join('');
       const r = c.reentry;
       const hist = (p.history || []).filter((h, i, a) => i === a.length - 1 || h.headline !== a[i + 1].headline);
       const stampOf = at => new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });

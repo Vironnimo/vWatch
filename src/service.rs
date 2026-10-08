@@ -3250,10 +3250,28 @@ impl Watchtower {
                 &self.warning_acknowledgements(&p.id)?,
                 &self.project_task_basis(&p.id)?,
             );
+            let cards = self.store.card_history(&p.id)?;
+            let suggestion_ids: Vec<&str> = card
+                .as_ref()
+                .and_then(|c| c.data["suggestions"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item["id"].as_str())
+                .collect();
+            // An edited or returning idea keeps the date of its first saved ID.
+            // Reuse the history needed below; never use the current card's date.
+            let mut suggestion_first_seen = Map::new();
+            for (at, data) in &cards {
+                for item in data["suggestions"].as_array().into_iter().flatten() {
+                    if let Some(id) = item["id"].as_str().filter(|id| suggestion_ids.contains(id)) {
+                        suggestion_first_seen
+                            .entry(id.to_owned())
+                            .or_insert_with(|| Value::String(at.clone()));
+                    }
+                }
+            }
             // the headline of every card version, newest first: the project's story in one line per update
-            let history: Vec<Value> = self
-                .store
-                .card_history(&p.id)?
+            let history: Vec<Value> = cards
                 .into_iter()
                 .enumerate()
                 .map(|(i, (at, data))| json!({"version": i + 1, "at": at, "headline": data["headline"], "phase": data["phase"]}))
@@ -3277,6 +3295,7 @@ impl Watchtower {
                     "facts_collected_at": stored.map(|s| s.collected_at),
                     "card": card.as_ref().map(|c| c.data.clone()),
                     "card_updated_at": card.map(|c| c.created_at),
+                    "suggestion_first_seen": suggestion_first_seen,
                     "card_outdated": outdated,
                     "warnings": self.project_warnings(&p.id)?,
                     "history": history,
@@ -3285,6 +3304,14 @@ impl Watchtower {
         }
         let changes = self.changes_digest(visit)?;
         let portfolio = self.store.latest_portfolio()?;
+        let new_app_ids: Vec<&str> = portfolio
+            .as_ref()
+            .and_then(|p| p.data["new_apps"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        let new_app_first_seen = self.store.new_app_first_seen(&new_app_ids)?;
         let feedback: Map<String, Value> = reactions
             .into_iter()
             .map(|f| {
@@ -3303,6 +3330,7 @@ impl Watchtower {
             "projects": projects,
             "portfolio": portfolio.as_ref().map(|p| p.data.clone()),
             "portfolio_updated_at": portfolio.map(|p| p.created_at),
+            "new_app_first_seen": new_app_first_seen,
             "ideas": self.store.ideas()?.iter().map(idea_json).collect::<Vec<_>>(),
             "tasks": self.store.tasks()?,
             "review_week": self.review_week().0,

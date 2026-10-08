@@ -360,6 +360,7 @@ details.hb > summary:hover h2 { color: var(--accent); }
 /* handing a task to a coding agent */
 .task { font-size: 12.5px; white-space: nowrap; }
 .taskrow { margin-top: 8px; }
+.taskrow time { display: block; margin-bottom: 6px; font-size: 12px; }
 .reentry .rmeta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
 /* search */

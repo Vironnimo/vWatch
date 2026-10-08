@@ -1188,6 +1188,117 @@ fn owner_choices_show_up_in_the_window_state() {
 }
 
 #[test]
+fn idea_recency_uses_first_saved_identity_across_edits_and_returns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    let suggestion = |id: &str, title: &str| json!({"id": id, "type": "feature", "title": title, "why": "Hilft beim Wiedereinstieg."});
+    let app = |id: &str, title: &str| json!({"id": id, "title": title, "pitch": "Offene Fragen sammeln.", "because": "Mehrere Projekte brauchen das."});
+    let old_suggestion = suggestion("sg-first", "Erste Idee");
+    let new_suggestion = suggestion("sg-second", "Zweite Idee");
+    let old_app = app("ap-first", "Erste App");
+    let new_app = app("ap-second", "Zweite App");
+    svc.put_card(
+        "demo",
+        card_with(json!({"suggestions": [old_suggestion]})),
+        false,
+        false,
+    )
+    .unwrap();
+    clock.advance(Duration::minutes(5));
+    svc.put_portfolio(
+        json!({"greeting": "Moin", "new_apps": [old_app]}),
+        false,
+        false,
+    )
+    .unwrap();
+    let first_card_at = "2026-09-30T08:00:00Z";
+    let first_app_at = "2026-09-30T08:05:00Z";
+    let state = svc.state(false).unwrap();
+    assert_eq!(
+        state["projects"][0]["suggestion_first_seen"],
+        json!({"sg-first": first_card_at})
+    );
+    assert_eq!(
+        state["new_app_first_seen"],
+        json!({"ap-first": first_app_at})
+    );
+
+    // Rewriting the title or authored order does not make the old idea newer.
+    clock.advance(Duration::days(1));
+    let second_at = "2026-10-01T08:05:00Z";
+    svc.put_card(
+        "demo",
+        json!({"suggestions": [new_suggestion, suggestion("sg-first", "Präzisierte erste Idee")]}),
+        true,
+        false,
+    )
+    .unwrap();
+    svc.put_portfolio(
+        json!({"new_apps": [new_app, app("ap-first", "Präzisierte erste App")]}),
+        true,
+        false,
+    )
+    .unwrap();
+    let state = svc.state(false).unwrap();
+    let suggestion_dates = json!({"sg-first": first_card_at, "sg-second": second_at});
+    let app_dates = json!({"ap-first": first_app_at, "ap-second": second_at});
+    assert_eq!(
+        state["projects"][0]["suggestion_first_seen"],
+        suggestion_dates
+    );
+    assert_eq!(state["new_app_first_seen"], app_dates);
+
+    // Only current items are sent to the window. Historical occurrences survive
+    // disappearance and even a rename or removal of the watched project.
+    clock.advance(Duration::days(1));
+    svc.put_card("demo", json!({"suggestions": []}), true, false)
+        .unwrap();
+    svc.put_portfolio(json!({"new_apps": []}), true, false)
+        .unwrap();
+    let state = svc.state(false).unwrap();
+    assert_eq!(state["projects"][0]["suggestion_first_seen"], json!({}));
+    assert_eq!(state["new_app_first_seen"], json!({}));
+    svc.rename_project("demo", "Anderer Name").unwrap();
+    svc.remove_project("demo").unwrap();
+    svc.restore_project("demo").unwrap();
+
+    clock.advance(Duration::days(1));
+    svc.put_card(
+        "demo",
+        json!({"suggestions": [old_suggestion, new_suggestion]}),
+        true,
+        false,
+    )
+    .unwrap();
+    svc.put_portfolio(json!({"new_apps": [old_app, new_app]}), true, false)
+        .unwrap();
+    let card_history = svc.store().card_history("demo").unwrap();
+    let portfolio_version = svc.store().latest_portfolio().unwrap().unwrap();
+    drop(svc);
+
+    // Existing databases need no backfill, and deriving display metadata must
+    // neither rewrite documents nor change their authored array order.
+    let (svc, _) = service(tmp.path());
+    let state = svc.state(false).unwrap();
+    assert_eq!(
+        state["projects"][0]["suggestion_first_seen"],
+        suggestion_dates
+    );
+    assert_eq!(state["new_app_first_seen"], app_dates);
+    assert_eq!(
+        state["projects"][0]["card"]["suggestions"][0]["id"],
+        "sg-first"
+    );
+    assert_eq!(state["portfolio"]["new_apps"][0]["id"], "ap-first");
+    assert_eq!(svc.store().card_history("demo").unwrap(), card_history);
+    let portfolio_after = svc.store().latest_portfolio().unwrap().unwrap();
+    assert_eq!(portfolio_after.version, portfolio_version.version);
+    assert_eq!(portfolio_after.data, portfolio_version.data);
+}
+
+#[test]
 fn a_ci_turning_red_or_green_makes_the_card_due() {
     use std::sync::{Arc, Mutex};
     let tmp = tempfile::tempdir().unwrap();

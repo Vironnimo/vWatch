@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 mod undo;
 use undo::OwnerScope;
@@ -513,6 +513,37 @@ impl Store {
                     })
                 })?
                 .collect()
+        })
+    }
+
+    /// First saved appearances of current app ideas, independent of later edits
+    /// or removal and return. Read only the idea lists and stop once all are found.
+    pub fn new_app_first_seen(&self, ids: &[&str]) -> Result<Map<String, Value>> {
+        let mut dates = Map::new();
+        if ids.is_empty() {
+            return Ok(dates);
+        }
+        self.with(|db| {
+            let mut stmt = db.prepare(
+                "SELECT created_at, json_quote(json_extract(data, '$.new_apps'))
+                 FROM portfolio WHERE json_valid(data) ORDER BY id",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let at: String = row.get(0)?;
+                let ideas = json(row.get(1)?);
+                for idea in ideas.as_array().into_iter().flatten() {
+                    if let Some(id) = idea["id"].as_str().filter(|id| ids.contains(id)) {
+                        dates
+                            .entry(id.to_owned())
+                            .or_insert_with(|| Value::String(at.clone()));
+                    }
+                }
+                if dates.len() == ids.len() {
+                    break;
+                }
+            }
+            Ok(dates)
         })
     }
 
