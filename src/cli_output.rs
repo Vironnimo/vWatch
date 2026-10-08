@@ -1164,6 +1164,7 @@ fn label(key: &str) -> String {
         "ci" => "CI",
         "url" => "URL",
         "context_token" => "Context token",
+        "hidden_modules" => "Collapsed modules",
         "has_card" => "Card available",
         "one_liner" => "One-line description",
         "waiting_on_you" => "Questions for the user",

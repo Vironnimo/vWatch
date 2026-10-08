@@ -246,7 +246,7 @@ enum SettingsCmd {
     Update {
         #[arg(long, value_parser = ["handover", "board", "handbook"], ignore_case = true)]
         style: Option<String>,
-        /// Module IDs separated by commas. An empty value shows every module.
+        /// Collapse these module IDs (comma-separated); headers stay visible. Empty expands all.
         #[arg(long)]
         hidden_modules: Option<String>,
     },

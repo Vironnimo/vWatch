@@ -152,11 +152,13 @@
   }
 
   // ---------- building blocks ----------
-  const hiddenMods = () => new Set(S.prefs.hidden_modules || []);
+  // Keep the stored preference compatible; formerly hidden sections now stay reachable.
+  const collapsedMods = () => new Set(S.prefs.hidden_modules || []);
   function mod(id, title, sub, body) {
     MOD_TITLES[id] = title;
-    if (hiddenMods().has(id) || !body) return '';
-    return `<section class="mod" data-mod="${id}"><div class="mod-head"><div><h2>${esc(title)}</h2>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div><button class="hide" type="button" data-hide="${id}" title="Diesen Baustein ausblenden">ausblenden</button></div>${body}</section>`;
+    if (!body) return '';
+    const collapsed = collapsedMods().has(id), action = collapsed ? 'ausklappen' : 'einklappen';
+    return `<section class="mod${collapsed ? ' is-collapsed' : ''}" data-mod="${id}"><div class="mod-head"><div><h2>${esc(title)}</h2>${sub && !collapsed ? `<div class="sub">${esc(sub)}</div>` : ''}</div><button class="mod-toggle" type="button" data-mod-toggle="${id}" aria-expanded="${!collapsed}" aria-controls="mod-${id}-body" aria-label="${esc(title)} ${action}"><span aria-hidden="true">${collapsed ? '▸' : '▾'}</span> ${action}</button></div><div class="mod-body" id="mod-${id}-body"${collapsed ? ' hidden' : ''}>${body}</div></section>`;
   }
   const dmod = (title, body, sub) => body ? `<section class="mod"><div class="mod-head"><div><h2>${esc(title)}</h2>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div></div>${body}</section>` : '';
 
@@ -243,7 +245,7 @@
     const c = S.changes;
     if (!c) return '';
     const entries = c.entries || [];
-    if (c.has_baseline && !entries.length) return hiddenMods().has('changes') ? '' : `<p class="digest-empty faint">Keine neuen Befunde seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
+    if (c.has_baseline && !entries.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">Keine neuen Befunde seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
     const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: 'Neu', resolved: 'Nicht mehr offen', decision_applied: 'Antwort übernommen' })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${esc(e.title)}</div>${e.detail ? `<div class="why">${esc(e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>Nächster Schritt:</b> ${esc(e.next_step)}</div>` : ''}</div>`;
     const body = entries.length ? `<div class="digest-items">${entries.slice(0, 3).map(row).join('')}</div>${entries.length > 3 ? `<details><summary class="more">${entries.length - 3} weitere Änderungen</summary><div class="digest-items">${entries.slice(3).map(row).join('')}</div></details>` : ''}` : `<p class="faint">${c.has_baseline ? 'Keine neuen Befunde seit deinem letzten Lesestand.' : 'Markiere den aktuellen Stand als gelesen. Danach siehst du hier nur neue Befunde, erledigte Punkte und übernommene Antworten.'}</p>`;
     const action = c.token && (entries.length || !c.has_baseline) ? `<div class="actions"><button class="btn" type="button" data-changes-read="${esc(c.token)}">${c.has_baseline ? 'Diese Änderungen als gelesen markieren' : 'Aktuellen Stand als gelesen markieren'}</button></div>` : '';
@@ -378,7 +380,7 @@
   }
 
   function blockRecent(limit = 10) {
-    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map(c => ({ ...c, project: p.id }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date));
+    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map(c => ({ ...c, project: p.id, reportedAt: p.card_updated_at || '' }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date) || b.reportedAt.localeCompare(a.reportedAt));
     if (!items.length) return '';
     const prevDay = S.previous_visit ? S.previous_visit.slice(0, 10) : null;
     const shownItems = showAllRecent ? items : items.slice(0, limit);
@@ -391,8 +393,8 @@
       const head = `<span class="t">${esc(c.title)}${fresh}</span><span class="pmark">${dot(c.project)}${esc(p ? p.name : c.project)}</span>`;
       return `${h}${c.detail ? `<details class="ev-item"><summary>${head}</summary><p>${esc(c.detail)}</p></details>` : `<div class="ev-item"><div class="sum">${head}</div></div>`}`;
     }).join('');
-    const more = items.length > limit ? `<button class="more" type="button" data-recent-all>${showAllRecent ? 'weniger anzeigen' : `alle ${items.length} anzeigen`}</button>` : '';
-    return mod('recent', 'Was passiert ist', 'Die größeren Änderungen der letzten 14 Tage. Klick zeigt Details', `<div class="events">${body}</div>${more}`);
+    const more = items.length > limit ? `<div class="recent-controls"><span class="faint">${showAllRecent ? `${items.length} Einträge` : `${limit} neueste von ${items.length}`}</span><button class="more" type="button" data-recent-all>${showAllRecent ? `nur die neuesten ${limit} anzeigen` : `alle ${items.length} anzeigen`}</button></div>` : '';
+    return mod('recent', 'Was passiert ist', 'Letzte 14 Tage, neueste zuerst. Am selben Tag stehen zuletzt aktualisierte Karten oben. Klick zeigt Details', `${more}<div class="events">${body}</div>`);
   }
 
   function blockSafety() {
@@ -670,7 +672,7 @@
       body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(r.next_step)}</div><div class="rmeta"><span class="effort">${esc(r.effort)}</span>${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
         + dmod('Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true)).join('')}</ul>` : '')
         + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' || o.kind === 'ci' ? 'bad' : o.kind === 'unpushed' ? 'warn' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
-        + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${c.recent_changes.map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
+        + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${[...c.recent_changes].sort((a, b) => b.date.localeCompare(a.date)).map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
         + dmod('Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
         + dmod('Vision und Fortschritt', v.statement || v.progress_note ? `<div>${v.statement ? `<div>${esc(v.statement)}</div>` : ''}${v.progress_pct != null ? `<div class="prog"><span style="width:${Number(v.progress_pct)}%"></span></div><div class="faint mono" style="font-size:12px">${Number(v.progress_pct)} %</div>` : ''}${v.progress_note ? `<div class="muted" style="font-size:14px;margin-top:6px">${esc(v.progress_note)}</div>` : ''}</div>` : '')
         + dmod('Was es heute kann', c.features.length ? `<div class="feat">${c.features.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : '')
@@ -862,11 +864,11 @@
 
   // ---------- page ----------
   function renderFoot() {
-    const hidden = [...hiddenMods()];
+    const collapsed = [...collapsedMods()];
     const ratedCount = Object.keys(S.feedback).filter(id => rated(id) === 'down' || rated(id) === 'later').length;
     const archived = S.projects.filter(p => p.status === 'archived');
     const parts = [];
-    if (hidden.length) parts.push(`Ausgeblendet: ${hidden.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-unhide="${esc(id)}">einblenden</button>`).join(' · ')}`);
+    if (collapsed.length) parts.push(`Eingeklappt: ${collapsed.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-mod-toggle="${esc(id)}">ausklappen</button>`).join(' · ')}`);
     if (ratedCount) parts.push(`${ratedCount} ${ratedCount === 1 ? 'bewerteter Vorschlag' : 'bewertete Vorschläge'} ${showRated ? (ratedCount === 1 ? 'wird angezeigt' : 'werden angezeigt') : 'ausgeblendet'} <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'anzeigen'}</button>`);
     if (archived.length) parts.push(`Archiviert: ${archived.map(p => plink(p.id)).join(', ')}`);
     parts.push(`Karten schreiben Agents mit <code class="mono">watchtower</code> · Fakten misst die App selbst`);
@@ -1143,7 +1145,22 @@
       });
     } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
   }
-  async function setPref(key, value) { S.prefs[key] = value; render(); try { await call('set_pref', { key, value }); } catch (e) { toast('Einstellung nicht gespeichert.'); } }
+  async function setPref(key, value) {
+    const previous = S.prefs[key];
+    S.prefs[key] = value;
+    render();
+    try { await call('set_pref', { key, value }); }
+    catch (e) {
+      if (S.prefs[key] === value) { S.prefs[key] = previous; render(); }
+      toast('Einstellung nicht gespeichert.');
+    }
+  }
+  async function toggleModule(id) {
+    const collapsed = collapsedMods();
+    if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+    await setPref('hidden_modules', [...collapsed]);
+    $(`[data-mod-toggle="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  }
   async function setStatus(status, note) {
     const id = openId;
     try { await call('set_status', { id, status, note }); clearProjectDraft(id, 'status_note', note); await load(false); }
@@ -1294,10 +1311,8 @@
     if (sw) { setPref('style', sw.dataset.style); window.scrollTo(0, 0); return; }
     const fbBtn = t.closest('.fb button');
     if (fbBtn) { e.stopPropagation(); setFeedback(fbBtn.parentElement, fbBtn.dataset.v); return; }
-    const hide = t.closest('[data-hide]');
-    if (hide) { const id = hide.dataset.hide; setPref('hidden_modules', [...hiddenMods(), id]); toast(`„${MOD_TITLES[id]}“ ausgeblendet.`, () => setPref('hidden_modules', [...hiddenMods()].filter(x => x !== id))); return; }
-    const unhide = t.closest('[data-unhide]');
-    if (unhide) { setPref('hidden_modules', [...hiddenMods()].filter(x => x !== unhide.dataset.unhide)); return; }
+    const moduleToggle = t.closest('[data-mod-toggle]');
+    if (moduleToggle) { toggleModule(moduleToggle.dataset.modToggle); return; }
     if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
     if (t.closest('[data-since-close]')) { if (since) since.dismissed = true; if (openId) openDrawer(openId, true); return; }
     if (t.closest('[data-recent-all]')) { showAllRecent = !showAllRecent; render(); return; }

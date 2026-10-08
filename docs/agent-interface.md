@@ -83,6 +83,10 @@ The screen/event-handler pass covers behavior outside those endpoints:
 
 The CLI also exposes agent-only operations: measured refreshes, guarded card/brief writes, schema reads, run tracking, task reports, document history, trash restoration, saved output, jobs, usage and recovery activity.
 
+The legacy preference name `hidden_modules` and CLI flag `--hidden-modules` now mean collapsed sections: their headers remain visible and can reopen them directly. Existing saved values require no migration. The window's recent-event list sorts by event date descending, then card update timestamp descending for same-day ties, preserving authored order within one card. The timestamp orders reports; it does not invent event times.
+
+This behavior is covered by 30 passing UI checks, including legacy collapsed values, persistence, a failed preference save and list-size controls. The installed window was also exercised on a separate database copy: reopen a previously hidden activity section, show all 28 entries, return to the latest ten, and collapse while retaining the header. The owner's display preferences and feedback remained unchanged. The 133 Rust tests and strict Clippy passed; the display-label change was rechecked through the CLI/output contract suites.
+
 ## Call sequences
 
 Counts below are protocol design targets confirmed by command/contract tests, not measurements of fresh-model behavior. They exclude reading repository evidence and Skill references. A page or unfinished job adds its necessary continuation; it does not repeat the underlying operation.

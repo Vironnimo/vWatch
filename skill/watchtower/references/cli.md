@@ -116,7 +116,7 @@ On the user's explicit decision, use `tasks confirm <task-id> --revision <revisi
 
 `changes show` returns the digest since the last explicit acknowledgement and its snapshot token. `changes read --token <token>` marks exactly that snapshot read on the user's request. Reading views, refreshing facts and recording visits do not silently acknowledge the digest.
 
-`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|handbook>` changes the requested style. `--hidden-modules <comma-separated-ids>` changes the hidden sections; an empty value shows every section. Omitted options remain unchanged. Autostart and PATH cannot be toggled through these commands; those are the user's choices in the window's settings.
+`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|handbook>` changes the requested style. `--hidden-modules <comma-separated-ids>` collapses those sections; their headers stay visible for reopening. An empty value expands every section. The existing flag and stored key retain their names for compatibility; previously hidden sections now appear collapsed. Omitted options remain unchanged. Autostart and PATH cannot be toggled through these commands; those are the user's choices in the window's settings.
 
 ## Daily-run data
 

@@ -12,7 +12,7 @@ const expose = `globalThis.ui = {
   draft: (id, text) => { drafts[id] = text; },
   note: id => { noteFor = id; },
   answer: id => { answering = id; },
-  render, blockIdeas, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus,
+  render, blockIdeas, blockRecent, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus, toggleModule,
   openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead,
   openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit,
   removeProject, removeIdea
@@ -80,6 +80,68 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+test('previously hidden sections remain reachable and expand without changing other preferences', async () => {
+  const a = await app((command, args, state) => {
+    if (command === 'set_pref') state.prefs[args.key] = structuredClone(args.value);
+    return {};
+  });
+  a.state.projects[0].card.recent_changes = [{ date: '2026-10-07', title: 'Latest event' }];
+  a.state.prefs.hidden_modules = ['recent', 'pulse'];
+  for (const style of ['handover', 'board']) {
+    a.state.prefs.style = style;
+    await a.ui.load(false);
+    const markup = a.node('#view').innerHTML;
+    assert.match(markup, /class="mod is-collapsed" data-mod="recent"/);
+    assert.match(markup, /data-mod-toggle="recent" aria-expanded="false" aria-controls="mod-recent-body"/);
+    assert.match(markup, /id="mod-recent-body" hidden/);
+    assert.match(markup, /Was passiert ist ausklappen/);
+    assert.doesNotMatch(markup, /data-hide=/);
+  }
+  await a.ui.toggleModule('recent');
+  assert.equal(a.state.prefs.hidden_modules.join(','), 'pulse');
+  assert.equal(a.state.prefs.style, 'board');
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /data-mod-toggle="recent" aria-expanded="true"/);
+  assert.doesNotMatch(a.node('#view').innerHTML, /id="mod-recent-body" hidden/);
+  await a.ui.toggleModule('recent');
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /id="mod-recent-body" hidden/);
+  assert.equal(a.calls.filter(c => c.command === 'set_pref').length, 2);
+  assert.equal(a.calls.filter(c => c.command === 'mark_changes_read').length, 0);
+});
+
+test('a failed collapse restores the visible section and reports the unsaved preference', async () => {
+  const a = await app(command => {
+    if (command === 'set_pref') throw new Error('database busy');
+    return {};
+  });
+  a.state.projects[0].card.recent_changes = [{ date: '2026-10-07', title: 'Still visible' }];
+  await a.ui.load(false);
+  await a.ui.toggleModule('recent');
+  assert.match(a.node('#view').innerHTML, /data-mod-toggle="recent" aria-expanded="true"/);
+  assert.doesNotMatch(a.node('#view').innerHTML, /id="mod-recent-body" hidden/);
+  assert.match(a.node('#toast').innerHTML, /Einstellung nicht gespeichert/);
+});
+
+test('recent list expands and reduces at the top without collapsing its section', async () => {
+  const a = await app();
+  a.state.projects[0].card.recent_changes = Array.from({ length: 12 }, (_, i) => ({ date: '2026-10-07', title: `Event ${i}` }));
+  await a.ui.load(false);
+  let markup = a.ui.blockRecent();
+  assert.ok(markup.indexOf('data-recent-all') < markup.indexOf('class="events"'));
+  assert.match(markup, /10 neueste von 12/);
+  assert.doesNotMatch(markup, /Event 11/);
+  const click = () => a.dispatch('click', { target: { closest: selector => selector === '[data-recent-all]' ? {} : null } });
+  click();
+  markup = a.ui.blockRecent();
+  assert.match(markup, /Event 11/);
+  assert.match(markup, /nur die neuesten 10 anzeigen/);
+  assert.match(markup, /data-mod-toggle="recent" aria-expanded="true"/);
+  click();
+  assert.doesNotMatch(a.ui.blockRecent(), /Event 11/);
+  assert.equal(a.calls.filter(c => c.command === 'set_pref').length, 0);
+});
 
 test('a pending decision can only be submitted once and advances one question', async () => {
   const pending = deferred();
@@ -543,4 +605,46 @@ test('agent status remains distinct from fact freshness in every layout', async 
     assert.match(a.node('#view').innerHTML, /Gesamtbrief fehlt/);
     assert.doesNotMatch(a.node('#view').innerHTML, /no_card|· missing/);
   }
+});
+
+test('recent activity puts newer same-day reports before the initial limit without promoting older events', async () => {
+  const a = await app();
+  const earlier = a.state.projects[0];
+  earlier.card_updated_at = '2026-10-07T10:00:00Z';
+  earlier.card.recent_changes = Array.from({ length: 12 }, (_, i) => ({ date: '2026-10-07', title: `Earlier report ${i}` }));
+  const latest = structuredClone(earlier);
+  latest.id = 'latest'; latest.name = 'Latest'; latest.card_updated_at = '2026-10-07T11:00:00Z';
+  latest.card.recent_changes = [
+    { date: '2026-10-06', title: 'Older event in the newest card' },
+    { date: '2026-10-07', title: 'Latest report first' },
+    { date: '2026-10-07', title: 'Latest report second' },
+  ];
+  a.state.projects.push(latest);
+  await a.ui.load(false);
+  const initial = a.ui.blockRecent();
+  assert.match(initial, /Latest report first/);
+  assert.match(initial, /Latest report second/);
+  assert.ok(initial.indexOf('Latest report first') < initial.indexOf('Latest report second'));
+  assert.ok(initial.indexOf('Latest report second') < initial.indexOf('Earlier report 0'));
+  assert.match(initial, /Earlier report 7/);
+  assert.doesNotMatch(initial, /Earlier report 8|Older event in the newest card/);
+
+  const complete = a.ui.blockRecent(100);
+  assert.ok(complete.indexOf('Earlier report 11') < complete.indexOf('Older event in the newest card'));
+  assert.equal(latest.card.recent_changes[0].title, 'Older event in the newest card');
+});
+
+test('project recent activity is newest first and keeps the authored order within a date', async () => {
+  const a = await app();
+  a.state.projects[0].card.recent_changes = [
+    { date: '2026-10-06', title: 'Earlier project event' },
+    { date: '2026-10-07', title: 'Latest project event first' },
+    { date: '2026-10-07', title: 'Latest project event second' },
+  ];
+  await a.ui.load(false);
+  a.ui.openDrawer('sample');
+  const html = a.node('#drawer-root').innerHTML;
+  assert.ok(html.indexOf('Latest project event first') < html.indexOf('Latest project event second'));
+  assert.ok(html.indexOf('Latest project event second') < html.indexOf('Earlier project event'));
+  assert.equal(a.state.projects[0].card.recent_changes[0].title, 'Earlier project event');
 });

@@ -11,6 +11,8 @@ You rate every suggestion in the window (gut / später / Quatsch), optionally wi
 
 The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. A changes digest lists new and resolved open ends since you last marked it read.
 
+Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
+
 Copy a task and separately mark it assigned when you hand it to an agent. Watchtower keeps its completion criterion and reported result even when the original suggestion changes; you confirm the result or reopen the task. Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact remains visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
 
 ## One folder, two entry points
