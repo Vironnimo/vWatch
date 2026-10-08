@@ -64,6 +64,48 @@ fn json_output(output: &Output, code: i32) -> Value {
 }
 
 #[test]
+fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
+    let home = tempfile::tempdir().unwrap();
+    let svc = watchtower::Watchtower::open(&home.path().join("watchtower.db")).unwrap();
+    let saved = svc
+        .put_portfolio(json!({"greeting": "Alles aktuell"}), false, false)
+        .unwrap();
+
+    let output = run(home.path(), &["runs", "start", "--no-refresh"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let text = String::from_utf8(output.stdout).unwrap();
+    let continuation = text
+        .lines()
+        .find_map(|line| line.strip_prefix("Next: watchtower "))
+        .expect("a current run still has a synthesis continuation");
+    let args: Vec<_> = continuation.split_whitespace().collect();
+    assert!(args.ends_with(&["portfolio", "context"]));
+    let context = run(home.path(), &args);
+    assert_eq!(context.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&context.stdout).contains("Alles aktuell"));
+
+    let started = json_output(
+        &run(home.path(), &["runs", "start", "--no-refresh", "--json"]),
+        0,
+    );
+    assert_eq!(started["due"]["portfolio"]["due"], false);
+    assert!(started["next"]
+        .as_str()
+        .unwrap()
+        .ends_with("portfolio context"));
+    let finished = json_output(
+        &run(
+            home.path(),
+            &["runs", "finish", &started["run_id"].to_string(), "--json"],
+        ),
+        0,
+    );
+    assert_eq!(finished["state"], "complete");
+    assert_eq!(finished["run"]["portfolio"]["version"], saved["version"]);
+}
+
+#[test]
 fn executable_reports_json_exit_codes_and_usage_on_the_right_streams() {
     let home = tempfile::tempdir().unwrap();
     let result = json_output(&run(home.path(), &["--json", "projects", "list"]), 0);

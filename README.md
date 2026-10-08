@@ -27,7 +27,7 @@ Tasks and ideas show the action, reason and completion criterion without agent e
 
 The ideas collection combines project suggestions, app ideas, cross-project possibilities and your own ideas. Filters separate "Neu", "Gut gefunden", "Später", "Beauftragt", "Abgeschlossen", "Abgelehnt" and "Alle". A positive rating never creates an assignment. Rated and assigned proposals remain findable after a later report omits them; removing your own idea still moves it to restorable trash. Deferred ideas return to "Neu" when their date arrives.
 
-Ideas sort newest first by the first saved appearance of their stable ID, including in project drawers. Rewriting or reintroducing an older idea does not make it new. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
+Ideas sort newest first by the first saved appearance of their stable ID, including in project drawers. Rewriting or reintroducing an older idea does not make it new. Each project review includes reflection on useful improvements, followed by a synthesis across all projects, even when reports are current. Existing suggestions do not block new ones. Agents save worthwhile proposals, respect rejected or deferred ideas, and report what was newly added or why a considered direction did not qualify.
 
 ## One folder, two entry points
 

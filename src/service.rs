@@ -2877,9 +2877,19 @@ impl Watchtower {
         status["due"] = due.clone();
         status["next"] = due["next"]
             .as_str()
+            .filter(|next| next.starts_with("watchtower context "))
             .map(|s| json!(s))
-            .unwrap_or_else(|| json!(format!("watchtower runs finish {id}")));
-        status["instruction"] = json!(format!("Process every project in due.projects with the Skill, then the due portfolio brief. Save documents using the token from their corresponding context. If a step cannot be completed, use runs fail for run {id} with --error describing that failure and --project when it affects one project. Finish with watchtower runs finish {id}; only complete confirms a successful run."));
+            .or_else(|| {
+                status["run"]["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|project| project["status"] == "failed")
+                    .and_then(|project| project["id"].as_str())
+                    .map(|id| json!(format!("watchtower context {id}")))
+            })
+            .unwrap_or_else(|| json!("watchtower portfolio context"));
+        status["instruction"] = json!(format!("Review every due or failed project in this run with the Skill, including reflection on useful improvements before saving its card. Then always read portfolio context and synthesize opportunities across all projects, even when nothing is due. Save due or changed documents using their context tokens; after repairing a recorded failure, save even unchanged content to clear it. Report new ideas separately from retained ones, or a concrete considered direction and why it did not qualify. If a step cannot be completed, use runs fail for run {id} with --error describing that failure and --project when it affects one project. After reflection and synthesis, finish with watchtower runs finish {id}; complete confirms current reports and readable facts, not that the idea search was performed."));
         Ok(status)
     }
 
@@ -2978,7 +2988,7 @@ impl Watchtower {
             .filter_map(|project| project["id"].as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        Some(format!("Vervollständige den Watchtower-Lauf {}. Prüfe zuerst `watchtower runs status` und `watchtower due`. Bearbeite alle dort fälligen Projekte mit der Watchtower-Skill; offene Projekte dieses Laufs: {}. Lies Antworten und Statusnotizen des Besitzers. Schreibe Karten und danach den fälligen Portfolio-Brief jeweils mit dem context_token aus dem zuvor gelesenen Kontext. Melde nicht behebbare Fehler für Lauf {} über runs fail mit --error und deiner Fehlerbeschreibung; bei einem Projekt zusätzlich --project mit dessen ID. Schließe mit `watchtower runs finish {}` ab und behaupte Vollständigkeit nur, wenn der zurückgegebene Status complete ist.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
+        Some(format!("Vervollständige den Watchtower-Lauf {} mit der Watchtower-Skill. Prüfe `watchtower runs status` und `watchtower due`; offene Projekte dieses Laufs: {}. Bearbeite fällige und fehlgeschlagene Projekte. Berücksichtige die Antworten und Statusnotizen des Besitzers. Leite nach jeder Projektprüfung auch sinnvolle Verbesserungsmöglichkeiten ab, bevor du die Karte speicherst. Lies anschließend immer `watchtower portfolio context` und verbinde die Erkenntnisse aller Projekte zu möglichen Ideen, auch wenn kein Bericht fällig ist. Speichere fällige oder geänderte Dokumente mit ihrem context_token. Nach tatsächlich behobenem Lauf-Fehler speichere auch unveränderten Inhalt als neue Version, um den Fehler abzulösen. Unterscheide im Ergebnis neue von übernommenen Ideen; ohne neue Idee nenne eine konkret geprüfte Richtung und ihren Ausschlussgrund. Melde nicht behebbare Fehler für Lauf {} über runs fail mit --error und deiner Fehlerbeschreibung; bei einem Projekt zusätzlich --project mit dessen ID. Schließe nach der Reflexion und Synthese mit `watchtower runs finish {}` ab. Nur complete bestätigt aktuelle Berichte und lesbare Fakten; es prüft nicht deine Ideensuche.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
     }
 
     fn pending_run_replies(

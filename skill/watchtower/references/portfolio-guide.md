@@ -10,7 +10,18 @@ Run `watchtower portfolio context` and follow every output page before writing. 
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
 - Respect task assignments, reported results awaiting review, project status and acknowledged warnings. Do not suggest assigning the same work twice or reversing a deliberate choice.
-- Actively consider new app ideas and cross-project opportunities in every daily brief, even when suggestions already exist. Look for concrete unmet needs or useful combinations of existing capabilities. Retained ideas do not reserve all available places; compare them with new candidates. Add ideas when the evidence supports them, without a daily novelty quota.
+
+## Synthesize after the project reviews
+
+Do this in every daily run, even when no report is due. Bring together the project-review outcomes and observations collected along the way with all summaries in this context. Start from what the projects help the user accomplish, not just their current tasks or existing suggestions. An unchanged project can provide the missing capability for another project's need.
+
+Look for repeated friction, complementary capabilities, useful transfers of a proven approach, and work that could disappear through simplification. Also consider unmet needs that none of the current projects serves well. Derive concrete possibilities from these connections; a list of shared risks or today's focus is not a substitute for ideas. Check the strongest candidates against actual capabilities, current proposals, user decisions and assigned work. Read more source only where it changes that judgment.
+
+Choose where each useful idea belongs: improve one project through its `suggestions`; connect existing work through `synergies`; propose `new_apps` when a distinct need warrants a separate app. Do not force every idea into existing projects, and do not invent an app merely because the list is empty. Evidence supports the need and available building blocks; the proposed solution may be new. Explain the user benefit and relevant sources in the destination field. Keep useful `cross_project_hints` in mind even if no combination is ready yet.
+
+Evaluate the user's unmet need before choosing a project or implementation. Existing project boundaries are not fixed: consider the wider workflow and gaps between the apps. A missing integration, shared format or identifier is design work, not evidence against an idea's usefulness. Separate uncertain benefit from unresolved implementation; for a promising idea, name the assumption and a concrete way to check it instead of silently discarding it.
+
+Compare new candidates with retained ideas rather than treating occupied slots as unavailable. Preserve IDs for the same ideas and omit IDs for new ones. Record worthwhile ideas in Watchtower, not only in the final chat reply. If nothing new qualifies, the run reply should name a concrete candidate direction and why it did not qualify. This is a selection result, not a demand for filler or a new user-facing checklist.
 
 ## Field meanings
 

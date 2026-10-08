@@ -127,6 +127,9 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     );
     assert_eq!(project(&started, "demo")["card_version"], saved["version"]);
     assert_eq!(started["latest"]["portfolio"]["status"], "current");
+    // Current documents still lead the agent to cross-project synthesis;
+    // freshness is not evidence that it has considered useful possibilities.
+    assert_eq!(started["next"], "watchtower portfolio context");
     assert_eq!(
         started["latest"]["portfolio"]["initial_version"],
         saved_brief["version"]
@@ -170,6 +173,12 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
         .unwrap();
     svc.run_fail(id, None, "Die Zusammenfassung konnte nicht fertig werden")
         .unwrap();
+    // Freshness alone cannot clear a recorded failed review. Resuming the
+    // active run must lead back to that project before portfolio synthesis.
+    let resumed = svc.run_start(false).unwrap();
+    assert_eq!(resumed["run_id"], id);
+    assert_eq!(resumed["due"]["projects"], json!([]));
+    assert_eq!(resumed["next"], "watchtower context demo");
     let failed = svc.run_finish(id).unwrap();
     assert_eq!(failed["state"], "failed");
     assert_eq!(project(&failed, "demo")["status"], "failed");

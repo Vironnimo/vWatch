@@ -5,7 +5,7 @@ description: Operate Watchtower's project overview. Use when the user asks for a
 
 # Watchtower
 
-Watchtower is the user's morning overview of their software projects: measured git facts, project cards and a portfolio brief. Use its CLI for reading and changing Watchtower; never edit its database or files directly. The window shows saved changes within seconds; report the outcome in your reply because the user does not need to read command output.
+Watchtower is the user's morning overview of their software projects: measured git facts, project cards and a portfolio brief. A daily run both updates understanding and discovers useful possibilities: reflect after each project, then connect the findings across projects. Use its CLI for reading and changing Watchtower; never edit its database or files directly. The window shows saved changes within seconds; report the outcome in your reply because the user does not need to read command output.
 
 ## Run the CLI
 
@@ -45,12 +45,12 @@ If a command prints nothing or is interrupted, run `watchtower activity` to reco
 
 | The user says | CLI action |
 |---|---|
-| "Übersicht", "Leitstand", "Übergabe", "Handbuch" | `overview`, `projects show <project-id>`, `card show <project-id>` |
+| "Heute", "Projekte", "Übersicht", "Handbuch" | `overview`, `projects show <project-id>`, `card show <project-id>` |
 | "aktualisieren", "Morgenlauf" | `runs start`, then the daily run below |
 | "Projekt bearbeiten", "umbenennen", "verschoben" | `projects update <project-id> --name ... --path ...` |
 | "parken", "erledigt", "archivieren", "Ziel" | `projects status`, `projects goal` |
 | "gut", "später", "Quatsch", "antworten", "abgehakt" | `feedback set`; values `up`, `later`, `down`, `answered`, `done` |
-| "Ideenparkplatz" | `ideas list`, `ideas add`, `ideas remove` |
+| "Ideen" | Project `suggestions`, brief `synergies` and `new_apps`; `ideas list/add/remove` only for the user's own parked ideas |
 | "Auftrag", "zugewiesen", "Ergebnis prüfen" | `tasks list`, `tasks create`, `tasks report`, `tasks confirm` |
 | "Warnung bewusst akzeptieren", "Änderungen gelesen" | `warnings acknowledge`, `changes read` |
 
@@ -64,26 +64,26 @@ Replace `<placeholders>` with the values described beside each recipe. File path
    ```powershell
    watchtower runs start
    ```
-   Keep the returned run ID. Done when you know the due projects, their reasons, unreadable projects and whether the portfolio brief is due. Missing folders are problems to report; never create replacement projects for them. If nothing is due, continue to step 5.
-2. Before writing cards, read `references/card-guide.md`. For each due project, take its ID from the run output:
+   Keep the returned run ID. Done when you know the due projects, their reasons, unreadable projects, any recorded failures in this run and whether the portfolio brief is due. Missing folders are problems to report; never create replacement projects for them. If no project is due or failed, continue to step 4: current reports still need the cross-project reflection.
+2. Before writing cards, read `references/card-guide.md`. For each due or failed project, take its ID from the run output:
    ```powershell
    watchtower context <project-id>
    ```
-   Read every context page and study the repository as the guide describes. Keep the context token. Done when each proposed change has evidence and incorporates the user's replies, goals, decisions and task state.
+   Read every context page and study the repository as the guide describes. Keep the context token. Before saving this project, reflect on its purpose, user friction, useful capabilities and what could become simpler or unnecessary. Derive and evaluate concrete opportunities, including ones absent from its TODOs. Done when you have both an evidenced state update and an idea-selection outcome: worthwhile proposals to save, or specific considered directions that do not earn a proposal. Keep a short outcome note and useful cross-project observations for step 4; an unchanged card is not a reason to skip reflection.
 3. Write the card as a UTF-8 JSON file in your own temporary folder outside the watched repository. If no previous card exists, provide a complete card. If a card exists, write only the changed top-level fields and add `--merge` to this command. Save with the token from step 2:
    ```powershell
    watchtower card put <project-id> --context-token <context-token> --file <card-file>
    ```
    A supplied list or nested object replaces that entire field; keep its unchanged entries and item IDs. Done when the result confirms a saved card and names no unfilled fields. Fix warnings that would omit findings or owner instructions. If the studied card needs no changes, confirm it with `--merge --input-json '{}'` instead of a file. A validation failure names the fields to fix; `--dry-run` is available when you need validation without a save, not as a mandatory extra call.
-4. If the brief was due or a card changed, read `references/portfolio-guide.md`, then:
+4. After all project reviews, always read `references/portfolio-guide.md`, then:
    ```powershell
    watchtower portfolio context
    ```
-   Read every page, write the brief to your temporary folder and save with that context's token:
+   Read every page and combine all project summaries with the observations collected during this run. Include unchanged projects in this synthesis; they need no fresh repository inspection unless a promising connection needs checking. Work through the guide's cross-project reflection before choosing priorities and ideas. If the brief is due, your synthesis changes it, or you have repaired a recorded brief failure, write the brief to your temporary folder and save with that context's token:
    ```powershell
    watchtower portfolio put --context-token <context-token> --file <brief-file>
    ```
-   Done when the brief is saved and covers the focus, ideas and weekly review due in its context.
+   A new project-specific idea found here belongs in that project's card: read its context, merge the proposal, then reread portfolio context before saving the brief. Done when the synthesis is complete and any required brief is saved, including the weekly review due in its context. A current, unchanged brief without a recorded failure needs no write, but still needs an idea-selection outcome. After actually repairing a failed review, save even unchanged content (`--merge --input-json '{}'`): only a newer version clears that recorded failure.
 5. For a project that could not be updated, record its cause and next step; continue with the others:
    ```powershell
    watchtower runs fail <run-id> --project <project-id> --error "<cause and next step>"
@@ -92,9 +92,9 @@ Replace `<placeholders>` with the values described beside each recipe. File path
    ```powershell
    watchtower runs finish <run-id>
    ```
-   Only `complete` means every required update succeeded. Report saved cards, the brief's focus, unresolved failures and urgent findings in a few lines. Do not describe an incomplete run as finished successfully.
+   `complete` confirms current reports and readable facts; it cannot verify your reflection. Before finishing, check that each reviewed project has an idea-selection outcome and that you completed the synthesis. Report saved cards, the focus, unresolved failures and newly saved ideas by title, distinguishing them from retained ideas. If none were added, name the strongest considered direction and the concrete reason it did not earn a proposal; "nothing changed" or "ideas already exist" is not that reason. Do not describe an incomplete run as finished successfully.
 
-For parallel work, give each project worker its ID, due reason, this Skill and its own temporary folder. Each worker reads its context, saves its card and reports the result. Write the brief after those workers finish.
+For parallel work, give each project worker its ID, due reason, this Skill and its own temporary folder. Each worker completes steps 2–3 and returns the save outcome, new versus retained proposals, the strongest considered direction with its selection reason, and useful cross-project observations. A bare "card current" is not a complete handoff: obtain the missing reflection before synthesizing. The coordinating agent completes step 4 after the workers finish, using their findings and all project summaries rather than just concatenating their suggestions.
 
 ### 2. Update one card or answer a project question
 
