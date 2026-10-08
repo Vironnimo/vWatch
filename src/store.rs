@@ -959,11 +959,13 @@ fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
             "SELECT id,text FROM ideas WHERE ?1 IS NULL AND removed_at IS NULL ORDER BY id",
             scope,
         )?;
-        basis["visit"] = token_rows(
-            db,
-            "SELECT value FROM prefs WHERE key='last_visit' AND ?1 IS NULL",
-            scope,
-        )?;
+        // The brief only needs to know whether the owner opened Watchtower since
+        // its previous version. Later visits do not change that interpretation.
+        basis["previous_portfolio_opened"] = Value::Bool(db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM prefs WHERE key='last_visit' AND json_extract(value, '$') >= (SELECT created_at FROM portfolio ORDER BY id DESC LIMIT 1))",
+            [],
+            |row| row.get(0),
+        )?);
     }
     // These owner-facing features are absent in databases from before their migration.
     for (table, query) in [
@@ -1220,21 +1222,14 @@ fn changes_token(snapshot: &Value) -> String {
 }
 
 impl Store {
-    /// Reading or refreshing the window never moves an existing read baseline.
-    /// Only the first owner visit establishes one automatically.
-    pub(crate) fn changes_snapshot(&self, first_visit: bool, at: &str) -> Result<ChangesSnapshot> {
+    /// Reading or visiting never creates or moves the explicit read baseline.
+    pub(crate) fn changes_snapshot(&self) -> Result<ChangesSnapshot> {
         self.with(|db| {
-            let transaction = rusqlite::Transaction::new_unchecked(
-                db,
-                if first_visit {
-                    rusqlite::TransactionBehavior::Immediate
-                } else {
-                    rusqlite::TransactionBehavior::Deferred
-                },
-            )?;
+            let transaction =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Deferred)?;
             let current = changes_source(&transaction)?;
             let token = changes_token(&current);
-            let mut baseline = transaction
+            let baseline = transaction
                 .query_row(
                     "SELECT value FROM prefs WHERE key = 'changes_read'",
                     [],
@@ -1242,14 +1237,6 @@ impl Store {
                 )
                 .optional()?
                 .map(json);
-            if first_visit && baseline.is_none() {
-                let saved = serde_json::json!({"at": at, "snapshot": current});
-                transaction.execute(
-                    "INSERT INTO prefs(key, value) VALUES('changes_read', ?1)",
-                    [saved.to_string()],
-                )?;
-                baseline = Some(saved);
-            }
             transaction.commit()?;
             Ok(ChangesSnapshot {
                 current,

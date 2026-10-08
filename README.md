@@ -4,22 +4,30 @@ A local morning overview of all your software projects: where each one stands, w
 
 Watchtower holds two kinds of data:
 
-- **Facts** it measures itself from git: activity, backup (remote), uncommitted and unpushed work, leftover worktrees and branches, GitHub CI state. Exact and free.
+- **Facts** it measures itself from git: activity, configured remotes, uncommitted and unpushed work, additional worktrees and branches, GitHub CI state. A remote is not proof of a backup; missing measurements remain unknown.
 - **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `watchtower due` tells an agent which projects actually changed, so a daily run only re-analyses those.
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
-The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. "Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes (including uncommitted files, unpushed commits, worktrees, branches, remotes and CI) stay in the project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Changes remain unread until you explicitly mark them read.
+Four always-reachable areas organize the window: **Heute** brings together decisions, blocked work, results awaiting your confirmation, next steps and unread reports; **Projekte** keeps project voices, current state, tasks and expandable history and facts; **Ideen** collects suggestions and your own ideas; **Handbuch** helps you start and use each project. Routine Git work does not determine the attention order. Unread content and an outdated agent report are different signals.
+
+"Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes stay in project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Project and activity markers share the explicit read snapshot. Even the first visit does not create a read baseline: use "Aktuellen Stand als gelesen markieren" after reading. Refreshing facts or reopening the window never acknowledges reports.
 
 A compact report-status control beside fact freshness shows the last check's completion time, which project reports changed and which were kept, plus any unfinished work. Failures and pending replies remain visible in its label. The overview summary uses ordinary reading size so project content comes first.
 
 Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
 
-Copy a task and separately mark it assigned when you hand it to an agent. Watchtower keeps its completion criterion and reported result even when the original suggestion changes; you confirm the result or reopen the task. Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact remains visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
+"Auftrag vorbereiten" opens a preview with the task, reason and completion criterion. "Nur kopieren" copies without assigning; "Beauftragen und kopieren" first saves the assignment, then copies its task number and reporting instructions. You paste that text into your agent. If copying fails after saving, the assignment remains available for another copy. Watchtower retains the task and its source even when a suggestion leaves the current report; you confirm a reported result or reopen the task.
+
+The project drawer begins with purpose, current state, next step and its project voice. "Weiterarbeiten", "Starten & Handbuch" and "Verlauf & Fakten" provide direct access to the rest. Status and goals have a compact summary with an edit control. Search opens the matching section and highlights the result. Commit curves and any retained agent progress estimate stay in project details, outside the morning overview.
+
+Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact stays visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
 
 Tasks and ideas show the action, reason and completion criterion without agent estimates of duration or effort. Existing estimates are hidden throughout the window, and new cards and briefs no longer request or store them. Owner-set due dates and measured activity remain available.
 
-The ideas overview shows the six newest proposals across projects and new apps first, with all remaining ideas available through its list-size control. Dates come from the first saved appearance of each stable item ID; rewriting or reintroducing an older idea does not make it new. Project drawers use the same ordering. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
+The ideas collection combines project suggestions, app ideas, cross-project possibilities and your own ideas. Filters separate "Neu", "Gut gefunden", "Später", "Beauftragt", "Abgeschlossen", "Abgelehnt" and "Alle". A positive rating never creates an assignment. Rated and assigned proposals remain findable after a later report omits them; removing your own idea still moves it to restorable trash. Deferred ideas return to "Neu" when their date arrives.
+
+Ideas sort newest first by the first saved appearance of their stable ID, including in project drawers. Rewriting or reintroducing an older idea does not make it new. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
 
 ## One folder, two entry points
 
@@ -75,7 +83,7 @@ To rename a watched project or reconnect its moved folder, use its stable ID wit
 ```bash
 cargo test
 cargo clippy --all-targets
-node --test tests/ui.cjs
+node --test tests/ui.cjs tests/ui-drawer.cjs tests/ui-handoff.cjs tests/ui-ideas.cjs tests/ui-overview.cjs
 cargo build --release
 cargo test --no-default-features
 cargo run --bin Watchtower -- due --no-refresh

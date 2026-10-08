@@ -1,85 +1,7 @@
-// Run with `node --test tests/ui.cjs`; no browser packages are required.
+// Run with node --test tests/ui*.cjs.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-
-const source = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');
-const expose = `globalThis.ui = {
-  load, startRound, closeRound, roundStep, setFeedback, saveNote, saveAnswer,
-  highlight: (text, query) => { searchQ = query; return highlight(text); },
-  draft: (id, text) => { drafts[id] = text; },
-  note: id => { noteFor = id; },
-  answer: id => { answering = id; },
-  render, blockIdeas, blockRecent, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus, toggleModule,
-  openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead,
-  openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit,
-  removeProject, removeIdea
-};`;
-
-function fixture() {
-  return {
-    today: '2026-10-07', review_week: '2026-W40', prefs: { style: 'handover' },
-    feedback: {}, ideas: [], snooze_days: 7,
-    projects: [{
-      id: 'sample', name: 'Sample', path: 'C:/sample', status: 'active',
-      card: {
-        headline: 'Ready', phase: 'active', features: [], open_ends: [],
-        recent_changes: [], milestones: [], health_notes: [], cross_project_hints: [],
-        reentry: { next_step: 'Continue' },
-        suggestions: [{ id: 's1', title: 'Suggestion', why: 'Useful', type: 'feature' }],
-        waiting_on_you: [1, 2, 3].map(n => ({
-          id: `q${n}`, title: `Question ${n}`, options: [{ answer: `Option ${n}` }],
-        })),
-      },
-    }],
-  };
-}
-
-async function app(invoke = () => ({})) {
-  const state = fixture(), nodes = new Map(), events = new Map(), calls = [], copied = [];
-  let document;
-  const node = selector => {
-    if (!nodes.has(selector)) nodes.set(selector, {
-      innerHTML: '', value: '', textContent: '', hidden: false, scrollTop: 0,
-      focus() { document.activeElement = this; }, select() {},
-      setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
-      attributes: {}, addEventListener() {}, setAttribute(key, value) { this.attributes[key] = value; },
-      querySelector: child => node(`${selector} ${child}`), querySelectorAll: () => [],
-    });
-    return nodes.get(selector);
-  };
-  document = {
-    querySelector: node, querySelectorAll: selector => nodes.has(selector) ? [nodes.get(selector)] : [], activeElement: null,
-    addEventListener(type, handler) {
-      const list = events.get(type) || [];
-      list.push(handler); events.set(type, list);
-    },
-  };
-  const context = vm.createContext({
-    document, CSS: { escape: x => x }, setInterval() {}, setTimeout() {}, clearTimeout() {},
-    navigator: { clipboard: { writeText: async text => { copied.push(text); } } },
-    window: {
-      addEventListener() {}, scrollTo() {},
-      __TAURI__: { core: { invoke: async (command, args) => {
-        calls.push({ command, args });
-        return command === 'state' ? structuredClone(state) : invoke(command, args, state);
-      } } },
-    },
-  });
-  vm.runInContext(source.replace('load(true).then(refreshFacts);', expose), context);
-  await context.ui.load(false);
-  return { ui: context.ui, state, node, calls, copied, document, dispatch: (type, event) => {
-    for (const handler of events.get(type) || []) handler(event);
-  } };
-}
-
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
-}
+const { app, fixture, deferred } = require('./ui-helpers.cjs');
 
 test('legacy effort estimates stay invisible while recommendations and task actions remain usable', async () => {
   const a = await app();
@@ -98,22 +20,25 @@ test('legacy effort estimates stay invisible while recommendations and task acti
     assert.doesNotMatch(markup, /class="effort"/);
     assert.doesNotMatch(markup, />(?:half-day|hour|day|week|S|M|L)</);
   };
-  for (const style of ['handover', 'board', 'handbook']) {
+  for (const style of ['handover', 'board', 'ideas', 'handbook']) {
     a.state.prefs.style = style;
     await a.ui.load(false);
     const overview = a.node('#view').innerHTML;
     noEstimates(overview);
-    if (style !== 'handbook') {
-      for (const title of ['Focus item', 'Pattern item', 'Synergy item', 'Parked idea', 'Fits the existing project']) assert.ok(overview.includes(title));
-      for (const id of ['f1', 'p1', 'y1', 'idea:7']) assert.ok(overview.includes(`data-task="${id}"`));
+    if (style === 'handover') {
+      assert.match(overview, /Focus item/);
+      assert.match(overview, /data-task="f1"/);
       assert.match(overview, /data-focus-done="f1"/);
     }
-    if (style === 'handover') {
-      assert.match(overview, /New app item/);
-      assert.match(overview, /data-task="n1"/);
-      assert.match(overview, /data-task="s1"/);
+    if (style === 'board') {
+      for (const title of ['Pattern item', 'Synergy item']) assert.ok(overview.includes(title));
+      for (const id of ['p1', 'y1']) assert.ok(overview.includes(`data-task="${id}"`));
+      assert.match(overview, /3 Entscheidungen/);
     }
-    if (style === 'board') assert.match(overview, /3 Entscheidungen · 0 offene Enden/);
+    if (style === 'ideas') {
+      for (const title of ['New app item', 'Synergy item', 'Parked idea', 'Fits the existing project']) assert.ok(overview.includes(title));
+      for (const id of ['n1', 'y1', 's1', 'idea:7']) assert.ok(overview.includes(`data-task="${id}"`));
+    }
     a.ui.openDrawer('sample');
     const drawer = a.node('#drawer-root').innerHTML;
     noEstimates(drawer);
@@ -219,16 +144,14 @@ test('previously hidden sections remain reachable and expand without changing ot
   });
   a.state.projects[0].card.recent_changes = [{ date: '2026-10-07', title: 'Latest event' }];
   a.state.prefs.hidden_modules = ['recent', 'pulse'];
-  for (const style of ['handover', 'board']) {
-    a.state.prefs.style = style;
-    await a.ui.load(false);
-    const markup = a.node('#view').innerHTML;
-    assert.match(markup, /class="mod is-collapsed" data-mod="recent"/);
-    assert.match(markup, /data-mod-toggle="recent" aria-expanded="false" aria-controls="mod-recent-body"/);
-    assert.match(markup, /id="mod-recent-body" hidden/);
-    assert.match(markup, /Was passiert ist ausklappen/);
-    assert.doesNotMatch(markup, /data-hide=/);
-  }
+  a.state.prefs.style = 'board';
+  await a.ui.load(false);
+  const markup = a.node('#view').innerHTML;
+  assert.match(markup, /class="mod is-collapsed" data-mod="recent"/);
+  assert.match(markup, /data-mod-toggle="recent" aria-expanded="false" aria-controls="mod-recent-body"/);
+  assert.match(markup, /id="mod-recent-body" hidden/);
+  assert.match(markup, /Was passiert ist ausklappen/);
+  assert.doesNotMatch(markup, /data-hide=/);
   await a.ui.toggleModule('recent');
   assert.equal(a.state.prefs.hidden_modules.join(','), 'pulse');
   assert.equal(a.state.prefs.style, 'board');
@@ -248,6 +171,7 @@ test('a failed collapse restores the visible section and reports the unsaved pre
     return {};
   });
   a.state.projects[0].card.recent_changes = [{ date: '2026-10-07', title: 'Still visible' }];
+  a.state.prefs.style = 'board';
   await a.ui.load(false);
   await a.ui.toggleModule('recent');
   assert.match(a.node('#view').innerHTML, /data-mod-toggle="recent" aria-expanded="true"/);
@@ -320,9 +244,11 @@ test('a refreshed card updates the active round and keeps its answer draft', asy
   assert.match(a.node('#round-root').innerHTML, /Question 2/);
 });
 
-test('later and down ratings leave the optional explanation visible on the overview', async () => {
+test('later and down ratings leave the optional explanation visible in the ideas collection', async () => {
   for (const value of ['later', 'down']) {
     const a = await app();
+    a.state.prefs.style = 'ideas';
+    await a.ui.load(false);
     await a.ui.setFeedback({ dataset: { item: 's1' } }, value);
     if (value === 'later') await a.ui.saveSnooze('2026-10-14');
     assert.match(a.node('#view').innerHTML, /data-note-save="s1"/);
@@ -357,15 +283,19 @@ test('search highlights text without rewriting mark tags or HTML entities', asyn
 
 test('refresh preserves unsent idea and project text', async () => {
   const a = await app();
+  a.state.prefs.style = 'ideas';
+  await a.ui.load(false);
   const input = (id, value) => a.dispatch('input', {
     target: { id, value, matches: () => false },
   });
   input('idea-text', 'A useful new app');
   a.ui.openDrawer('sample');
+  a.dispatch('click', { target: { closest: selector => selector === '[data-drawer-edit]' ? {} : null } });
   input('goal-text', 'Ship next month');
   input('status-note', 'Only fix bugs');
   await a.ui.load(false);
   assert.match(a.node('#view').innerHTML, /value="A useful new app"/);
+  assert.doesNotMatch(a.node('#drawer-root').innerHTML, /id="project-owner-fields" hidden/);
   assert.match(a.node('#drawer-root').innerHTML, /value="Ship next month"/);
   assert.match(a.node('#drawer-root').innerHTML, /value="Only fix bugs"/);
 });
@@ -422,6 +352,8 @@ test('removing projects and ideas retains their data and offers targeted undo in
     return { removed: args?.id };
   });
   a.state.ideas = [{ id: 17, text: 'A useful idea', added_at: '2026-10-07' }];
+  a.state.prefs.style = 'ideas';
+  await a.ui.load(false);
   const originalProject = structuredClone(a.state.projects[0]);
   const originalIdea = structuredClone(a.state.ideas[0]);
   await a.ui.openPanel();
@@ -547,6 +479,7 @@ test('a copied task labels today as export date instead of evidence date', async
 
 test('later waits for an explicit future calendar date and preserves its note', async () => {
   const a = await app();
+  a.state.prefs.style = 'ideas';
   a.state.feedback.s1 = { value: 'up', note: 'Keep this reason', at: '2026-10-06T12:00:00Z' };
   await a.ui.load(false);
   await a.ui.setFeedback({ dataset: { item: 's1' } }, 'later');
@@ -611,7 +544,10 @@ test('copying never assigns; assignment is explicit and copied tracked tasks req
     }
     return {};
   });
+  a.state.prefs.style = 'ideas';
+  await a.ui.load(false);
   await a.ui.copyTask('s1');
+  assert.equal(a.copied.length, 1);
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 0);
   await a.ui.assignTask('s1');
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 1);
@@ -676,28 +612,40 @@ test('confirmation sends the displayed task revision and refreshes a changed rep
   assert.match(a.node('#toast').innerHTML, /Prüfe zuerst das neue Ergebnis/);
 });
 
-test('acknowledging a warning reduces attention without hiding measured facts', async () => {
+test('routine Git stays neutral while acknowledging a collision reduces attention without hiding facts', async () => {
   const a = await app((command, args, state) => {
     if (command === 'set_warning_ack') {
-      const warning = state.projects[0].warnings[0];
+      const warning = state.projects[0].warnings.find(w => w.key === args.key);
       warning.acknowledged = !!args.note; warning.note = args.note;
     }
     return {};
   });
   const p = a.state.projects[0];
+  p.card.waiting_on_you = [];
   p.facts = { is_git: true, has_remote: false, dirty: { files: 2 }, commits: { weekly: Array(26).fill(0) }, remotes: [] };
   p.warnings = [{ key: 'no_remote', title: 'Kein Remote', acknowledged: false }];
+  a.state.prefs.style = 'board';
   await a.ui.load(false);
   const before = a.ui.risk(p);
+  assert.equal(before, 0);
   a.dispatch('input', { target: { value: 'Intentionally local', dataset: { warningNote: 'sample:no_remote' }, matches: () => false } });
   await a.ui.saveWarning('sample', 'no_remote');
-  assert.equal(a.ui.risk(p), before - 2);
+  assert.equal(a.ui.risk(p), before);
   assert.match(a.node('#view').innerHTML, /bewusst ohne Remote/);
-  assert.match(a.node('#view').innerHTML, /2 Dateien offen/);
+  assert.match(a.node('#view').innerHTML, /2 Dateien, \+0\/−0/);
   a.ui.openDrawer('sample');
   assert.match(a.node('#drawer-root').innerHTML, /Intentionally local/);
   await a.ui.saveWarning('sample', 'no_remote', true);
   assert.equal(a.ui.risk(p), before);
+  p.facts.collisions = [{ a: { kind: 'main' }, b: { kind: 'worktree', name: 'feature' }, count: 1, files: ['src/lib.rs'] }];
+  p.warnings.push({ key: 'worktrees', title: 'Weitere Arbeitslinien', acknowledged: false });
+  await a.ui.load(false);
+  assert.ok(a.ui.risk(p) > before);
+  a.dispatch('input', { target: { value: 'Coordinated edits', dataset: { warningNote: 'sample:worktrees' }, matches: () => false } });
+  await a.ui.saveWarning('sample', 'worktrees');
+  assert.equal(a.ui.risk(p), before);
+  assert.match(a.node('#drawer-root').innerHTML, /src\/lib\.rs/);
+  assert.match(a.node('#drawer-root').innerHTML, /Coordinated edits/);
   p.warnings.push({ key: 'ci_red', title: 'CI ist fehlgeschlagen', can_acknowledge: false });
   await a.ui.load(false);
   assert.match(a.node('#drawer-root').innerHTML, /CI ist fehlgeschlagen/);
@@ -802,7 +750,7 @@ test('older check records do not pretend reports were rewritten or invent a comp
   await a.ui.load(false);
   assert.equal(a.node('#report-status-summary').textContent, 'Berichte noch ungeprüft');
   details = a.node('#report-status-body').innerHTML;
-  assert.match(details, /„Aktualisieren“ misst nur die Git-Fakten/);
+  assert.match(details, /„Git-Fakten messen“ erneuert keine Agent-Berichte/);
 });
 
 test('recent activity puts newer same-day reports before the initial limit without promoting older events', async () => {

@@ -695,6 +695,81 @@ fn portfolio_context_exposes_action_evidence_and_measurement_limits() {
 }
 
 #[test]
+fn current_contexts_hide_legacy_estimates_without_rewriting_evidence_or_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    let mut legacy_card = svc.card("demo").unwrap()["card"].clone();
+    legacy_card["reentry"]["effort"] = json!("half-day");
+    legacy_card["suggestions"][0]["effort"] = json!("M");
+    // Only the known obsolete slots are removed; arbitrary evidence stays intact.
+    legacy_card["preserved_extension"] = json!({"effort": "this is application data"});
+    legacy_card["suggestions"][0]["evidence"] = json!("docs/effort.md");
+    svc.store()
+        .rewrite_latest_card("demo", &legacy_card)
+        .unwrap();
+    let item = legacy_card["suggestions"][0]["id"].as_str().unwrap();
+    svc.set_feedback(item, Some("up"), Some("Bitte behalten"))
+        .unwrap();
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let mut legacy_brief = svc.portfolio().unwrap()["portfolio"].clone();
+    for field in ["focus", "synergies", "new_apps", "idea_checks"] {
+        legacy_brief[field] =
+            json!([{"id": field, "title": "Aufheben", "effort": "S", "evidence": "README.md"}]);
+    }
+    svc.store().rewrite_latest_portfolio(&legacy_brief).unwrap();
+    let card_history = svc.store().card_history("demo").unwrap();
+    let portfolio_history = || {
+        svc.store()
+            .portfolio_history()
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.version, p.created_at, p.data, p.basis))
+            .collect::<Vec<_>>()
+    };
+    let original_portfolio_history = portfolio_history();
+    let feedback = svc.feedback(None).unwrap();
+
+    let card_context = svc.context("demo").unwrap();
+    assert!(card_context["previous_card"]["card"]["reentry"]
+        .get("effort")
+        .is_none());
+    assert!(card_context["previous_card"]["card"]["suggestions"][0]
+        .get("effort")
+        .is_none());
+    assert_eq!(
+        card_context["previous_card"]["card"]["preserved_extension"],
+        legacy_card["preserved_extension"]
+    );
+    assert_eq!(
+        card_context["previous_card"]["card"]["suggestions"][0]["evidence"],
+        "docs/effort.md"
+    );
+    assert!(card_context["feedback"][0]["item"].get("effort").is_none());
+    assert_eq!(card_context["feedback"][0]["note"], "Bitte behalten");
+    let portfolio_context = svc.portfolio_context().unwrap();
+    assert!(portfolio_context["projects"][0]["card"]["reentry"]
+        .get("effort")
+        .is_none());
+    for field in ["focus", "synergies", "new_apps", "idea_checks"] {
+        let item = &portfolio_context["previous_portfolio"]["portfolio"][field][0];
+        assert!(item.get("effort").is_none());
+        assert_eq!(item["evidence"], "README.md");
+    }
+    assert!(portfolio_context["feedback"][0]["item"]
+        .get("effort")
+        .is_none());
+    assert_eq!(svc.card("demo").unwrap()["card"], legacy_card);
+    assert_eq!(svc.portfolio().unwrap()["portfolio"], legacy_brief);
+    assert_eq!(svc.store().card_history("demo").unwrap(), card_history);
+    assert_eq!(portfolio_history(), original_portfolio_history);
+    assert_eq!(svc.feedback(None).unwrap(), feedback);
+}
+
+#[test]
 fn visits_remember_the_previous_one() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());

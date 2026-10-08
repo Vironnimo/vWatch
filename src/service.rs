@@ -148,6 +148,70 @@ fn digest_identity(category: &str, item: &Value) -> String {
     )
 }
 
+/// Compare what the owner reads, not generated ids, elapsed ages or retired estimates.
+/// Lists are compared as sets of semantic values so merely reordering a report is
+/// not another unread report. Event-level markers are calculated separately.
+fn reading_content(value: &Value) -> Value {
+    match value {
+        Value::String(_) => json!(digest_text(value)),
+        Value::Array(items) => {
+            let mut items: Vec<Value> = items.iter().map(reading_content).collect();
+            items.sort_by_key(Value::to_string);
+            Value::Array(items)
+        }
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .filter(|(key, _)| !["id", "effort", "age_days"].contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), reading_content(value)))
+                .collect(),
+        ),
+        value => value.clone(),
+    }
+}
+
+fn document_item(kind: Kind, doc: &Value, item_id: &str) -> Option<Value> {
+    for (list, _, item_kind) in kind.items() {
+        if let Some(item) = doc[*list]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|item| item["id"] == item_id)
+        {
+            let mut snapshot = item.clone();
+            snapshot.as_object_mut()?.remove("id");
+            snapshot["kind"] = json!(item_kind);
+            return Some(snapshot);
+        }
+    }
+    None
+}
+
+/// Historical identities retain both their first appearance and last authored
+/// snapshot for older tasks that predate saved source snapshots.
+fn remember_items(
+    history: &mut Map<String, Value>,
+    kind: Kind,
+    doc: &Value,
+    project: Option<&str>,
+    at: &str,
+) {
+    for (list, _, _) in kind.items() {
+        for item in doc[*list].as_array().into_iter().flatten() {
+            let Some(id) = item["id"].as_str() else {
+                continue;
+            };
+            let first_seen = history
+                .get(id)
+                .map(|entry| entry["first_seen"].clone())
+                .unwrap_or_else(|| json!(at));
+            history.insert(id.to_owned(), json!({
+                "first_seen": first_seen, "item": document_item(kind, doc, id), "project_id": project,
+            }));
+        }
+    }
+}
+
 struct DigestItem {
     category: &'static str,
     title: String,
@@ -510,6 +574,19 @@ fn feedback_json(f: &Feedback) -> Value {
         "snoozed_until": snoozed_until(f),
         "item": f.item.clone().unwrap_or_else(|| json!({"title": f.title})),
     })
+}
+
+fn feedback_context(f: &Feedback) -> Value {
+    let mut feedback = feedback_json(f);
+    if matches!(
+        feedback["item"]["kind"].as_str(),
+        Some("suggestion" | "focus" | "synergy" | "new_app")
+    ) {
+        if let Some(item) = feedback["item"].as_object_mut() {
+            item.remove("effort");
+        }
+    }
+    feedback
 }
 
 fn snoozed_until(f: &Feedback) -> Option<String> {
@@ -1573,7 +1650,7 @@ impl Watchtower {
         let feedback: Vec<Value> = reactions
             .iter()
             .filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str()))
-            .map(feedback_json)
+            .map(feedback_context)
             .collect();
         let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() { " Use --merge only when sending changed top-level fields; send each changed list in full." } else { " Send a complete card." });
         Ok(json!({
@@ -1581,7 +1658,7 @@ impl Watchtower {
             "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
             "facts": extend(json!({"collected_at": stored.collected_at}), stored.data),
             "new_fields": card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)),
-            "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": c.data})),
+            "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": Kind::Card.current_view(&c.data)})),
             "since_previous_card": since,
             "feedback": feedback,
             "feedback_summary": feedback_summary(&reactions),
@@ -1967,7 +2044,7 @@ impl Watchtower {
                 "milestones": dated_between(&card.data["milestones"], &week_from, &week_to),
             }));
             let card_json = card.map(|card| {
-                let c = &card.data;
+                let c = &Kind::Card.current_view(&card.data);
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
                 json!({
                     "version": card.version, "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
@@ -2010,9 +2087,9 @@ impl Watchtower {
             "review_week": {"week": week, "from": from.to_string(), "to": to.to_string(), "due": !reviewed},
             "owner_ideas": self.store.ideas()?.iter().map(|i| extend(idea_json(i), json!({"checked": !unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
             "projects": rows,
-            "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data})),
+            "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": Kind::Portfolio.current_view(&p.data)})),
             "owner_last_opened": self.store.pref("last_visit")?,
-            "feedback": reactions.iter().map(feedback_json).collect::<Vec<_>>(),
+            "feedback": reactions.iter().map(feedback_context).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
             "tasks": self.tasks(None)?["tasks"],
             "next": "Prepare the brief from this context and save the document to a UTF-8 file. Use portfolio put with --file for that file and --context-token for this context's token.",
@@ -2310,10 +2387,10 @@ impl Watchtower {
                 (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
                 (None, None) => return Err(WatchtowerError::new(
                     "unknown_item",
-                    format!("No current card or brief has an item with id '{item_id}'."),
+                    format!("No current card, brief or owner idea has an item with id '{item_id}'."),
                 )
                 .hint(
-                    "Use an existing item ID from the current card or brief. Read watchtower overview for the current projects and portfolio.",
+                    "Use an existing item ID from overview, or idea:<id> for an active owner idea from ideas list.",
                 )),
             };
         let kind = item
@@ -2385,6 +2462,32 @@ impl Watchtower {
 
     /// The item with this id in the current cards and brief: (its project, the item with its `kind`).
     fn find_item(&self, item_id: &str) -> Result<Option<(Option<String>, Value)>> {
+        if let Some(id) = item_id
+            .strip_prefix("idea:")
+            .and_then(|id| id.parse::<i64>().ok())
+        {
+            if format!("idea:{id}") == item_id {
+                if let Some(idea) = self
+                    .store
+                    .idea(id)?
+                    .filter(|idea| idea["removed_at"].is_null())
+                {
+                    let assessment = self.store.latest_portfolio()?.and_then(|brief| {
+                        brief.data["idea_checks"].as_array().and_then(|checks| {
+                            checks.iter().find(|check| check["idea"] == id).cloned()
+                        })
+                    });
+                    return Ok(Some((
+                        None,
+                        json!({
+                            "kind": "owner_idea", "title": idea["text"], "text": idea["text"],
+                            "added_at": idea["added_at"], "assessment": assessment,
+                        }),
+                    )));
+                }
+            }
+            return Ok(None);
+        }
         let mut docs: Vec<(Option<String>, Kind, Value)> = Vec::new();
         for p in self.store.projects()? {
             if let Some(card) = self.store.latest_card(&p.id)? {
@@ -2395,24 +2498,8 @@ impl Watchtower {
             docs.push((None, Kind::Portfolio, pf.data));
         }
         for (project, kind, doc) in docs {
-            for (list, _, item_kind) in kind.items() {
-                let Some(item) = doc[*list]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|i| i["id"] == item_id)
-                else {
-                    continue;
-                };
-                let mut snapshot = json!({"kind": item_kind});
-                for (key, value) in item
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .filter(|(k, _)| *k != "id")
-                {
-                    snapshot[key] = value.clone();
-                }
+            if let Some(snapshot) = document_item(kind, &doc, item_id) {
+                let item = &snapshot;
                 let project = project.or_else(|| item["project"].as_str().map(str::to_owned));
                 return Ok(Some((project, snapshot)));
             }
@@ -2550,7 +2637,11 @@ impl Watchtower {
                 let Some(id) = item["id"].as_str() else {
                     continue;
                 };
-                if owners.iter().any(|(other_id, other_project, other_kind)| {
+                if id.starts_with("idea:") {
+                    conflicts.push(format!(
+                        "{list}[{index}].id: '{id}' uses the reserved owner-idea namespace"
+                    ));
+                } else if owners.iter().any(|(other_id, other_project, other_kind)| {
                     other_id == id
                         && (other_project.as_deref() != project
                             || other_kind
@@ -2581,13 +2672,13 @@ impl Watchtower {
         ];
         match key {
             "style"
-                if !value
-                    .as_str()
-                    .is_some_and(|style| ["handover", "board", "handbook"].contains(&style)) =>
+                if !value.as_str().is_some_and(|style| {
+                    ["handover", "board", "handbook", "ideas"].contains(&style)
+                }) =>
             {
                 Err(
                     WatchtowerError::new("invalid_pref", "Invalid style. Nothing was changed.")
-                        .hint("Use handover, board or handbook."),
+                        .hint("Use handover, board, handbook or ideas."),
                 )
             }
             "hidden_modules"
@@ -3131,10 +3222,15 @@ impl Watchtower {
 
     /// Changes remain unread until the owner explicitly acknowledges the exact
     /// snapshot they saw, including across window refreshes and restarts.
-    fn changes_digest(&self, first_visit: bool) -> Result<Value> {
-        let state = self.store.changes_snapshot(first_visit, &self.now())?;
+    fn changes_digest(&self) -> Result<Value> {
+        self.reading_state().map(|(changes, _)| changes)
+    }
+
+    fn reading_state(&self) -> Result<(Value, Map<String, Value>)> {
+        let state = self.store.changes_snapshot()?;
         let current_snapshot = &state.current;
         let mut entries = Vec::new();
+        let mut projects = Map::new();
         if let Some(baseline) = &state.baseline {
             let before = &baseline["snapshot"];
             let old_feedback = before["feedback"].as_array().cloned().unwrap_or_default();
@@ -3157,6 +3253,22 @@ impl Watchtower {
                     .map(|p| digest_items(p, &old_feedback))
                     .unwrap_or_default();
                 let current = digest_items(project, &feedback);
+                let unread_recent: Vec<usize> = project["card"]["recent_changes"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .filter_map(|(index, item)| {
+                        let key = digest_identity("change", item);
+                        previous
+                            .get(&key)
+                            .is_none_or(|prior| {
+                                prior.comparison != json!(digest_text(&item["detail"]))
+                            })
+                            .then_some(index)
+                    })
+                    .collect();
+                let first_entry = entries.len();
                 for (key, item) in &current {
                     let prior = previous.get(key);
                     if prior.is_some_and(|old| old.comparison == item.comparison) {
@@ -3192,17 +3304,27 @@ impl Watchtower {
                         "detail": detail, "next_step": "",
                     }));
                 }
+                if let Some(id) = project["id"].as_str() {
+                    projects.insert(id.to_owned(), json!({
+                        "card_unread": entries.len() != first_entry
+                            || reading_content(&project["card"]) != reading_content(&old.map(|p| &p["card"]).cloned().unwrap_or(Value::Null)),
+                        "unread_recent_changes": unread_recent,
+                    }));
+                }
             }
         }
-        Ok(json!({
-            "since": state.baseline.as_ref().map(|b| b["at"].clone()),
-            "token": state.token, "total": entries.len(), "entries": entries,
-            "has_baseline": state.baseline.is_some(),
-        }))
+        Ok((
+            json!({
+                "since": state.baseline.as_ref().map(|b| b["at"].clone()),
+                "token": state.token, "total": entries.len(), "entries": entries,
+                "has_baseline": state.baseline.is_some(),
+            }),
+            projects,
+        ))
     }
 
     pub fn mark_changes_read(&self, token: &str) -> Result<Value> {
-        let state = self.store.changes_snapshot(false, &self.now())?;
+        let state = self.store.changes_snapshot()?;
         if state.token != token
             || !self
                 .store
@@ -3214,11 +3336,11 @@ impl Watchtower {
             )
             .hint("Refresh the overview, read the new changes, then mark them as read."));
         }
-        Ok(json!({"ok": true, "changes": self.changes_digest(false)?}))
+        Ok(json!({"ok": true, "changes": self.changes_digest()?}))
     }
 
-    /// Everything the window renders. A visit more than an hour after the last one
-    /// moves the "new since your last visit" line forward.
+    /// Everything the window renders. Visits record re-entry context; only an
+    /// explicit read acknowledgement changes unread report and event markers.
     pub fn state(&self, visit: bool) -> Result<Value> {
         let now = (self.clock)();
         let last = self.store.pref("last_visit")?.filter(|v| v.is_string());
@@ -3237,8 +3359,14 @@ impl Watchtower {
             }
             self.store.set_pref("last_visit", &json!(stamp(now)))?;
         }
+        // Capture the acknowledgement token before loading displayed cards. A
+        // concurrent later write must invalidate this token, never be silently
+        // acknowledged as though it had already been shown in the window.
+        let (changes, reading) = self.reading_state()?;
         let mut projects = Vec::new();
         let reactions = self.store.feedback()?;
+        let mut item_history = Map::new();
+        let mut tasks = self.store.tasks()?;
         for p in self.store.projects()? {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
@@ -3262,6 +3390,7 @@ impl Watchtower {
             // Reuse the history needed below; never use the current card's date.
             let mut suggestion_first_seen = Map::new();
             for (at, data) in &cards {
+                remember_items(&mut item_history, Kind::Card, data, Some(&p.id), at);
                 for item in data["suggestions"].as_array().into_iter().flatten() {
                     if let Some(id) = item["id"].as_str().filter(|id| suggestion_ids.contains(id)) {
                         suggestion_first_seen
@@ -3294,6 +3423,7 @@ impl Watchtower {
                     "facts": stored.as_ref().map(|s| s.data.clone()),
                     "facts_collected_at": stored.map(|s| s.collected_at),
                     "card": card.as_ref().map(|c| c.data.clone()),
+                    "pending_owner_replies": self.pending_run_replies(&p, card.as_ref(), &reactions),
                     "card_updated_at": card.map(|c| c.created_at),
                     "suggestion_first_seen": suggestion_first_seen,
                     "card_outdated": outdated,
@@ -3302,8 +3432,44 @@ impl Watchtower {
                 }),
             ));
         }
-        let changes = self.changes_digest(visit)?;
+        for project in &mut projects {
+            let read = project["id"].as_str().and_then(|id| reading.get(id));
+            project["card_unread"] = read
+                .map(|read| read["card_unread"].clone())
+                .unwrap_or(Value::Null);
+            project["unread_recent_changes"] = read
+                .map(|read| read["unread_recent_changes"].clone())
+                .unwrap_or(Value::Null);
+        }
         let portfolio = self.store.latest_portfolio()?;
+        for brief in self.store.portfolio_history()? {
+            remember_items(
+                &mut item_history,
+                Kind::Portfolio,
+                &brief.data,
+                None,
+                &brief.created_at,
+            );
+        }
+        // Ratings and task snapshots outlive a removed project. Its archived
+        // card history is still the authority for first-seen dates and kinds.
+        let missing_projects: std::collections::BTreeSet<&str> = reactions
+            .iter()
+            .filter_map(|feedback| feedback.project_id.as_deref())
+            .chain(tasks.iter().flat_map(|task| {
+                task["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+            }))
+            .filter(|id| !projects.iter().any(|project| project["id"] == *id))
+            .collect();
+        for id in missing_projects {
+            for (at, data) in self.store.card_history(id)? {
+                remember_items(&mut item_history, Kind::Card, &data, Some(id), &at);
+            }
+        }
         let new_app_ids: Vec<&str> = portfolio
             .as_ref()
             .and_then(|p| p.data["new_apps"].as_array())
@@ -3311,14 +3477,63 @@ impl Watchtower {
             .flatten()
             .filter_map(|item| item["id"].as_str())
             .collect();
-        let new_app_first_seen = self.store.new_app_first_seen(&new_app_ids)?;
+        let first_seen = |id: &str| {
+            item_history
+                .get(id)
+                .map(|entry| entry["first_seen"].clone())
+                .unwrap_or(Value::Null)
+        };
+        let new_app_first_seen: Map<String, Value> = new_app_ids
+            .iter()
+            .map(|id| ((*id).to_owned(), first_seen(id)))
+            .collect();
+        let synergy_first_seen: Map<String, Value> = portfolio
+            .as_ref()
+            .and_then(|brief| brief.data["synergies"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["id"].as_str())
+            .map(|id| (id.to_owned(), first_seen(id)))
+            .collect();
+        for task in &mut tasks {
+            let source = task["source_id"].as_str().unwrap_or("");
+            let snapshot = task
+                .get("source_snapshot")
+                .filter(|snapshot| !snapshot.is_null())
+                .cloned()
+                .or_else(|| {
+                    reactions
+                        .iter()
+                        .find(|feedback| feedback.item_id == source)
+                        .and_then(|feedback| feedback.item.clone())
+                })
+                .or_else(|| item_history.get(source).map(|entry| entry["item"].clone()));
+            let snapshot = match snapshot {
+                Some(snapshot) => Some(snapshot),
+                None => self.find_item(source)?.map(|(_, item)| item),
+            };
+            let date = snapshot
+                .as_ref()
+                .filter(|snapshot| snapshot["kind"] == "owner_idea")
+                .map(|snapshot| snapshot["added_at"].clone())
+                .unwrap_or_else(|| first_seen(source));
+            task["source_kind"] = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot["kind"].clone())
+                .unwrap_or(Value::Null);
+            task["source_snapshot"] = snapshot.unwrap_or(Value::Null);
+            task["source_first_seen"] = date;
+        }
         let feedback: Map<String, Value> = reactions
             .into_iter()
             .map(|f| {
                 let until = snoozed_until(&f);
+                let date = f.item.as_ref().filter(|item| item["kind"] == "owner_idea")
+                    .map(|item| item["added_at"].clone()).unwrap_or_else(|| first_seen(&f.item_id));
                 (
                     f.item_id,
-                    json!({"value": f.value, "at": f.at, "note": f.note, "snoozed_until": until}),
+                    json!({"value": f.value, "at": f.at, "note": f.note, "snoozed_until": until,
+                        "item": f.item, "project_id": f.project_id, "title": f.title, "first_seen": date}),
                 )
             })
             .collect();
@@ -3331,8 +3546,9 @@ impl Watchtower {
             "portfolio": portfolio.as_ref().map(|p| p.data.clone()),
             "portfolio_updated_at": portfolio.map(|p| p.created_at),
             "new_app_first_seen": new_app_first_seen,
+            "synergy_first_seen": synergy_first_seen,
             "ideas": self.store.ideas()?.iter().map(idea_json).collect::<Vec<_>>(),
-            "tasks": self.store.tasks()?,
+            "tasks": tasks,
             "review_week": self.review_week().0,
             "run_status": self.run_status()?,
             "feedback": feedback,
@@ -3388,9 +3604,23 @@ impl Watchtower {
         let done_when = task_text(&payload, "done_when", false, 2000)?;
         let source = task_text(&payload, "source_id", false, 1000)?;
         let source_id = (!source.is_empty()).then_some(source);
+        let source_snapshot = if let Some(source_id) = &source_id {
+            match self.find_item(source_id)? {
+                Some((_, item)) => Some(item),
+                None => self
+                    .store
+                    .feedback()?
+                    .into_iter()
+                    .find(|feedback| &feedback.item_id == source_id)
+                    .and_then(|feedback| feedback.item),
+            }
+        } else {
+            None
+        };
         let at = self.now();
         let data = json!({
             "projects": projects, "project_snapshots": project_snapshots, "source_id": source_id, "title": title, "why": why,
+            "source_snapshot": source_snapshot,
             "evidence": evidence, "done_when": done_when, "created_at": at, "updated_at": at,
             "reported_at": null, "completed_at": null, "result": "", "result_evidence": "",
             "history": [{"actor": "owner", "status": "assigned", "at": at}],

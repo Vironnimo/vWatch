@@ -16,6 +16,8 @@
   let S = null;           // state from the app core
   let showRated = false;  // show suggestions the owner already rated away
   let showAllRecent = false;
+  const openFolds = new Set();
+  const foldAttrs = id => `data-fold="${esc(id)}"${openFolds.has(id) ? ' open' : ''}`;
   const expanded = { ideas: false };
   let noteFor = null;     // item whose "why?" field shows right after a later/down rating
   let snoozeFor = null;
@@ -26,10 +28,16 @@
   let answering = null;   // question whose answer field is open
   const drafts = {};      // unsent note and answer text per item, kept across re-renders
   let ideaDraft = '';
+  let ideaFilter = 'new';
+  let ideaHighlight = null;
+  const ideaEditing = new Map(); // retain an open response even if an agent rewrites its source
+  const restoringIdeaProjects = new Set();
   const projectDrafts = {}; // unsaved status note and goal fields per project
   let openId = null;      // project whose drawer is open
-  let hbOpen = false;     // the drawer's handbook section is expanded
-  let since = null;       // { id, data, dismissed }: what happened since the owner last opened that project
+  const drawerTabs = {};  // selected project section survives refreshes and reopening
+  const drawerEditors = new Set();
+  let drawerSearch = null; // the exact search destination, retained during data refresh
+  let since = null;       // { id, data }: what happened since the owner last opened that project
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
   const projectEdits = {}; // unsaved names and folder paths in settings
@@ -59,7 +67,13 @@
   const dot = id => `<span class="dot" style="background:${color(id)}"></span>`;
   const byId = id => S.projects.find(p => p.id === id);
   const plink = id => { const p = byId(id); return p ? `<button class="plink" type="button" data-open="${esc(id)}">${dot(id)}${esc(p.name)}</button>` : esc(id); };
-  const isNew = iso => !!(iso && S.previous_visit && iso > S.previous_visit);
+  const projectUnread = p => p.card_unread === true;
+  function cardFreshness(p) {
+    if (!p.card) return '<span class="report-freshness">Noch kein Bericht</span>';
+    const pending = p.pending_owner_replies > 0;
+    const date = p.card_updated_at ? `Bericht vom ${fmtDate(p.card_updated_at)}` : 'Berichtsdatum unbekannt';
+    return `<span class="report-freshness">${date}${pending ? ' · Deine Antwort wartet auf den nächsten Bericht' : p.card_outdated ? ' · Projekt seitdem verändert' : ''}</span>`;
+  }
   const phasePill = p => p.card ? `<span class="pill ${esc(p.card.phase)}">${esc(PHASE[p.card.phase] || p.card.phase)}</span>` : '<span class="pill unknown">ohne Karte</span>';
   const projectValue = (p, field) => (projectDrafts[p.id] || {})[field] ?? p[field] ?? '';
   const clearProjectDraft = (id, field, saved) => {
@@ -116,7 +130,7 @@
   // ---------- facts-derived safety ----------
   const acknowledged = (p, key) => !!(p.warnings || []).find(w => w.key === key && w.acknowledged);
   function noRemoteTag(p) {
-    return acknowledged(p, 'no_remote') ? '<span class="tag">bewusst ohne Remote</span>' : '<span class="tag bad">kein Remote</span>';
+    return acknowledged(p, 'no_remote') ? '<span class="tag">bewusst ohne Remote</span>' : '<span class="tag">kein Remote eingerichtet</span>';
   }
   function warningControls(p) {
     const warnings = p.warnings || [];
@@ -135,13 +149,11 @@
   function safety(p) {
     const f = p.facts || {};
     const d = f.dirty || {};
-    const out = { remote: f.has_remote, unsaved: null, level: null, ahead: f.ahead || 0, ci: (f.ci || {}).state || 'unknown', leftovers: null };
+    const out = { remote: f.has_remote, unsaved: null, level: '', ahead: Number.isFinite(f.ahead) ? f.ahead : null, ci: (f.ci || {}).state || 'unknown', leftovers: null };
     if (d.files) {
-      const lines = (d.lines_added || 0) + (d.lines_removed || 0);
       const age = d.oldest_change ? daysSince(d.oldest_change) : 0;
       out.unsaved = `${num(d.files)} Dateien, +${num(d.lines_added)}/−${num(d.lines_removed)}${age > 0 ? `, seit ${age} ${age === 1 ? 'Tag' : 'Tagen'}` : ''}`;
       out.unsavedShort = `${num(d.files)} ${d.files === 1 ? 'Datei' : 'Dateien'} offen${age > 0 ? ` · ${age} T` : ''}`;
-      out.level = lines > 500 || age > 3 ? 'bad' : 'warn';
     }
     const unmerged = ((f.branches || {}).unmerged || []).length;
     const wts = (f.worktrees || {}).count || 0;
@@ -176,13 +188,19 @@
   }
 
   // ---------- handing a task to a coding agent ----------
+  let taskPreview = null;
+  const taskCopy = task => JSON.parse(JSON.stringify(task));
+  const missingTaskProjects = task => (task.projects || []).filter(id => !byId(id) && !(Number.isInteger(task.id) && (task.project_snapshots || []).some(p => p.id === id)));
+  const activeTaskFor = task => (S.tasks || []).find(t => ['assigned', 'blocked', 'review'].includes(t.status) && t.source_id === task.source_id && [...(t.projects || [])].sort().join('|') === [...(task.projects || [])].sort().join('|'));
   function taskBtn(key, task) {
     const snapshot = { ...task, source_id: key };
-    const active = (S.tasks || []).find(t => ['assigned', 'blocked', 'review'].includes(t.status) && t.source_id === key && [...t.projects].sort().join('|') === [...task.projects].sort().join('|'));
+    const active = activeTaskFor(snapshot);
     TASKS[key] = active || snapshot;
-    return `<span class="task-actions"><button class="linkish task" type="button" data-task="${esc(key)}" title="Kopiert einen fertigen Auftrag für einen Coding-Agent">Auftrag kopieren</button>${active ? `<span class="faint">${esc(TASK_STATUS[active.status])} · #${active.id}</span>` : `<button class="linkish task" type="button" data-task-assign="${esc(key)}" title="Merkt, dass du diesen Auftrag an einen Agent übergibst">Beauftragt</button>`}</span>`;
+    return `<span class="task-actions"><button class="linkish task" type="button" data-task="${esc(key)}" title="Aufgabe und Fertigkriterium vor der Übergabe prüfen">${active ? 'Auftrag ansehen' : 'Auftrag vorbereiten'}</button>${active ? `<span class="faint">${esc(TASK_STATUS[active.status])} · #${active.id}</span>` : ''}</span>`;
   }
   function taskPrompt(t) {
+    const missing = missingTaskProjects(t);
+    if (missing.length) return `Auftrag noch nicht bereit. Projekt nicht mehr beobachtet: ${missing.join(', ')}. Nimm das Projekt vor der Übergabe wieder auf.`;
     const ps = t.projects.map(id => byId(id) || (t.project_snapshots || []).find(p => p.id === id)).filter(Boolean);
     const lines = [!ps.length ? 'Aufgabe für ein neues Projekt:' : ps.length === 1 ? `Aufgabe im Projekt ${ps[0].name} (${ps[0].path}):` : `Aufgabe über die Projekte ${ps.map(p => `${p.name} (${p.path})`).join(', ')}:`, t.title, ''];
     if (t.why) lines.push(`Warum: ${t.why}`);
@@ -199,6 +217,66 @@
     return lines.join('\n');
   }
 
+  function openTaskPreview(key) {
+    if (taskPreview?.busy || !TASKS[key]) return;
+    const task = taskCopy(TASKS[key]);
+    taskPreview = { key, task, prompt: taskPrompt(task), origin: document.activeElement, busy: false, message: '', error: false, uncertain: false, manualCopy: false };
+    renderTaskPreview();
+    $('#task-preview-title').focus();
+  }
+  function closeTaskPreview() {
+    if (!taskPreview || taskPreview.busy) return;
+    const { key, origin } = taskPreview;
+    taskPreview = null;
+    renderTaskPreview();
+    const targets = document.querySelectorAll(`[data-task="${CSS.escape(key)}"]`);
+    const target = origin?.isConnected ? origin : targets[targets.length - 1] || $('#refresh');
+    target?.focus({ preventScroll: true });
+  }
+  function renderTaskPreview() {
+    const root = $('#task-root');
+    if (!root) return;
+    if (!taskPreview) { root.innerHTML = ''; return; }
+    const p = taskPreview, t = p.task, saved = Number.isInteger(t.id), disabled = p.busy ? ' disabled' : '';
+    const missing = missingTaskProjects(t);
+    if (p.projectsMissing && !missing.length) p.prompt = taskPrompt(t);
+    p.projectsMissing = missing.length > 0;
+    const projects = (t.projects || []).map(id => byId(id) || (t.project_snapshots || []).find(project => project.id === id)).filter(Boolean);
+    const field = (label, value, empty) => `<div><dt>${label}</dt><dd${value ? '' : ' class="faint"'}>${esc(value || empty)}</dd></div>`;
+    const html = `<div class="scrim" data-task-preview-close></div><section class="task-preview" role="dialog" aria-modal="true" aria-labelledby="task-preview-title" aria-describedby="task-preview-hint"${p.busy ? ' aria-busy="true"' : ''}>
+      <div class="task-preview-head"><h2 id="task-preview-title" tabindex="-1">${saved ? `Auftrag #${t.id}` : 'Auftrag vorbereiten'}</h2><button class="btn" type="button" id="task-preview-close" data-task-preview-close${disabled}>Schließen</button></div>
+      <div class="faint">${esc([...projects.map(project => project.name), ...missing].join(' · ') || 'Neues Projekt')}${saved ? ` · ${esc(TASK_STATUS[t.status] || t.status)}` : ''}</div>
+      <dl class="task-preview-fields">${field('Aufgabe', t.title, 'Keine Aufgabe angegeben.')}${field('Grund', t.why, 'Kein zusätzlicher Grund angegeben.')}${field('Beleg', t.evidence, 'Kein Beleg angegeben; vor der Umsetzung prüfen.')}${field('Fertig, wenn', t.done_when, 'Noch nicht beschrieben; mit dem Agent vor der Umsetzung klären.')}</dl>
+      <p id="task-preview-hint" class="muted">${saved ? 'Der kopierte Text enthält die Auftragsnummer und die Rückmeldung an Watchtower. Ein Ergebnis bestätigst weiterhin du.' : '„Nur kopieren“ überträgt den Text. „Beauftragen und kopieren“ merkt den Auftrag samt Fertigkriterium und ergänzt die Rückmeldung an Watchtower. Danach fügst du ihn bei deinem Agent ein.'}</p>
+      ${p.message ? `<p class="task-preview-message${p.error ? ' is-error' : ''}" role="${p.error ? 'alert' : 'status'}">${esc(p.message)}</p>` : ''}
+      ${missing.length ? ideaProjectRecovery(missing) : `<details class="task-preview-text"${p.manualCopy ? ' open' : ''}><summary>Vollständiger Auftragstext</summary><textarea id="task-preview-prompt" aria-label="Auftragstext zum Kopieren" readonly rows="10">${esc(p.prompt)}</textarea></details>`}
+      <div class="task-preview-actions">${p.uncertain ? `<button class="btn primary" id="task-preview-check" type="button" data-task-preview-check${disabled}>Aufträge prüfen</button>` : missing.length ? '' : saved ? `<button class="btn primary" id="task-preview-copy" type="button" data-task-preview-copy${disabled}>${p.busy ? 'Kopiert …' : 'Auftrag kopieren'}</button>` : `<button class="btn" id="task-preview-copy" type="button" data-task-preview-copy${disabled}>Nur kopieren</button><button class="btn primary" id="task-preview-assign" type="button" data-task-preview-assign${disabled}>${p.busy ? 'Übergabe wird vorbereitet …' : 'Beauftragen und kopieren'}</button>`}</div>
+    </section>`;
+    // A normal data refresh must not reset selection, expanded text or scroll position.
+    if (p.rendered === html && root.innerHTML) return;
+    const focused = document.activeElement, focusId = focused?.id?.startsWith('task-preview-') ? focused.id : null;
+    const scroll = root.querySelector('.task-preview')?.scrollTop || 0;
+    root.innerHTML = html;
+    p.rendered = html;
+    root.querySelector('.task-preview').scrollTop = scroll;
+    if (focusId) {
+      const target = root.querySelector(`#${focusId}`);
+      (target && !target.disabled ? target : $('#task-preview-title')).focus({ preventScroll: true });
+    }
+  }
+  function taskPreviewKey(e) {
+    if (!taskPreview) return false;
+    if (e.key === 'Escape') { e.preventDefault(); closeTaskPreview(); }
+    if (e.key === 'Tab') {
+      const root = $('#task-root'), nodes = [...root.querySelectorAll('button:not(:disabled), summary, textarea')].filter(el => el.offsetParent !== null);
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (!first) { e.preventDefault(); $('#task-preview-title').focus(); }
+      else if (!nodes.includes(document.activeElement) || (e.shiftKey && document.activeElement === first)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    return true;
+  }
+
   // The owner explicitly records assignments; copying a prompt alone changes nothing.
   const TASK_STATUS = { assigned: 'Beauftragt', blocked: 'Blockiert', review: 'Zur Prüfung', done: 'Erledigt bestätigt', cancelled: 'Beendet' };
   function trackedTask(t, history = false) {
@@ -210,8 +288,8 @@
       : t.status === 'blocked' ? `<button class="btn" type="button" data-task-status="assigned" ${identity}>Wieder freigeben</button>`
         : ['done', 'cancelled'].includes(t.status) ? `<button class="btn" type="button" data-task-status="assigned" ${identity}>Wieder öffnen</button>` : '';
     const active = ['assigned', 'blocked', 'review'].includes(t.status);
-    const events = history && (t.history || []).length ? `<details class="task-history"><summary class="more">Verlauf</summary><ul class="bullets">${t.history.map(h => `<li>${h.actor === 'owner' ? 'Du' : 'Agent'}: ${esc(TASK_STATUS[h.status] || h.status || '')}${h.at ? ` · ${fmtDate(h.at)}` : ''}${h.result ? ` · ${esc(h.result)}` : ''}${h.evidence ? `<div class="ev">${esc(h.evidence)}</div>` : ''}</li>`).join('')}</ul></details>` : '';
-    return `<article class="idea tracked-task" data-status="${esc(t.status)}"><div class="h"><div class="t">${esc(t.title)}</div><span class="task-status" data-status="${esc(t.status)}">${esc(TASK_STATUS[t.status] || t.status)}</span></div><div class="who">${(t.projects || []).map(plink).join('')}<span class="faint">#${t.id} · ${ago(t.updated_at || t.created_at)}</span></div>${t.result ? `<div class="task-result">${esc(t.result)}</div>` : ''}${t.result_evidence ? `<div class="ev">${esc(t.result_evidence)}</div>` : ''}${t.done_when ? `<div class="why">Fertig, wenn: ${esc(t.done_when)}</div>` : ''}${t.why || t.evidence ? `<details><summary class="more">Ursprünglicher Auftrag</summary><div class="why">${esc(t.why)}</div><div class="ev">${esc(t.evidence)}</div></details>` : ''}<div class="task-actions">${actions}${active ? `<button class="linkish task" type="button" data-task="${key}">Auftrag kopieren</button><button class="linkish" type="button" data-task-status="cancelled" ${identity}>Beenden</button>` : ''}</div>${events}</article>`;
+    const events = history && (t.history || []).length ? `<details class="task-history" ${foldAttrs(`task-history:${t.id}`)}><summary class="more">Verlauf</summary><ul class="bullets">${t.history.map(h => `<li>${h.actor === 'owner' ? 'Du' : 'Agent'}: ${esc(TASK_STATUS[h.status] || h.status || '')}${h.at ? ` · ${fmtDate(h.at)}` : ''}${h.result ? ` · ${esc(h.result)}` : ''}${h.evidence ? `<div class="ev">${esc(h.evidence)}</div>` : ''}</li>`).join('')}</ul></details>` : '';
+    return `<article class="idea tracked-task" data-status="${esc(t.status)}" data-search-anchor="task:${t.id}" tabindex="-1"><div class="h"><div class="t">${esc(t.title)}</div><span class="task-status" data-status="${esc(t.status)}">${esc(TASK_STATUS[t.status] || t.status)}</span></div><div class="who">${(t.projects || []).map(plink).join('')}<span class="faint">#${t.id} · ${ago(t.updated_at || t.created_at)}</span></div>${t.result ? `<div class="task-result">${esc(t.result)}</div>` : ''}${t.result_evidence ? `<div class="ev">${esc(t.result_evidence)}</div>` : ''}${t.done_when ? `<div class="why">Fertig, wenn: ${esc(t.done_when)}</div>` : ''}${t.why || t.evidence ? `<details ${foldAttrs(`task-original:${t.id}`)}><summary class="more">Ursprünglicher Auftrag</summary><div class="why">${esc(t.why)}</div><div class="ev">${esc(t.evidence)}</div></details>` : ''}<div class="task-actions">${actions}${active ? `<button class="linkish task" type="button" data-task="${key}">Auftrag ansehen</button><button class="linkish" type="button" data-task-status="cancelled" ${identity}>Beenden</button>` : ''}</div>${events}</article>`;
   }
   function blockTasks(project = null) {
     const all = (S.tasks || []).filter(t => !project || (t.projects || []).includes(project));
@@ -219,7 +297,7 @@
     const rest = all.filter(t => !active.includes(t));
     if (!all.length || (!active.length && !rest.length)) return '';
     const shownTasks = active.slice(0, 3), remaining = active.slice(3);
-    const body = `<div class="cards2">${shownTasks.map(t => trackedTask(t, !!project)).join('')}</div>${remaining.length ? `<details><summary class="more">${remaining.length} weitere Aufträge</summary><div class="cards2">${remaining.map(t => trackedTask(t, !!project)).join('')}</div></details>` : ''}${rest.length ? `<details><summary class="more">${rest.length} abgeschlossene Aufträge</summary><div class="cards2">${rest.map(t => trackedTask(t, true)).join('')}</div></details>` : ''}`;
+    const body = `<div class="cards2">${shownTasks.map(t => trackedTask(t, !!project)).join('')}</div>${remaining.length ? `<details ${foldAttrs(`tasks-more:${project || 'all'}`)}><summary class="more">${remaining.length} weitere Aufträge</summary><div class="cards2">${remaining.map(t => trackedTask(t, !!project)).join('')}</div></details>` : ''}${rest.length ? `<details ${foldAttrs(`tasks-done:${project || 'all'}`)}><summary class="more">${rest.length} abgeschlossene Aufträge</summary><div class="cards2">${rest.map(t => trackedTask(t, true)).join('')}</div></details>` : ''}`;
     return project ? dmod('Aufträge', body) : mod('tasks', 'Deine Aufträge', `${active.filter(t => t.status === 'review').length} zur Prüfung · ${active.filter(t => t.status === 'blocked').length} blockiert · ${active.filter(t => t.status === 'assigned').length} beauftragt`, body);
   }
 
@@ -272,18 +350,23 @@
     // Keep the native details element itself in place so refresh preserves open state and summary focus.
     control.setAttribute('data-state', pending && r.state === 'complete' ? 'incomplete' : r.state || 'unknown');
     $('#report-status-summary').textContent = `${labels[r.state] || labels.unknown}${pending ? ` · ${pending} ${pending === 1 ? 'Antwort offen' : 'Antworten offen'}` : ''}`;
-    $('#report-status-body').innerHTML = `<p class="faint">${esc(timing)}</p>${r.state !== 'complete' && started ? `<p>Aktuelle Prüfung begonnen: ${esc(started)}.</p>` : ''}${outcomes}${portfolioText ? `<p>${esc(portfolioText)}</p>` : ''}${lines ? `<ul class="report-status-problems">${lines}</ul>` : ''}${pending ? `<p>${pending} ${pending === 1 ? 'Antwort wartet' : 'Antworten warten'} noch darauf, in die Projektberichte übernommen zu werden.</p>` : ''}${r.state === 'unknown' ? '<p>Ein Agent prüft die Projekte und schreibt bei Bedarf neue Berichte. „Aktualisieren“ misst nur die Git-Fakten.</p>' : ''}${repair ? `<button class="btn" type="button" data-copy="${esc(repair)}">Auftrag zum Fortsetzen kopieren</button>` : ''}`;
+    $('#report-status-body').innerHTML = `<p class="faint">${esc(timing)}</p>${r.state !== 'complete' && started ? `<p>Aktuelle Prüfung begonnen: ${esc(started)}.</p>` : ''}${outcomes}${portfolioText ? `<p>${esc(portfolioText)}</p>` : ''}${lines ? `<ul class="report-status-problems">${lines}</ul>` : ''}${pending ? `<p>${pending} ${pending === 1 ? 'Antwort wartet' : 'Antworten warten'} noch darauf, in die Projektberichte übernommen zu werden.</p>` : ''}${r.state === 'unknown' ? '<p>Ein Agent prüft die Projekte und schreibt bei Bedarf neue Berichte. „Git-Fakten messen“ erneuert keine Agent-Berichte.</p>' : ''}${repair ? `<button class="btn" type="button" data-copy="${esc(repair)}">Auftrag zum Fortsetzen kopieren</button>` : ''}`;
   }
 
   function blockChanges() {
     const c = S.changes;
     if (!c) return '';
     const entries = c.entries || [];
-    if (c.has_baseline && !entries.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">Keine neuen Projektmeldungen seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
+    const unread = visible().filter(projectUnread);
+    if (c.has_baseline && !entries.length && !unread.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">Keine neuen Projektmeldungen seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
     const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: 'Neu', resolved: 'Nicht mehr offen', decision_applied: 'Antwort übernommen' })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${esc(e.title)}</div>${e.detail ? `<div class="why">${esc(e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>Nächster Schritt:</b> ${esc(e.next_step)}</div>` : ''}</div>`;
-    const body = entries.length ? `<div class="digest-items">${entries.slice(0, 3).map(row).join('')}</div>${entries.length > 3 ? `<details><summary class="more">${entries.length - 3} weitere Änderungen</summary><div class="digest-items">${entries.slice(3).map(row).join('')}</div></details>` : ''}` : `<p class="faint">${c.has_baseline ? 'Keine neuen Projektmeldungen seit deinem letzten Lesestand.' : 'Markiere den aktuellen Stand als gelesen. Danach siehst du hier neue Fortschritte, offene Punkte, Fragen und Entscheidungen aus den Projektberichten.'}</p>`;
-    const action = c.token && (entries.length || !c.has_baseline) ? `<div class="actions"><button class="btn" type="button" data-changes-read="${esc(c.token)}">${c.has_baseline ? 'Diese Änderungen als gelesen markieren' : 'Aktuellen Stand als gelesen markieren'}</button></div>` : '';
-    return mod('changes', 'Seit deinem letzten Lesen', `Fortschritte, offene Punkte und Entscheidungen${c.since ? ` · Lesestand vom ${fmtDate(c.since)}` : ''}`, `<div class="digest-summary">${body}${action}</div>`);
+    const groups = new Map();
+    for (const e of entries) { const key = e.project || ''; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(e); }
+    const body = entries.length ? `<div class="digest-groups">${[...groups].map(([id, items]) => `<details class="digest-project" ${foldAttrs(`digest:${id}`)}><summary><b>${esc((byId(id) || {}).name || 'Projektüberblick')}</b><span class="count">${items.length}</span><span class="digest-preview">${esc(items[0].title)}</span></summary><div class="digest-items">${items.map(row).join('')}</div></details>`).join('')}</div>` : `<p class="faint">${c.has_baseline ? 'Projektberichte enthalten ungelesene Änderungen, etwa im Handbuch oder in der Projektstimme.' : 'Markiere den aktuellen Stand ausdrücklich als gelesen. Ein Besuch allein setzt deinen Lesestand nicht.'}</p>`;
+    const also = unread.filter(p => !groups.has(p.id));
+    const other = also.length ? `<p class="digest-other">Weitere ungelesene Berichte: ${also.map(p => plink(p.id)).join(' · ')}</p>` : '';
+    const action = c.token && (entries.length || unread.length || !c.has_baseline) ? `<div class="actions"><button class="btn" type="button" data-changes-read="${esc(c.token)}">${c.has_baseline ? 'Diese Änderungen als gelesen markieren' : 'Aktuellen Stand als gelesen markieren'}</button></div>` : '';
+    return mod('changes', 'Seit deinem letzten Lesen', `Projektmeldungen${c.since ? ` · Lesestand vom ${fmtDate(c.since)}` : ''}`, `<div class="digest-summary">${body}${other}${action}</div>`);
   }
 
   function spark(weekly, col, h = 38) {
@@ -303,41 +386,49 @@
   // right after a later/down rating the card turns into an optional "why?" field
   function noteForm(id, label) {
     const down = S.feedback[id] && S.feedback[id].value === 'down';
-    return `<div class="idea noteform"><div class="kind">${down ? 'Abgelehnt' : 'Später'} · ${esc(label)}</div>
+    return `<div class="idea noteform${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">${down ? 'Abgelehnt' : 'Später'} · ${esc(label)}</div>
       ${snoozeControls(id)}<div class="why">Magst du kurz sagen, warum? Die Agents richten künftige Vorschläge danach.</div>
       <div class="inrow"><input type="text" aria-label="Warum" data-draft="${esc(id)}" data-kind="note" maxlength="300" value="${esc(drafts[id] || '')}" placeholder="${down ? 'z. B. passt nicht zum Projekt' : 'z. B. erst nach dem Release'}">
       <button type="button" class="btn primary" data-note-save="${esc(id)}">Merken</button><button type="button" class="btn" data-note-skip>Überspringen</button></div></div>`;
   }
   const myNote = id => { const f = S.feedback[id]; return f && f.note && !reply(id) ? `<div class="mynote">Deine Notiz: ${esc(f.note)}</div>` : ''; };
 
-  function ideaCard(s, projects, projectId, kind) {
+  function ideaCard(s, projects, projectId, kind, options = {}) {
     if (noteFor === s.id) return noteForm(s.id, s.title);
-    if (hiddenByRating(s.id)) return '';
-    const firstSeen = projectId ? (byId(projectId).suggestion_first_seen || {})[s.id] : (S.new_app_first_seen || {})[s.id];
+    if (!options.collection && hiddenByRating(s.id)) return '';
+    const firstSeen = options.firstSeen || (projectId ? ((byId(projectId) || {}).suggestion_first_seen || {})[s.id] : (S.new_app_first_seen || {})[s.id]);
     const stamp = firstSeen && Number.isFinite(Date.parse(firstSeen)) ? `<time class="faint" datetime="${esc(firstSeen)}" title="Erstmals vorgeschlagen: ${esc(new Date(firstSeen).toLocaleString('de-DE'))}">vorgeschlagen ${esc(new Date(firstSeen).toLocaleDateString('de-DE'))}</time>` : '';
-    return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
+    const task = ideaTask(s.id);
+    const finished = task && ['done', 'cancelled'].includes(task.status);
+    const returned = S.feedback[s.id]?.value === 'later' && snoozedUntil(S.feedback[s.id]) <= S.today;
+    const missingProjects = (projects || []).filter(id => !byId(id));
+    const action = finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(s.id || s.title, { projects: task ? task.projects : projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when });
+    const taskDetails = options.collection && task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${s.id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
+    return `<div class="idea${ideaHighlight === s.id ? ' search-hit' : ''}" data-idea-id="${esc(s.id)}" tabindex="-1">${kind ? `<div class="kind">${esc(kind)}${options.retained ? ' · aus früherem Bericht gemerkt' : ''}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
+      ${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[s.id]))}</div>` : ''}
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
-      ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
+      ${s.evidence ? `<details ${foldAttrs(`idea-evidence:${s.id}`)}><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
       ${myNote(s.id)}
       <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
-      <div class="taskrow">${stamp}${taskBtn(s.id || s.title, { projects: projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when })}</div></div>`;
+      <div class="taskrow">${stamp}${action}</div>${taskDetails}</div>`;
   }
 
   function blockFocus() {
     const t = (S.portfolio && S.portfolio.focus) || [];
     if (!t.length) return '';
-    return mod('focus', 'Heute zuerst', 'Über alle Projekte hinweg ausgewählt', `<div class="focus">${t.slice(0, 3).map((it, i) => `
+    const date = S.portfolio_updated_at ? ` · Einschätzung vom ${fmtDate(S.portfolio_updated_at)}` : '';
+    return mod('focus', 'Als Nächstes', `Vom Agent über alle Projekte hinweg ausgewählt${date}`, `<div class="focus">${t.slice(0, 3).map((it, i) => `
       <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
       <div class="meta">${plink(it.project)}${taskBtn(it.id || `focus-${i}`, { projects: [it.project], title: it.title, why: it.why, done_when: it.done_when })}${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
-      <div class="why">${esc(it.why)}</div></div></div>`).join('')}</div>`);
+      <div class="why">${esc(it.why)}</div>${byId(it.project) && byId(it.project).card_outdated ? '<p class="report-freshness">Projekt seit der Einschätzung verändert · vor dem Auftrag prüfen</p>' : ''}</div></div>`).join('')}</div>`);
   }
 
   // what the facts say about a project, as a few short badges
   const bytes = n => n >= 1e9 ? `${(n / 1e9).toLocaleString('de-DE', { maximumFractionDigits: 1 })} GB` : `${Math.round(n / 1e6).toLocaleString('de-DE')} MB`;
   const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
   // two lines of work that change the same files may conflict when merged
-  const lineName = l => l.kind === 'main' ? 'ungesicherte Arbeit im Hauptordner' : l.kind === 'worktree' ? `Worktree ${l.name}` : `Branch ${l.name}`;
+  const lineName = l => l.kind === 'main' ? 'lokale Änderungen im Hauptordner' : l.kind === 'worktree' ? `Worktree ${l.name}` : `Branch ${l.name}`;
   const collisions = p => (p.facts && p.facts.collisions) || [];
   const collisionText = c => `${lineName(c.a)} und ${lineName(c.b)} ändern ${plural(c.count, 'gleiche Datei', 'gleiche Dateien')}: ${c.files.join(', ')}${c.count > c.files.length ? ' …' : ''}`;
   function collisionTag(p) {
@@ -360,31 +451,45 @@
     if (!f.is_git) return `<span class="tag">${f.error === 'path_missing' ? 'Ordner fehlt' : 'kein Git'}</span>`;
     const s = safety(p);
     const out = [];
-    if (!s.remote) out.push(noRemoteTag(p));
+    if (s.remote === false) out.push(noRemoteTag(p));
     if (s.unsavedShort) out.push(`<span class="tag ${s.level}">${esc(s.unsavedShort)}</span>`);
-    if (s.ahead) out.push(`<span class="tag warn">${s.ahead} ungepusht</span>`);
+    if (s.ahead > 0) out.push(`<span class="tag">${s.ahead} lokale Commits vor Upstream</span>`);
+    if (s.ahead == null) out.push('<span class="tag">Push-Stand unbekannt</span>');
     if (s.ci === 'red') out.push('<span class="tag bad">CI rot</span>');
-    if (!out.length) out.push('<span class="tag good">gesichert</span>');
+    if (!s.unsaved && f.dirty && f.dirty.files === 0) out.push('<span class="tag">Arbeitsstand sauber</span>');
     out.push(collisionTag(p));
     return out.join('');
   }
-  const risk = p => { const s = safety(p); return (p.facts && p.facts.is_git && !s.remote && !acknowledged(p, 'no_remote') ? 2 : 0) + (s.level === 'bad' ? 2 : s.level === 'warn' ? 1 : 0) + (s.ci === 'red' ? 1 : 0) + (s.ahead ? 1 : 0); };
+  // Rank owner action above routine repository activity. Counts of dirty files,
+  // local commits and worktrees are facts, not a measure of urgency.
+  const projectTasks = p => (S.tasks || []).filter(t => (t.projects || []).includes(p.id));
+  const goalIsDue = p => !!(p.goal && p.goal_due && p.goal_due <= S.today && p.status !== 'done');
+  const risk = p => (projectTasks(p).some(t => t.status === 'blocked') ? 100 : 0)
+    + (projectTasks(p).some(t => t.status === 'review') ? 80 : 0)
+    + (goalIsDue(p) ? 60 : 0)
+    + (p.card ? Math.min(openQs(p.card).length, 2) * 20 : 0)
+    + (safety(p).ci === 'red' ? 8 : 0)
+    + (collisions(p).length && !acknowledged(p, 'worktrees') ? 5 : 0)
+    + (projectUnread(p) ? 2 : 0);
+  const byAttention = list => [...list].sort((a, b) => risk(b) - risk(a) || (lastWork(b) || '').localeCompare(lastWork(a) || '') || a.name.localeCompare(b.name));
 
   function blockProjects() {
-    const list = [...visible()].sort((a, b) => risk(b) - risk(a) || (lastWork(b) || '').localeCompare(lastWork(a) || ''));
+    const list = byAttention(visible());
     if (!list.length) return '';
     const tile = p => {
       const c = p.card, waiting = c ? openQs(c).length : 0;
-      const fresh = isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : '';
+      const fresh = projectUnread(p) ? '<span class="pill new">ungelesen</span>' : '';
+      const tasks = projectTasks(p), blocked = tasks.filter(t => t.status === 'blocked').length, review = tasks.filter(t => t.status === 'review').length;
       return `<button class="tile" type="button" data-open="${esc(p.id)}">
         <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span class="pills">${fresh}${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
         <p class="voice">${c ? `„${esc(c.personality || c.headline)}“` : '<span class="faint">Noch keine Einschätzung. Kommt beim nächsten Agent-Lauf.</span>'}</p>
+        ${c && c.personality ? `<p class="project-headline">${esc(c.headline)}</p>` : ''}
         ${goalLine(p)}
-        <div class="badges">${signals(p)}${waiting ? `<span class="tag ask">${waiting} ${waiting === 1 ? 'Entscheidung' : 'Entscheidungen'}</span>` : ''}</div>
-        <div class="tfoot">${spark(weekly(p), color(p.id), 22)}<span>zuletzt ${ago(lastWork(p))}</span></div>
+        <div class="badges">${blocked ? `<span class="tag ask">${blocked} blockiert</span>` : ''}${review ? `<span class="tag ask">${review} zur Prüfung</span>` : ''}${waiting ? `<span class="tag ask">${waiting} ${waiting === 1 ? 'Entscheidung' : 'Entscheidungen'}</span>` : ''}${safety(p).ci === 'red' ? '<span class="tag bad">CI rot</span>' : ''}</div>
+        <div class="tfoot">${cardFreshness(p)}</div>
       </button>`;
     };
-    return mod('projects', 'Deine Projekte', 'Die riskantesten zuerst. Klick öffnet den Steckbrief', `<div class="tiles">${list.map(tile).join('')}</div>`);
+    return mod('projects', 'Deine Projekte', 'Entscheidungen, wartende Ergebnisse und fällige Ziele zuerst', `<div class="tiles">${list.map(tile).join('')}</div>`);
   }
 
   // one question: answer it or mark it done; answered ones show the reply until the next card
@@ -416,15 +521,14 @@
   }
 
   function blockRecent(limit = 10) {
-    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map(c => ({ ...c, project: p.id, reportedAt: p.card_updated_at || '' }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date) || b.reportedAt.localeCompare(a.reportedAt));
+    const items = visible().flatMap(p => (p.card ? p.card.recent_changes : []).map((c, index) => ({ ...c, project: p.id, reportedAt: p.card_updated_at || '', unread: (p.unread_recent_changes || []).includes(index) }))).filter(c => daysSince(c.date) <= 14).sort((a, b) => b.date.localeCompare(a.date) || b.reportedAt.localeCompare(a.reportedAt));
     if (!items.length) return '';
-    const prevDay = S.previous_visit ? S.previous_visit.slice(0, 10) : null;
     const shownItems = showAllRecent ? items : items.slice(0, limit);
     let last = '';
     const body = shownItems.map(c => {
       const h = c.date !== last ? `<div class="day-h">${fmtShort(c.date)} · ${ago(c.date)}</div>` : '';
       last = c.date;
-      const fresh = prevDay && c.date >= prevDay ? ' <span class="pill new">neu</span>' : '';
+      const fresh = c.unread ? ' <span class="pill new">ungelesen</span>' : '';
       const p = byId(c.project);
       const head = `<span class="t">${esc(c.title)}${fresh}</span><span class="pmark">${dot(c.project)}${esc(p ? p.name : c.project)}</span>`;
       return `${h}${c.detail ? `<details class="ev-item"><summary>${head}</summary><p>${esc(c.detail)}</p></details>` : `<div class="ev-item"><div class="sum">${head}</div></div>`}`;
@@ -436,16 +540,16 @@
   function blockSafety() {
     const rows = byLastWork(visible()).filter(p => p.facts && p.facts.is_git).map(p => {
       const s = safety(p);
-      const unsaved = [s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : '', s.ahead ? `<span class="tag warn">${s.ahead} ungepusht</span>` : ''].filter(Boolean).join(' ');
+      const unsaved = [s.unsaved ? `<span>${esc(s.unsaved)}</span>` : p.facts.dirty && p.facts.dirty.files === 0 ? 'Arbeitsstand sauber' : 'Arbeitsstand unbekannt', s.ahead == null ? 'Push-Stand unbekannt' : s.ahead > 0 ? `${s.ahead} lokale Commits vor Upstream` : 'Kein Vorsprung zum lokalen Upstream-Stand'].join('<br>');
       const ci = CI[s.ci] || CI.unknown;
       return `<tr><td>${plink(p.id)}</td>
-        <td>${s.remote ? `<span class="tag good">${esc(p.facts.remotes.map(r => r.name).join(', '))}</span>` : noRemoteTag(p)}</td>
-        <td>${unsaved || '<span class="faint">sauber</span>'}</td>
+        <td>${s.remote ? `<span class="tag">${esc((p.facts.remotes || []).map(r => r.name).join(', ') || 'Remote eingerichtet')}</span>` : s.remote === false ? noRemoteTag(p) : '<span class="faint">unbekannt</span>'}</td>
+        <td>${unsaved}</td>
         <td>${s.leftovers ? `<span class="faint">${esc(s.leftovers)}</span>` : ''} ${collisionTag(p)}</td>
         <td>${ci[1] ? `<span class="tag ${ci[1]}">${ci[0]}</span>` : `<span class="faint">${ci[0]}</span>`}</td></tr>`;
     }).join('');
     if (!rows) return '';
-    return mod('safety', 'Sicherheitslage', 'Was verloren ginge, wenn heute die Platte stirbt oder ein Agent falsch auscheckt', `<div class="tablewrap"><table class="safety"><thead><tr><th>Projekt</th><th>Backup</th><th>Ungesichert</th><th>Liegengeblieben</th><th>CI</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+    return mod('safety', 'Git-Zustand', 'Lokal gemessene Fakten. Remotes belegen keine Sicherung; der Upstream-Stand wird ohne Fetch gelesen.', `<div class="tablewrap"><table class="safety"><thead><tr><th>Projekt</th><th>Remote</th><th>Arbeitsstand</th><th>Weitere Arbeitslinien</th><th>CI</th></tr></thead><tbody>${rows}</tbody></table></div>`);
   }
 
   // what the agents did overnight, with the signs that something went wrong
@@ -473,17 +577,6 @@
     return mod('space', 'Platz', `${bytes(total)} in Build- und Paketordnern, die sich neu erzeugen lassen. Einmal am Tag gemessen`, `<div class="list">${rows}</div>`);
   }
 
-  function blockPulse() {
-    const list = visible().filter(p => p.facts && p.facts.is_git);
-    if (!list.length) return '';
-    const shares = list.map(p => [p.id, p.facts.commits.last_30d]).sort((a, b) => b[1] - a[1]);
-    const total = shares.reduce((a, [, v]) => a + v, 0) || 1;
-    const bar = shares.map(([id, v]) => v ? `<span style="width:${(v / total * 100).toFixed(2)}%;background:${color(id)}" title="${esc(byId(id).name)}: ${v}"></span>` : '').join('');
-    const legend = shares.map(([id, v]) => `<span>${dot(id)}${esc(byId(id).name)} <b class="mono">${num(v)}</b></span>`).join('');
-    const note = (S.portfolio && S.portfolio.attention_note) || 'Wohin deine Commits der letzten 30 Tage gingen';
-    return mod('pulse', 'Puls', note, `<div class="attn-bar" role="img" aria-label="Anteil der Commits in 30 Tagen">${bar}</div><div class="attn-legend">${legend}</div>`);
-  }
-
   // patterns, synergies and verdicts: what shows only when all projects lie side by side
   function blockAcross() {
     const pf = S.portfolio || {};
@@ -505,6 +598,97 @@
 
   const ideaTime = at => Number.isFinite(Date.parse(at)) ? Date.parse(at) : -Infinity;
   const newestIdeas = items => [...items].sort((a, b) => ideaTime(b.firstSeen) - ideaTime(a.firstSeen));
+  const IDEA_FILTERS = { new: 'Neu', up: 'Gut gefunden', later: 'Später', assigned: 'Beauftragt', done: 'Abgeschlossen', down: 'Abgelehnt', all: 'Alle' };
+  const IDEA_KINDS = { suggestion: 'Aus dem Projekt', new_app: 'Neue App', synergy: 'Querverbindung', owner_idea: 'Deine Idee' };
+  function ideaProjectRecovery(ids) {
+    return `<div class="idea-project-recovery"><p class="faint">Vor einem neuen Auftrag wieder aufnehmen:</p>${[...new Set(ids)].map(id => `<div><span>Projekt nicht mehr beobachtet: ${esc(id)}</span> <button class="linkish" type="button" data-idea-restore-project="${esc(id)}"${restoringIdeaProjects.has(id) ? ' disabled' : ''}>${restoringIdeaProjects.has(id) ? 'Wird wieder aufgenommen …' : 'Projekt wieder aufnehmen'}</button></div>`).join('')}</div>`;
+  }
+  async function restoreIdeaProject(id) {
+    if (restoringIdeaProjects.has(id)) return;
+    restoringIdeaProjects.add(id); render();
+    try {
+      const result = await call('restore_project', { id });
+      await load(false);
+      toast(`${result.project?.name || id} ist wieder im Blick.`);
+    } catch (e) { toast(`Projekt nicht wieder aufgenommen: ${errText(e)}`); }
+    finally { restoringIdeaProjects.delete(id); render(); }
+  }
+  function ideaTask(id) {
+    const tasks = (S.tasks || []).filter(t => t.source_id === id);
+    return tasks.filter(t => ['assigned', 'blocked', 'review'].includes(t.status)).sort((a, b) => Number(b.id) - Number(a.id))[0]
+      || tasks.sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+  }
+  function ideaBucket(entry) {
+    const task = ideaTask(entry.s.id);
+    if (task) return ['assigned', 'blocked', 'review'].includes(task.status) ? 'assigned' : 'done';
+    return ({ up: 'up', later: 'later', down: 'down' })[rated(entry.s.id)] || 'new';
+  }
+  function ideaCollection() {
+    const entries = new Map(), pf = S.portfolio || {};
+    const add = entry => { if (entry.s.id && !entries.has(entry.s.id)) entries.set(entry.s.id, entry); };
+    for (const p of visible()) for (const s of (p.card || {}).suggestions || []) add({ s, project: p.id, projects: [p.id], kind: 'suggestion', firstSeen: (p.suggestion_first_seen || {})[s.id] });
+    for (const [field, kind, times] of [['new_apps', 'new_app', S.new_app_first_seen], ['synergies', 'synergy', S.synergy_first_seen]]) {
+      for (const s of pf[field] || []) add({ s, project: null, projects: s.projects || [], kind, firstSeen: (times || {})[s.id] });
+    }
+    for (const own of S.ideas || []) {
+      const assessment = (pf.idea_checks || []).find(c => c.idea === own.id);
+      add({ s: { id: `idea:${own.id}`, title: own.text }, own, assessment, project: null, projects: assessment?.fits || [], kind: 'owner_idea', firstSeen: own.added_at });
+    }
+    for (const [id, f] of Object.entries(S.feedback || {})) {
+      const item = f.item;
+      if (!item || !IDEA_KINDS[item.kind] || !['up', 'later', 'down'].includes(f.value) || item.kind === 'owner_idea') continue;
+      add({ s: { ...item, id, title: item.title || f.title }, project: f.project_id, projects: f.project_id ? [f.project_id] : item.projects || [], kind: item.kind, firstSeen: f.first_seen, retained: true });
+    }
+    for (const task of S.tasks || []) {
+      const source = task.source_snapshot;
+      if (!source || !IDEA_KINDS[source.kind] || source.kind === 'owner_idea') continue;
+      add({ s: { ...source, id: task.source_id, title: task.title || source.title, why: task.why, evidence: task.evidence, done_when: task.done_when }, project: source.kind === 'suggestion' ? task.projects?.[0] : null, projects: task.projects || [], kind: source.kind, firstSeen: task.source_first_seen, retained: true });
+    }
+    // An in-progress reply is local UI state, independent of a background rewrite.
+    for (const id of [noteFor, snoozeFor].filter(Boolean)) {
+      if (entries.has(id)) ideaEditing.set(id, entries.get(id));
+      else if (ideaEditing.has(id)) add(ideaEditing.get(id));
+    }
+    for (const id of ideaEditing.keys()) if (id !== noteFor && id !== snoozeFor) ideaEditing.delete(id);
+    return newestIdeas([...entries.values()]);
+  }
+  function ideaEntryCard(entry) {
+    const options = { collection: true, firstSeen: entry.firstSeen, retained: entry.retained };
+    return entry.own ? ownerIdeaCard(entry, options) : ideaCard(entry.s, entry.projects, entry.project, IDEA_KINDS[entry.kind], options);
+  }
+  function renderIdeas() {
+    const entries = ideaCollection(), matching = entries.filter(e => ideaFilter === 'all' || ideaBucket(e) === ideaFilter);
+    const pinned = entries.filter(e => !matching.includes(e) && [noteFor, snoozeFor].includes(e.s.id));
+    const tabs = Object.entries(IDEA_FILTERS).map(([filter, label]) => {
+      const count = filter === 'all' ? entries.length : entries.filter(e => ideaBucket(e) === filter).length;
+      return `<button class="idea-filter" type="button" data-idea-filter="${filter}" aria-pressed="${ideaFilter === filter}" aria-controls="idea-collection">${label} <span>${count}</span></button>`;
+    }).join('');
+    const descriptions = {
+      new: 'Noch ohne Entscheidung oder nach „Später“ wieder da. Neueste zuerst nach ihrem ersten Auftauchen.',
+      up: 'Von dir gut gefunden. Ein Auftrag entsteht erst, wenn du ihn bewusst übergibst.',
+      later: 'Bis zum gewählten Tag zurückgestellt. Dann erscheinen sie wieder unter „Neu“.',
+      assigned: 'An einen Agent übergebene Ideen, einschließlich Blockaden und Ergebnissen zur Prüfung.',
+      done: 'Von dir bestätigte Ergebnisse und beendete Aufträge. Du kannst sie wieder öffnen.',
+      down: 'Von dir abgelehnt. Die Agents sollen diese Vorschläge nicht wieder bringen.',
+      all: 'Eigene Ideen, Projektvorschläge, neue Apps und Querverbindungen. Neueste zuerst.',
+    };
+    const empty = { new: 'Gerade keine offenen Ideen. Deine gemerkten Vorschläge findest du in den anderen Ansichten.', up: 'Noch keine Idee gut gefunden.', later: 'Keine Ideen zurückgestellt.', assigned: 'Noch keine Idee beauftragt.', done: 'Noch keine abgeschlossenen Ideen.', down: 'Keine Ideen abgelehnt.', all: 'Noch keine Ideen. Halte deine erste Idee fest.' };
+    return `<div class="ideas-page"><header class="ideas-heading"><h1>Ideen</h1><p>Entdecken, festhalten und weiterverfolgen.</p></header>${ideaAddForm()}<nav class="idea-filters" aria-label="Ideen filtern">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>Offene Eingabe</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
+  }
+  function setIdeaFilter(filter) {
+    if (!Object.hasOwn(IDEA_FILTERS, filter)) return;
+    ideaFilter = filter; ideaHighlight = null; render();
+    $(`[data-idea-filter="${filter}"]`)?.focus({ preventScroll: true });
+  }
+  async function openIdeaResult(id) {
+    const entry = ideaCollection().find(e => e.s.id === id);
+    if (!entry) { toast('Diese Idee ist nicht mehr in der Sammlung.'); return; }
+    ideaFilter = ideaBucket(entry); ideaHighlight = id;
+    await setPref('style', 'ideas');
+    const card = $(`[data-idea-id="${CSS.escape(id)}"]`);
+    card?.scrollIntoView?.({ block: 'center' });
+    card?.focus({ preventScroll: true });
+  }
   function blockIdeas() {
     const fromProjects = visible().flatMap(p => ((p.card || {}).suggestions || []).map(s => ({ s, project: p.id, firstSeen: (p.suggestion_first_seen || {})[s.id] })));
     const apps = ((S.portfolio || {}).new_apps || []).map(s => ({ s, project: null, firstSeen: (S.new_app_first_seen || {})[s.id] }));
@@ -520,19 +704,24 @@
 
   // ideas the owner parks; the next brief says whether and where each one is worth doing
   const IDEA_VERDICT = { build: ['eigene App', 'good'], fold_in: ['in Projekt einbauen', 'good'], later: ['später', ''], drop: ['lieber nicht', 'bad'] };
+  function ideaAddForm() {
+    return `<div class="idea-add"><label for="idea-text">Eigene Idee festhalten</label><div class="parkform"><input id="idea-text" type="text" value="${esc(ideaDraft)}" maxlength="600" placeholder="Was würdest du gern bauen oder verbessern?" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Festhalten</button></div><p class="faint">Der nächste Agent-Lauf prüft, ob und wo sie sich lohnt.</p></div>`;
+  }
+  function ownerIdeaCard(entry) {
+    const { s, own, assessment: c } = entry, id = s.id, task = ideaTask(id);
+    if (noteFor === id) return noteForm(id, s.title);
+    const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
+    const verdict = c ? `<div class="idea-assessment"><span class="faint">Agent-Einschätzung:</span> <span class="tag ${v[1]}">${esc(v[0])}</span><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}</div>` : '<div class="faint">Noch nicht eingeschätzt.</div>';
+    const returned = S.feedback[id]?.value === 'later' && snoozedUntil(S.feedback[id]) <= S.today;
+    const finished = task && ['done', 'cancelled'].includes(task.status);
+    const missingProjects = entry.projects.filter(project => !byId(project));
+    const action = finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(id, { projects: task ? task.projects : entry.projects, title: s.title, why: c?.why || '' });
+    const details = task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
+    return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
+  }
   function blockParking() {
-    const checks = (S.portfolio || {}).idea_checks || [];
-    const items = [...(S.ideas || [])].reverse().map(i => {
-      const c = checks.find(x => x.idea === i.id);
-      const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
-      const verdict = c
-        ? `<div class="h"><span class="tag ${v[1]}">${esc(v[0])}</span></div><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}`
-        : '<div class="faint" style="font-size:13px">Der nächste Agent-Lauf schätzt sie ein.</div>';
-      const task = c && (c.verdict === 'build' || c.verdict === 'fold_in') ? taskBtn(`idea:${i.id}`, { projects: c.fits || [], title: i.text, why: c.why }) : '';
-      return `<div class="idea"><div class="h"><div class="t">${esc(i.text)}</div><button class="linkish faint" type="button" data-idea-remove="${i.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${verdict}<div class="foot"><span class="faint mono" style="font-size:12px">geparkt ${fmtShort(i.added_at)}</span>${task}</div></div>`;
-    }).join('');
-    const form = `<div class="parkform"><input id="idea-text" type="text" value="${esc(ideaDraft)}" maxlength="600" placeholder="Idee festhalten, z. B. eine App, die meine Stromzähler ausliest" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Parken</button></div>`;
-    return mod('parking', 'Ideen-Parkplatz', 'Halt eine Idee fest; der nächste Agent-Lauf prüft, ob und wo sie sich lohnt', form + (items ? `<div class="cards2">${items}</div>` : ''));
+    const items = ideaCollection().filter(e => e.own && (e.s.id === noteFor || !hiddenByRating(e.s.id))).map(ownerIdeaCard).join('');
+    return mod('parking', 'Eigene Ideen', 'Halt fest, was du gern bauen oder verbessern würdest', ideaAddForm() + (items ? `<div class="cards2">${items}</div>` : ''));
   }
 
   // the first brief of a week looks back on the week before; shown until the next one
@@ -549,63 +738,56 @@
     return `<div class="note" style="margin-top:24px">${missing.length === 1 ? 'Ein Projekt hat' : `${missing.length} Projekte haben`} noch keine Einschätzung: ${missing.map(p => plink(p.id)).join(', ')}. Der nächste Agent-Lauf schreibt sie. <button class="linkish" type="button" data-open-settings>Wie richte ich den Lauf ein?</button></div>`;
   }
 
-  // ---------- handover ----------
+  // ---------- Today: what needs the owner's attention ----------
+  let showAllAttention = false;
+  let inspectedTask = null;
+  function attentionItems() {
+    const projects = byAttention(visible());
+    const tasks = (S.tasks || []).filter(t => ['review', 'blocked'].includes(t.status)).map(t => ({ type: 'task', task: t, score: t.status === 'blocked' ? 100 : 90 }));
+    const goals = projects.filter(goalIsDue).map(p => ({ type: 'goal', p, score: 80, title: p.goal }));
+    const questions = projects.flatMap(p => p.card ? openQs(p.card).map((q, i) => ({ type: 'question', p, q, title: q.title, score: 50 - i })) : []);
+    const problems = projects.flatMap(p => {
+      if (p.facts?.error === 'path_missing') return [{ type: 'problem', p, score: 75, title: 'Projektordner fehlt – Pfad prüfen', label: 'Ordner fehlt' }];
+      return safety(p).ci === 'red' ? [{ type: 'problem', p, score: 70, title: 'CI meldet fehlgeschlagene Prüfungen', label: 'CI rot' }] : [];
+    });
+    return [...tasks, ...goals, ...problems, ...questions].sort((a, b) => b.score - a.score);
+  }
+  function blockAttention() {
+    const items = attentionItems(), questions = items.filter(i => i.type === 'question').length;
+    const selected = inspectedTask && (S.tasks || []).find(t => t.id === inspectedTask);
+    const inspection = selected ? `<div class="task-inspection"><button type="button" class="linkish" data-task-inspection-close>Auftragsansicht schließen</button>${trackedTask(selected, true)}</div>` : '';
+    if (!items.length) return `<section class="morning-attention quiet"><h2>Gerade wartet nichts auf dich</h2><p class="muted">Keine offenen Entscheidungen, blockierten Aufträge oder Ergebnisse zur Bestätigung.</p>${inspection}</section>`;
+    const row = item => {
+      if (item.type === 'task') return `<details class="attention-row" ${foldAttrs(`attention:${item.task.id}`)}><summary><span class="tag ask">${item.task.status === 'blocked' ? 'Blockiert' : 'Ergebnis prüfen'}</span><span class="attention-title">${esc(item.task.title)}</span><span class="faint">#${item.task.id}</span></summary><div class="attention-detail">${trackedTask(item.task)}</div></details>`;
+      const label = item.label || (item.type === 'goal' ? (item.p.goal_due < S.today ? 'Ziel überfällig' : 'Ziel heute fällig') : 'Entscheidung');
+      return `<div class="attention-row"><span class="tag ask">${label}</span><button type="button" class="linkish attention-title" data-attention-project="${esc(item.p.id)}" data-attention-tab="${item.type === 'problem' ? 'history' : 'work'}" data-attention-anchor="${esc(item.q ? `question:${item.q.id}` : item.type === 'problem' ? 'facts' : 'owner')}">${esc(item.title)}</button><span class="attention-project">${esc(item.p.name)}</span></div>`;
+    };
+    return `<section class="morning-attention"><div class="attention-head"><div><h2>Braucht dich</h2><p class="muted">${items.length} ${items.length === 1 ? 'Punkt wartet' : 'Punkte warten'} auf eine Entscheidung oder Prüfung.</p></div>${questions ? `<button class="btn" type="button" data-round-start>${questions === 1 ? 'Entscheidung beantworten' : `${questions} Entscheidungen nacheinander`}</button>` : ''}</div><div class="attention-list">${(showAllAttention ? items : items.slice(0, 5)).map(row).join('')}</div>${items.length > 5 ? `<button class="more" type="button" data-attention-all>${showAllAttention ? 'wieder weniger anzeigen' : `alle ${items.length} anzeigen`}</button>` : ''}${inspection}</section>`;
+  }
+  async function openTaskResult(id) {
+    if (!(S.tasks || []).some(t => t.id === id)) return;
+    inspectedTask = id;
+    await setPref('style', 'handover');
+    render();
+    const el = document.querySelector(`.task-inspection [data-search-anchor="task:${id}"]`);
+    if (el) { el.classList?.add('search-hit'); el.scrollIntoView?.({ block: 'center' }); el.focus({ preventScroll: true }); }
+  }
   function renderHandover() {
     const n = visible().length;
     const greeting = (S.portfolio && S.portfolio.greeting) || `Guten Morgen. ${n} ${n === 1 ? 'Projekt' : 'Projekte'} im Blick.`;
-    const fresh = isNew(S.portfolio_updated_at) ? '<span class="pill new">neu</span>' : '';
-    const aside = blockWeek() + blockNight() + blockRecent() + blockPulse();
+    const newIdeas = ideaCollection().filter(e => ideaBucket(e) === 'new').length;
     return `<div class="handover">
-      <div class="greet"><div class="kicker">Übergabe · ${n} ${n === 1 ? 'Projekt' : 'Projekte'} ${fresh}</div><h2>${esc(greeting)}</h2></div>
+      <div class="greet"><div class="kicker">Heute · ${n} ${n === 1 ? 'Projekt' : 'Projekte'}</div><h2>${esc(greeting)}</h2></div>
+      ${blockAttention()}${blockFocus()}${blockChanges()}
       ${missingCardsNote()}
-      ${blockFocus()}${blockProjects()}
-      <div class="duo">${blockWaiting()}${aside ? `<div class="aside">${aside}</div>` : ''}</div>
-      ${blockAcross()}${blockIdeas()}${blockParking()}
+      <div class="overview-links"><button type="button" data-nav="board"><b>${n} ${n === 1 ? 'Projekt' : 'Projekte'}</b><span>Stand, Projektstimmen und offene Arbeit</span></button><button type="button" data-nav="ideas"><b>${newIdeas ? `${newIdeas} ${newIdeas === 1 ? 'Idee' : 'Ideen'} entdecken` : 'Deine Ideensammlung'}</b><span>Neue Vorschläge, gut Gefundenes und eigene Ideen</span></button><button type="button" data-nav="handbook"><b>Handbuch</b><span>Projekte starten und wieder einsteigen</span></button></div>
     </div>`;
   }
 
-  // ---------- board ----------
-  function card(p) {
-    const s = safety(p), c = p.card;
-    const badges = [
-      p.facts && p.facts.is_git && !s.remote ? noRemoteTag(p) : '',
-      s.unsaved ? `<span class="tag ${s.level}">${num(p.facts.dirty.files)} Dateien offen</span>` : '',
-      s.ahead ? `<span class="tag warn">${s.ahead} ungepusht</span>` : '',
-      s.ci === 'red' ? '<span class="tag bad">CI rot</span>' : '',
-      collisionTag(p),
-      unreleasedTag(p),
-      p.status !== 'active' ? `<span class="tag">${esc(STATUS[p.status])}</span>` : '',
-      p.card_outdated ? '<span class="tag">seit Karte geändert</span>' : '',
-    ].join('');
-    const fresh = isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : '';
-    const commits = (p.facts && p.facts.commits) || { last_30d: 0 };
-    return `<button class="card" type="button" data-open="${esc(p.id)}">
-      <div class="h"><span class="name">${dot(p.id)}${esc(p.name)}</span><span style="display:flex;gap:6px">${fresh}${phasePill(p)}</span></div>
-      <div class="hl">${c ? esc(c.headline) : '<span class="faint">Noch keine Einschätzung. Kommt beim nächsten Agent-Lauf.</span>'}</div>
-      ${goalLine(p)}
-      ${spark(weekly(p), color(p.id))}
-      <div class="stats"><span>zuletzt ${ago(lastWork(p))}</span><span class="mono">${num(commits.last_30d)} / 30 T</span></div>
-      ${badges ? `<div class="badges">${badges}</div>` : ''}
-      ${c ? `<div class="next"><span class="faint" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">Wiedereinstieg</span><b>${esc(c.reentry.next_step)}</b><span>${openQs(c).length} Entscheidungen · ${c.open_ends.length} offene Enden</span></div>` : ''}
-    </button>`;
-  }
-
+  // ---------- Projects: voices and records, with measured detail on demand ----------
   function renderBoard() {
-    const list = visible();
-    const git = list.filter(p => p.facts && p.facts.is_git);
-    const noRemote = git.filter(p => !p.facts.has_remote && !acknowledged(p, 'no_remote')).length;
-    const unsaved = git.filter(p => (p.facts.dirty || {}).files || p.facts.ahead).length;
-    const red = git.filter(p => (p.facts.ci || {}).state === 'red').length;
-    const waiting = list.reduce((a, p) => a + (p.card ? openQs(p.card).length : 0), 0);
-    const kpis = `<div class="kpis">
-      <div class="kpi ${noRemote ? 'bad' : 'ok'}"><div class="v">${noRemote}</div><div class="l">Remote ungeklärt</div></div>
-      <div class="kpi ${unsaved ? 'warn' : 'ok'}"><div class="v">${unsaved}</div><div class="l">mit ungesicherter Arbeit</div></div>
-      <div class="kpi ${red ? 'bad' : 'ok'}"><div class="v">${red}</div><div class="l">mit rotem CI</div></div>
-      <div class="kpi"><div class="v">${waiting}</div><div class="l">Entscheidungen offen</div></div></div>`;
-    const grid = mod('cards', 'Projekte', 'Sortiert nach letzter Arbeit. Klick öffnet den Steckbrief', `<div class="grid">${byLastWork(list).map(card).join('')}</div>`);
-    return `${mod('kpis', 'Lage auf einen Blick', null, kpis)}
-      <div class="board"><div>${grid}${blockSafety()}${blockRecent()}${blockPulse()}${blockSpace()}</div>
-      <aside class="side">${blockFocus()}${blockWeek()}${blockNight()}${blockWaiting(1)}${blockParking()}${blockAcross()}</aside></div>`;
+    if (!visible().length) return renderEmpty() + blockTasks();
+    return `<div class="project-overview">${blockProjects()}${blockTasks()}<details class="reference-fold" ${foldAttrs('history')}><summary>Verlauf und Einordnung <span class="faint">Projektmeldungen, Rückblick und Zusammenhänge</span></summary>${blockRecent()}${blockWeek()}${blockAcross()}</details><details class="reference-fold" ${foldAttrs('facts')}><summary>Gemessene Git-Fakten <span class="faint">Arbeitsstände, letzte Aktivität und Speicherplatz</span></summary>${blockSafety()}${blockNight()}${blockSpace()}</details></div>`;
   }
 
   // ---------- handbook ----------
@@ -614,28 +796,29 @@
   const hbEmpty = h => !h || (!h.architecture && !h.installed && !HB_LISTS.some(k => (h[k] || []).length));
   // one line per command; lines break only between words, so `-Open` or `build-release.ps1` stay whole
   const cmdHtml = how => how.split('; ').map(line => line.split(' ').map(t => t.length <= 32 ? `<span class="nb">${esc(t)}</span>` : esc(t)).join(' ')).join('\n');
-  function hbParts(h) {
+  function hbParts(h, searchable = false) {
     h = h || {};
-    const kv = (items, key, val, keyClass) => items && items.length ? `<dl class="kv">${items.map(x => `<dt class="${keyClass}">${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
+    const anchor = key => searchable ? ` data-search-anchor="${key}" tabindex="-1"` : '';
+    const kv = (items, key, val, keyClass, group) => items && items.length ? `<dl class="kv">${items.map((x, i) => `<dt class="${keyClass}"${anchor(`${group}:${i}`)}>${esc(x[key])}</dt><dd>${esc(x[val])}</dd>`).join('')}</dl>` : '';
     const i = h.installed;
-    const inst = i ? `<div class="hb-inst">Installiert: <b>${esc(i.version)}</b> <button class="linkish mono faint" type="button" data-external="${esc(i.path)}" title="Im Explorer öffnen">${esc(i.path)}</button>${i.open ? `<div>Öffnen: ${esc(i.open)}</div>` : ''}</div>` : '';
+    const inst = i ? `<div class="hb-inst"${anchor('hb-installed')}>Installiert: <b>${esc(i.version)}</b> <button class="linkish mono faint" type="button" data-external="${esc(i.path)}" title="Im Explorer öffnen">${esc(i.path)}</button>${i.open ? `<div>Öffnen: ${esc(i.open)}</div>` : ''}</div>` : '';
     // a URL is opened, a command copied; a URL with a <placeholder> can only be copied and completed
     const act = r => /^https?:\/\/[^\s<]+$/.test(r.how)
       ? `<button class="linkish" type="button" data-external="${esc(r.how)}" aria-label="${esc(r.what)} öffnen">öffnen</button>`
       : `<button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button>`;
     return {
       // label on top, the command below at full width, one line per command; copying takes it as written
-      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map(r => `<div class="hb-run"><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code>${act(r)}</div></div>`).join('')}</div>` : ''),
-      arch: h.architecture ? `<p class="hb-arch">${esc(h.architecture)}</p>` : '',
-      places: kv(h.places, 'path', 'what', 'mono'),
-      read: kv(h.read_first, 'path', 'why', 'mono'),
-      needs: (h.needs || []).length ? `<ul class="bullets">${h.needs.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '',
-      terms: kv(h.terms, 'term', 'meaning', 'term'),
+      run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map((r, i) => `<div class="hb-run"${anchor(`hb-run:${i}`)}><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code>${act(r)}</div></div>`).join('')}</div>` : ''),
+      arch: h.architecture ? `<p class="hb-arch"${anchor('hb-architecture')}>${esc(h.architecture)}</p>` : '',
+      places: kv(h.places, 'path', 'what', 'mono', 'hb-place'),
+      read: kv(h.read_first, 'path', 'why', 'mono', 'hb-read'),
+      needs: (h.needs || []).length ? `<ul class="bullets">${h.needs.map((n, i) => `<li${anchor(`hb-need:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '',
+      terms: kv(h.terms, 'term', 'meaning', 'term', 'hb-term'),
     };
   }
   const hbSec = (title, body) => body ? `<div class="hb-sec"><h3>${esc(title)}</h3>${body}</div>` : '';
-  function handbookBody(h) {
-    const x = hbParts(h);
+  function handbookBody(h, searchable = false) {
+    const x = hbParts(h, searchable);
     return hbSec('So startest du es', x.run) + hbSec('Wie es gebaut ist', x.arch) + hbSec('Wo was liegt', x.places)
       + hbSec('Zuerst lesen', x.read) + hbSec('Braucht', x.needs) + hbSec('Begriffe', x.terms);
   }
@@ -658,7 +841,7 @@
 
   // what happened since the owner last opened this project, when that was a while ago
   function sinceHtml(p) {
-    if (!since || since.id !== p.id || !since.data || since.dismissed) return '';
+    if (!since || since.id !== p.id || !since.data) return '';
     const s = since.data;
     const when = s.days < 28 ? `vor ${s.days} Tagen` : `vor ${Math.round(s.days / 7)} Wochen`;
     const counts = [
@@ -669,21 +852,29 @@
     if (s.phase) lines.push(`<li>Phase: ${esc(PHASE[s.phase.from] || s.phase.from)} → ${esc(PHASE[s.phase.to] || s.phase.to || '—')}</li>`);
     s.milestones.forEach(m => lines.push(`<li><b>Meilenstein:</b> ${esc(m.title)} <span class="faint mono">${fmtShort(m.date)}</span></li>`));
     s.recent_changes.forEach(ch => lines.push(`<li>${esc(ch.title)} <span class="faint mono">${fmtShort(ch.date)}</span></li>`));
-    const body = !s.commits && !s.card_updates ? '<div class="muted">Seitdem ist nichts passiert.</div>' : lines.length ? `<ul class="bullets">${lines.join('')}</ul>` : '';
-    return `<section class="since"><div class="since-h"><b>Seit du zuletzt reingeschaut hast</b><span class="faint">${when} · ${counts}</span><button class="linkish" type="button" data-since-close>ausblenden</button></div>${body}</section>`;
+    const body = lines.length ? `<ul class="bullets">${lines.join('')}</ul>` : '<div class="muted">Keine weiteren Ereignisse im gespeicherten Verlauf.</div>';
+    return `<details class="since" data-drawer-detail="since"><summary><b>Seit deinem letzten Besuch</b><span class="faint"> · ${when} · ${counts}</span></summary>${body}</details>`;
   }
 
   // ---------- drawer ----------
+  const pastReplies = p => Object.entries(S.feedback || {}).filter(([id, f]) => f.project_id === p.id
+    && f.item?.kind === 'question' && ['answered', 'done'].includes(f.value)
+    && !(p.card?.waiting_on_you || []).some(w => w.id === id))
+    .sort((a, b) => String(b[1].at || '').localeCompare(String(a[1].at || '')));
   function drawerHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
     const commits = f.commits || {};
-    const statusBar = `<div class="statusbar"><span class="faint" style="font-size:13px">Deine Absicht:</span><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt oder worauf sie achten sollen" value="${esc(projectValue(p, 'status_note'))}" aria-label="Notiz an die Agents"></div>
-      <div class="statusbar goalbar"><span class="faint" style="font-size:13px">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(projectValue(p, 'goal'))}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(projectValue(p, 'goal_due'))}" aria-label="Bis wann" title="Bis wann (optional)"></div>`;
+    const tab = drawerTabs[p.id] || 'work';
+    const anchor = name => `data-search-anchor="${esc(name)}" tabindex="-1"`;
+    const section = (key, title, body, sub) => body ? `<div ${anchor(key)}>${dmod(title, body, sub)}</div>` : '';
+    const editing = drawerEditors.has(p.id);
+    const statusBar = `<div class="project-intent" ${anchor('owner')}><div class="intent-summary"><span>Deine Absicht: <b>${esc(STATUS[p.status] || p.status)}</b></span><button class="linkish" type="button" data-drawer-edit aria-expanded="${editing}" aria-controls="project-owner-fields">${editing ? 'Bearbeiten schließen' : 'Status und Ziel bearbeiten'}</button></div>${p.status_note ? `<p class="muted">${esc(p.status_note)}</p>` : ''}${goalLine(p)}
+      <div id="project-owner-fields"${editing ? '' : ' hidden'}><div class="statusbar"><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt" value="${esc(projectValue(p, 'status_note'))}" aria-label="Notiz an die Agents"></div><div class="statusbar goalbar"><span class="faint">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(projectValue(p, 'goal'))}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(projectValue(p, 'goal_due'))}" aria-label="Bis wann" title="Bis wann (optional)"></div><p class="faint edit-hint">Änderungen werden beim Verlassen des Feldes gespeichert.</p></div></div>`;
     const factsKv = f.is_git ? `<dl class="kv">
       <dt>Commits</dt><dd class="mono">${num(commits.total)} gesamt · 7 T: ${num(commits.last_7d)} · 30 T: ${num(commits.last_30d)} · seit ${commits.first ? fmtDate(commits.first) : '—'}</dd>
       <dt>Branch</dt><dd class="mono">${esc(f.branch || '—')}${f.upstream ? ` → ${esc(f.upstream)}` : ''}${f.ahead ? ` · ${f.ahead} voraus` : ''}${f.behind ? ` · ${f.behind} zurück` : ''}</dd>
-      <dt>Remote</dt><dd>${f.has_remote ? esc(f.remotes.map(r => `${r.name}: ${r.url}`).join(', ')) : noRemoteTag(p)}</dd>
-      <dt>Ungesichert</dt><dd>${s.unsaved ? `<span class="tag ${s.level}">${esc(s.unsaved)}</span>` : 'sauber'}</dd>
+      <dt>Remote</dt><dd>${f.has_remote ? esc((f.remotes || []).map(r => `${r.name}: ${r.url}`).join(', ')) : noRemoteTag(p)}</dd>
+      <dt>Lokale Änderungen</dt><dd>${s.unsaved ? esc(s.unsaved) : 'keine nicht committeten Änderungen'}</dd>
       <dt>Liegengeblieben</dt><dd>${esc(s.leftovers || 'nichts')}</dd>
       ${releaseText(p) ? `<dt>Release</dt><dd>${esc(releaseText(p))}</dd>` : ''}
       ${collisions(p).length ? `<dt>Überschneidungen</dt><dd>${collisions(p).map(c => `<div>${esc(collisionText(c))}</div>`).join('')}</dd>` : ''}
@@ -691,61 +882,100 @@
       ${f.space && f.space.total_bytes ? `<dt>Platz</dt><dd>${bytes(f.space.total_bytes)} neu erzeugbar: ${f.space.dirs.filter(d => d.bytes >= 1e6).slice(0, 4).map(d => `${esc(d.path)} ${bytes(d.bytes)}`).join(' · ')}</dd>` : ''}
       <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
+    const r = c && c.reentry || {};
     let body = `<button class="close" data-close type="button">Schließen</button>
-      <h2 class="pname">${dot(p.id)}${esc(p.name)} ${phasePill(p)}${isNew(p.card_updated_at) ? '<span class="pill new">neu</span>' : ''}</h2>
-      ${c ? `<div class="one">${esc(c.one_liner)}</div>` : ''}
-      <div class="stack">${c && c.stack ? `${esc(c.stack)} · ` : ''}<button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
-      ${statusBar}
-      ${sinceHtml(p)}
-      ${c && c.personality ? `<div class="say">„${esc(c.personality)}“</div>` : ''}
-      <div style="margin-top:14px">${spark(weekly(p), color(p.id), 48)}${c && c.phase_evidence ? `<div class="faint" style="font-size:12.5px">${esc(c.phase_evidence)}</div>` : ''}</div>`;
+      <header class="project-summary"><h2 class="pname" ${anchor('name')}>${dot(p.id)}${esc(p.name)} ${phasePill(p)}${projectUnread(p) ? '<span class="pill new">ungelesen</span>' : ''}</h2>
+      ${c ? `<div class="one" ${anchor('purpose')}>${esc(c.one_liner)}</div><div class="project-current" ${anchor('headline')}><span class="faint">Aktueller Stand</span><p>${esc(c.headline)}</p>${cardFreshness(p)}</div>` : ''}
+      ${r.next_step ? `<div class="project-next" ${anchor('reentry')}><span class="faint">Nächster Schritt</span><p>${esc(r.next_step)}</p>${r.why ? `<div class="muted">${esc(r.why)}</div>` : ''}${r.done_when ? `<div class="muted">Fertig, wenn: ${esc(r.done_when)}</div>` : ''}${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>` : ''}
+      ${c && c.personality ? `<div class="say" ${anchor('voice')}>„${esc(c.personality)}“</div>` : ''}</header>
+      <div class="drawer-tabs" role="tablist" aria-label="Projektbereiche">${[['work', 'Weiterarbeiten'], ['handbook', 'Starten & Handbuch'], ['history', 'Verlauf & Fakten']].map(([key, title]) => `<button type="button" role="tab" id="drawer-tab-${key}" data-drawer-tab="${key}" aria-selected="${tab === key}" aria-controls="drawer-panel-${key}">${title}</button>`).join('')}</div>`;
+    let work = statusBar, handbook = '', history = sinceHtml(p);
     if (!c) {
-      body += `<div class="note" style="margin-top:20px">Noch keine Einschätzung. Der nächste Agent-Lauf schreibt sie. Bis dahin siehst du nur die Git-Fakten.</div>`;
+      work += '<p class="note">Noch keine Einschätzung. Der nächste Agent-Lauf schreibt sie. Die gemessenen Git-Fakten findest du unter „Verlauf & Fakten“.</p>';
+      handbook = '<p class="muted">Noch kein Handbuch. Der nächste Agent-Lauf schreibt es.</p>';
     } else {
       const v = c.vision || {};
-      const suggestions = newestIdeas(c.suggestions.map(s => ({ s, firstSeen: (p.suggestion_first_seen || {})[s.id] }))).map(({ s }) => ideaCard(s, [], p.id)).filter(Boolean).join('');
-      const r = c.reentry;
+      const suggestions = newestIdeas(c.suggestions.map(s => ({ s, firstSeen: (p.suggestion_first_seen || {})[s.id] }))).map(({ s }) => {
+        const content = ideaCard(s, [], p.id, null, { collection: drawerSearch?.id === p.id && drawerSearch.anchor === `suggestion:${s.id}` });
+        return content ? `<div ${anchor(`suggestion:${s.id}`)}>${content}</div>` : '';
+      }).join('');
       const hist = (p.history || []).filter((h, i, a) => i === a.length - 1 || h.headline !== a[i + 1].headline);
       const stampOf = at => new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
       const histRow = (h, i, a) => `<li><span class="when">${stampOf(h.at)}</span><span class="rail"></span><span class="what">${esc(h.headline)}${a[i + 1] && a[i + 1].phase !== h.phase ? ` <span class="pill ${esc(h.phase)}">${esc(PHASE[h.phase] || h.phase)}</span>` : ''}</span></li>`;
       const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
-      body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(r.next_step)}</div><div class="rmeta">${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
-        + dmod('Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true)).join('')}</ul>` : '')
-        + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' || o.kind === 'ci' ? 'bad' : o.kind === 'unpushed' ? 'warn' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
-        + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${[...c.recent_changes].sort((a, b) => b.date.localeCompare(a.date)).map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
-        + dmod('Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
-        + dmod('Vision und Fortschritt', v.statement || v.progress_note ? `<div>${v.statement ? `<div>${esc(v.statement)}</div>` : ''}${v.progress_pct != null ? `<div class="prog"><span style="width:${Number(v.progress_pct)}%"></span></div><div class="faint mono" style="font-size:12px">${Number(v.progress_pct)} %</div>` : ''}${v.progress_note ? `<div class="muted" style="font-size:14px;margin-top:6px">${esc(v.progress_note)}</div>` : ''}</div>` : '')
-        + dmod('Was es heute kann', c.features.length ? `<div class="feat">${c.features.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : '')
-        + dmod('Meilensteine', c.milestones.length ? `<ol class="timeline">${c.milestones.map(m => `<li><span class="when">${fmtDate(m.date)}</span><span class="rail"></span><span class="what">${esc(m.title)}</span></li>`).join('')}</ol>` : '')
-        + dmod('Chronik', chronicle, 'Die Überschrift jeder Kartenversion, neueste zuerst')
-        + dmod('Gesundheit', c.health_notes.length ? `<ul class="bullets">${c.health_notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
-        + dmod('Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts; die Agents werten das nicht als Risiko')
-        + dmod('Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '')
-        + (hbEmpty(c.handbook) ? '' : `<details class="mod hb" data-hb${hbOpen ? ' open' : ''}><summary class="mod-head"><div><h2>Handbuch <span class="chev" aria-hidden="true">▸</span></h2><div class="sub">Starten, Aufbau, wo was liegt: fürs Wiederreinkommen nach längerer Pause</div></div></summary>${handbookBody(c.handbook)}</details>`);
+      work += section('questions', 'Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true).replace('<li ', `<li ${anchor(`question:${w.id}`)} `)).join('')}</ul>` : '')
+        + section('open-ends', 'Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map((o, i) => `<div class="row" ${anchor(`open:${i}`)}><div class="t">${esc(o.title)}</div><span class="tag">${esc(KIND[o.kind] || o.kind)}</span>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '')
+        + section('suggestions', 'Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
+        + section('decisions', 'Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map((n, i) => `<li ${anchor(`decision:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts')
+        + section('connections', 'Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map((n, i) => `<li ${anchor(`connection:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '');
+      handbook = `<div class="stack" ${anchor('stack')}>${esc(c.stack || '')}</div>`
+        + (hbEmpty(c.handbook) ? '<p class="muted">Noch kein Handbuch. Der nächste Agent-Lauf schreibt es.</p>' : handbookBody(c.handbook, true))
+        + section('features', 'Was es heute kann', c.features.length ? `<div class="feat">${c.features.map((x, i) => `<span ${anchor(`feature:${i}`)}>${esc(x)}</span>`).join('')}</div>` : '');
+      history += section('recent', 'Zuletzt passiert', c.recent_changes.length ? `<div class="list">${c.recent_changes.map((ch, i) => ({ ch, i })).sort((a, b) => b.ch.date.localeCompare(a.ch.date)).map(({ ch, i }) => `<div class="row" ${anchor(`recent:${i}`)}><div class="t">${esc(ch.title)}</div><div class="faint mono">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
+        + section('vision', 'Vision und Fortschritt', v.statement || v.progress_note || v.progress_pct != null ? `<div>${v.statement ? `<p>${esc(v.statement)}</p>` : ''}${v.progress_pct != null ? `<div class="faint">Agent-Einschätzung: ${Number(v.progress_pct)} %</div>` : ''}${v.progress_note ? `<p class="muted">${esc(v.progress_note)}</p>` : ''}</div>` : '')
+        + section('milestones', 'Meilensteine', c.milestones.length ? `<ol class="timeline">${c.milestones.map((m, i) => `<li ${anchor(`milestone:${i}`)}><span class="when">${fmtDate(m.date)}</span><span class="rail"></span><span class="what">${esc(m.title)}</span></li>`).join('')}</ol>` : '')
+        + section('chronicle', 'Chronik', chronicle, 'Die Überschrift jeder Kartenversion, neueste zuerst')
+        + section('health', 'Gesundheit', c.health_notes.length ? `<ul class="bullets">${c.health_notes.map((n, i) => `<li ${anchor(`health:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '')
+        + (c.phase_evidence ? `<p class="muted" ${anchor('phase')}>${esc(c.phase_evidence)}</p>` : '');
     }
-    body += blockTasks(p.id) + warningControls(p) + dmod('Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min${p.card_updated_at ? ` · Karte vom ${fmtDate(p.card_updated_at)}` : ''}` : null);
-    return `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(p.name)}">${body}</aside>`;
+    work += `<div ${anchor('tasks')}>${blockTasks(p.id)}</div>`;
+    handbook += `<div class="stack" ${anchor('path')}><button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>`;
+    const replies = pastReplies(p);
+    history += section('past-replies', 'Deine früheren Antworten', replies.length ? `<ul class="bullets">${replies.map(([id, f]) => `<li ${anchor(`answer:${id}`)}><b>${esc(f.item.title || f.title)}</b><p>${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Von dir als erledigt markiert.'}${f.at ? ` <span class="faint">· ${fmtDate(f.at)}</span>` : ''}</p></li>`).join('')}</ul>` : '')
+      + warningControls(p) + section('facts', 'Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min` : null)
+      + (f.is_git ? `<details class="commit-history" data-drawer-detail="commits"><summary>Commit-Aktivität ansehen</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
+    body += [['work', work], ['handbook', handbook], ['history', history]].map(([key, html]) => `<section id="drawer-panel-${key}" class="drawer-panel" role="tabpanel" aria-labelledby="drawer-tab-${key}"${tab === key ? '' : ' hidden'}>${html}</section>`).join('');
+    return `<div class="scrim" data-close></div><aside class="drawer project-drawer" role="dialog" aria-modal="true" aria-label="${esc(p.name)}">${body}</aside>`;
   }
 
-  function openDrawer(id, keepScroll) {
+  function openDrawer(id, keepScroll, searchTarget = null) {
     const p = byId(id);
     if (!p) return;
     const focused = keepScroll ? inputFocus() : null;
     const root = $('#drawer-root');
     const prev = root.querySelector('.drawer');
     const top = keepScroll && prev ? prev.scrollTop : 0;
+    const details = keepScroll && prev ? [...prev.querySelectorAll('details[open]')].map(el => el.dataset.drawerDetail || el.querySelector('summary')?.textContent).filter(Boolean) : [];
     if (!keepScroll) {
       since = null;
+      drawerSearch = searchTarget;
       call('open_project', { id }).then(r => { if (openId === id && r.since) { since = { id, data: r.since }; openDrawer(id, true); } }).catch(() => {});
     }
     root.innerHTML = drawerHtml(p);
     openId = id;
     const d = root.querySelector('.drawer');
+    if (details.length) for (const el of d.querySelectorAll('details')) {
+      if (details.includes(el.dataset.drawerDetail || el.querySelector('summary')?.textContent)) el.open = true;
+    }
     d.scrollTop = top;
     if (!keepScroll) root.querySelector('.close').focus();
-    else restoreInputFocus(focused);
+    else { restoreInputFocus(focused); if (drawerSearch && drawerSearch.id === id) revealDrawerTarget(drawerSearch.anchor, false); }
   }
-  const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; };
+  const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; drawerSearch = null; };
+  function selectDrawerTab(tab) {
+    if (!openId || !['work', 'handbook', 'history'].includes(tab)) return;
+    drawerTabs[openId] = tab;
+    drawerSearch = null;
+    openDrawer(openId, true);
+    $('#drawer-root .drawer').scrollTop = 0;
+    $(`#drawer-tab-${tab}`).focus({ preventScroll: true });
+  }
+  function revealDrawerTarget(anchor, focus = true) {
+    const target = $(`#drawer-root [data-search-anchor="${CSS.escape(anchor)}"]`);
+    if (!target) return;
+    for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === 'DETAILS') parent.open = true;
+    }
+    for (const detail of target.querySelectorAll('details')) detail.open = true;
+    target.classList.add('search-hit');
+    if (focus) { target.scrollIntoView({ block: 'center' }); target.focus({ preventScroll: true }); }
+  }
+  function openDrawerTarget(id, tab = 'work', anchor = 'name') {
+    if (!byId(id)) return;
+    drawerTabs[id] = ['work', 'handbook', 'history'].includes(tab) ? tab : 'work';
+    openDrawer(id, false, { id, anchor });
+    revealDrawerTarget(anchor);
+  }
 
   // ---------- decision round: every open question, one at a time ----------
   function startRound() {
@@ -808,33 +1038,54 @@
 
   // ---------- search ----------
   const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let searchSnapshot = null; // selection always refers to the results the owner can see
+  const searchIdentity = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
   function searchEntries() {
     const out = [];
     for (const p of S.projects) {
-      const add = (where, text, hb) => { if (text) out.push({ id: p.id, where, text: String(text), hb: !!hb }); };
-      add('Name', p.name);
-      add('Ordner', p.path);
+      const add = (where, text, tab, anchor, source = text) => { if (text) out.push({ id: p.id, name: p.name, where, text: String(text), tab: tab || 'work', anchor, identity: searchIdentity([p.id, where, source]) }); };
+      add('Name', p.name, 'work', 'name');
+      add('Ordner', p.path, 'handbook', 'path');
+      add('Deine Absicht', [p.status_note, p.goal].filter(Boolean).join(' · '), 'work', 'owner');
+      for (const [id, f] of pastReplies(p)) add('Frühere Antwort', [f.item.title || f.title, f.note].filter(Boolean).join(' · '), 'history', `answer:${id}`, id);
+      for (const task of (S.tasks || []).filter(t => (t.projects || []).includes(p.id))) {
+        add('Auftrag', [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · '), 'work', `task:${task.id}`, task.id);
+      }
       const c = p.card;
       if (!c) continue;
-      add('Kurz gesagt', c.one_liner); add('Stack', c.stack); add('Überschrift', c.headline);
-      if (c.vision && c.vision.statement) add('Vision', c.vision.statement);
-      c.features.forEach(x => add('Kann', x));
-      c.recent_changes.forEach(x => add('Zuletzt passiert', x.detail ? `${x.title} – ${x.detail}` : x.title));
-      c.milestones.forEach(x => add('Meilenstein', x.title));
-      c.open_ends.forEach(x => add('Offenes Ende', x.detail ? `${x.title} – ${x.detail}` : x.title));
-      c.waiting_on_you.forEach(x => add('Frage an dich', x.title));
-      c.suggestions.forEach(x => add('Vorschlag', `${x.title} – ${x.why}`));
-      c.health_notes.forEach(x => add('Gesundheit', x));
-      (c.decisions || []).forEach(x => add('Entscheidung', x));
-      c.cross_project_hints.forEach(x => add('Querverbindung', x));
+      add('Kurz gesagt', c.one_liner, 'work', 'purpose'); add('Stack', c.stack, 'handbook', 'stack'); add('Aktueller Stand', c.headline, 'work', 'headline');
+      add('Projektstimme', c.personality, 'work', 'voice');
+      add('Nächster Schritt', c.reentry && [c.reentry.next_step, c.reentry.why, c.reentry.done_when].filter(Boolean).join(' · '), 'work', 'reentry');
+      if (c.vision) add('Vision und Fortschritt', [c.vision.statement, c.vision.progress_note].filter(Boolean).join(' · '), 'history', 'vision');
+      c.features.forEach((x, i) => add('Kann', x, 'handbook', `feature:${i}`, x));
+      c.recent_changes.forEach((x, i) => add('Zuletzt passiert', x.detail ? `${x.title} – ${x.detail}` : x.title, 'history', `recent:${i}`, x));
+      c.milestones.forEach((x, i) => add('Meilenstein', x.title, 'history', `milestone:${i}`, x));
+      c.open_ends.forEach((x, i) => add('Offenes Ende', [x.title, x.detail, x.source].filter(Boolean).join(' · '), 'work', `open:${i}`, x));
+      c.waiting_on_you.forEach(x => {
+        add('Frage an dich', [x.title, x.source, ...(x.options || []).map(o => o.answer)].filter(Boolean).join(' · '), 'work', `question:${x.id}`, x.id);
+        const answered = reply(x.id);
+        if (answered && answered.note) add('Deine Antwort', answered.note, 'work', `question:${x.id}`, x.id);
+      });
+      c.suggestions.forEach(x => add('Vorschlag', [x.title, x.why, x.evidence, x.done_when].filter(Boolean).join(' · '), 'work', `suggestion:${x.id}`, x.id));
+      c.health_notes.forEach((x, i) => add('Gesundheit', x, 'history', `health:${i}`));
+      (c.decisions || []).forEach((x, i) => add('Entscheidung', x, 'work', `decision:${i}`));
+      c.cross_project_hints.forEach((x, i) => add('Querverbindung', x, 'work', `connection:${i}`));
       const h = c.handbook || {};
-      (h.run || []).forEach(x => add('Handbuch · Starten', `${x.what}: ${x.how}`, true));
-      if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.open || ''} ${h.installed.path}`, true);
-      add('Handbuch · Aufbau', h.architecture, true);
-      (h.places || []).forEach(x => add('Handbuch · Wo was liegt', `${x.path} – ${x.what}`, true));
-      (h.read_first || []).forEach(x => add('Handbuch · Zuerst lesen', `${x.path} – ${x.why}`, true));
-      (h.needs || []).forEach(x => add('Handbuch · Braucht', x, true));
-      (h.terms || []).forEach(x => add('Handbuch · Begriff', `${x.term}: ${x.meaning}`, true));
+      (h.run || []).forEach((x, i) => add('Handbuch · Starten', `${x.what}: ${x.how}`, 'handbook', `hb-run:${i}`, x));
+      if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.open || ''} ${h.installed.path}`, 'handbook', 'hb-installed', h.installed);
+      add('Handbuch · Aufbau', h.architecture, 'handbook', 'hb-architecture');
+      (h.places || []).forEach((x, i) => add('Handbuch · Wo was liegt', `${x.path} – ${x.what}`, 'handbook', `hb-place:${i}`, x));
+      (h.read_first || []).forEach((x, i) => add('Handbuch · Zuerst lesen', `${x.path} – ${x.why}`, 'handbook', `hb-read:${i}`, x));
+      (h.needs || []).forEach((x, i) => add('Handbuch · Braucht', x, 'handbook', `hb-need:${i}`));
+      (h.terms || []).forEach((x, i) => add('Handbuch · Begriff', `${x.term}: ${x.meaning}`, 'handbook', `hb-term:${i}`, x));
+    }
+    for (const idea of ideaCollection()) {
+      if (idea.project && !idea.retained && !idea.own) continue;
+      out.push({ ideaId: idea.s.id, identity: searchIdentity(['idea', idea.s.id]), name: idea.own ? 'Deine Ideen' : 'Ideen', where: idea.own ? 'Eigene Idee' : 'Vorschlag', text: [idea.s.title, idea.s.why, idea.s.pitch, idea.s.evidence].filter(Boolean).join(' · ') });
+    }
+    for (const task of (S.tasks || []).filter(t => !(t.projects || []).some(id => byId(id)))) {
+      out.push({ taskId: task.id, identity: searchIdentity(['task', task.id]), name: 'Aufträge', where: 'Auftrag', text: [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · ') });
     }
     return out;
   }
@@ -842,7 +1093,7 @@
     const words = norm(searchQ).split(/\s+/).filter(Boolean);
     if (!words.length) return [];
     return searchEntries()
-      .map(e => ({ e, hay: norm(`${byId(e.id).name} ${e.text}`) }))
+      .map(e => ({ e, hay: norm(`${e.name} ${e.text}`) }))
       .filter(x => words.every(w => x.hay.includes(w)))
       .map(x => ({ ...x.e, score: (x.e.where === 'Name' ? 100 : 0) + words.filter(w => norm(x.e.text).includes(w)).length }))
       .sort((a, b) => b.score - a.score)
@@ -873,43 +1124,52 @@
   function renderSearchResults() {
     const box = $('#search-root .sresults');
     if (!box) return;
-    const res = searchResults();
+    if (!searchSnapshot || searchSnapshot.query !== searchQ) searchSnapshot = { query: searchQ, results: searchResults() };
+    const res = searchSnapshot.results;
     searchSel = Math.min(searchSel, Math.max(0, res.length - 1));
-    box.innerHTML = !searchQ.trim() ? '<p class="faint sempty">Sucht in allen Karten und Handbüchern: Funktionen, Befehle, Begriffe, Entscheidungen.</p>'
+    box.innerHTML = !searchQ.trim() ? '<p class="faint sempty">Sucht in Projekten, Handbüchern, Aufträgen, Ideen und deinen Antworten. Ein Treffer öffnet die Fundstelle.</p>'
       : !res.length ? '<p class="faint sempty">Nichts gefunden.</p>'
-      : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" data-id="${esc(r.id)}" data-hb="${r.hb}" aria-selected="${i === searchSel}"><span class="w">${dot(r.id)}<b>${esc(byId(r.id).name)}</b> · ${esc(r.where)}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
+      : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" aria-selected="${i === searchSel}"><span class="w">${r.id ? dot(r.id) : ''}<b>${esc(r.name)}</b> · ${esc(r.where)}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
     const sel = box.querySelector('[aria-selected="true"]');
     if (sel) sel.scrollIntoView({ block: 'nearest' });
   }
   function openSearch() {
-    if (!S || !S.projects.length) return;
+    if (!S) return;
+    searchSnapshot = null;
     searchOpen = true;
     $('#search-root').innerHTML = `<div class="scrim" data-search-close></div><div class="search" role="dialog" aria-modal="true" aria-label="Suche">
       <input type="search" id="search-q" placeholder="Suchen, z. B. Login, SQLite, Port" value="${esc(searchQ)}" aria-label="Suchbegriff" autocomplete="off">
-      <div class="sresults"></div><div class="shint faint">↑ ↓ wählen · Enter öffnet den Steckbrief · Esc schließt</div></div>`;
+      <div class="sresults"></div><div class="shint faint">↑ ↓ wählen · Enter öffnet die Fundstelle · Esc schließt</div></div>`;
     renderSearchResults();
     const input = $('#search-q');
     input.focus();
     input.select();
   }
-  const closeSearch = () => { searchOpen = false; $('#search-root').innerHTML = ''; };
+  const closeSearch = () => { searchOpen = false; searchSnapshot = null; $('#search-root').innerHTML = ''; };
   function pickResult(btn) {
     if (!btn) return;
-    if (btn.dataset.hb === 'true') hbOpen = true;
+    const selected = (searchOpen ? searchSnapshot?.results || [] : searchResults())[Number(btn.dataset.sres)];
+    if (!selected) return;
+    // Array positions are presentation anchors, not item identities. Reconcile
+    // the visible hit with the current document before choosing its new anchor.
+    const matches = searchEntries().filter(entry => entry.identity === selected.identity);
+    if (matches.length !== 1) { toast('Treffer nicht mehr aktuell oder nicht mehr eindeutig. Öffne die Suche erneut.'); return; }
+    const result = matches[0];
     closeSearch();
-    openDrawer(btn.dataset.id);
-    const hb = btn.dataset.hb === 'true' && document.querySelector('#drawer-root [data-hb]');
-    if (hb) hb.scrollIntoView({ block: 'start' });
+    if (result.ideaId) { closeDrawer(); openIdeaResult(result.ideaId); return; }
+    if (result.taskId != null) { closeDrawer(); openTaskResult(result.taskId); return; }
+    openDrawerTarget(result.id, result.tab, result.anchor);
   }
 
   // ---------- page ----------
   function renderFoot() {
-    const collapsed = [...collapsedMods()];
+    const available = new Set(S.prefs.style === 'board' ? ['projects', 'tasks', 'recent', 'week', 'across', 'safety', 'night', 'space'] : S.prefs.style === 'handover' ? ['focus', 'changes'] : []);
+    const collapsed = [...collapsedMods()].filter(id => available.has(id));
     const ratedCount = Object.keys(S.feedback).filter(id => rated(id) === 'down' || rated(id) === 'later').length;
     const archived = S.projects.filter(p => p.status === 'archived');
     const parts = [];
     if (collapsed.length) parts.push(`Eingeklappt: ${collapsed.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-mod-toggle="${esc(id)}">ausklappen</button>`).join(' · ')}`);
-    if (ratedCount) parts.push(`${ratedCount} ${ratedCount === 1 ? 'bewerteter Vorschlag' : 'bewertete Vorschläge'} ${showRated ? (ratedCount === 1 ? 'wird angezeigt' : 'werden angezeigt') : 'ausgeblendet'} <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'anzeigen'}</button>`);
+    if (ratedCount && S.prefs.style === 'board') parts.push(`Bewertete Einschätzungen in „Verlauf und Einordnung“ <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'einblenden'}</button>`);
     if (archived.length) parts.push(`Archiviert: ${archived.map(p => plink(p.id)).join(', ')}`);
     parts.push(`Karten schreiben Agents mit <code class="mono">watchtower</code> · Fakten misst die App selbst`);
     $('#foot').innerHTML = parts.map(x => `<span>${x}</span>`).join('');
@@ -1020,14 +1280,16 @@
     const collected = S.projects.map(p => p.facts_collected_at).filter(Boolean).sort()[0];
     $('#fresh').textContent = collected ? `Git-Fakten vor ${minutesAgo(collected)} Min` : '';
     renderRunStatus();
-    $('#refresh').hidden = $('.switch').hidden = !S.projects.length;
+    $('#refresh').hidden = !S.projects.length;
+    $('.switch').hidden = false;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
-    const style = { board: renderBoard, handbook: renderHandbook }[S.prefs.style] || renderHandover;
-    $('#view').innerHTML = (S.projects.length ? blockChanges() : '') + blockTasks() + (!S.projects.length ? renderEmpty() : style());
+    const style = { board: renderBoard, ideas: renderIdeas, handbook: renderHandbook }[S.prefs.style] || renderHandover;
+    $('#view').innerHTML = !S.projects.length && (!S.prefs.style || S.prefs.style === 'handover') ? renderEmpty() + blockAttention() : style();
     renderFoot();
     if (openId) openDrawer(openId, true);
     if (panelOpen) renderPanel(true);
     if (round) renderRound(true);
+    renderTaskPreview();
     restoreInputFocus(focused);
   }
 
@@ -1055,16 +1317,18 @@
     const b = $('#refresh');
     b.disabled = true; b.textContent = 'Misst …';
     try { S = await call('refresh'); render(); } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
-    b.disabled = false; b.textContent = 'Aktualisieren';
+    b.disabled = false; b.textContent = 'Git-Fakten messen';
     refreshing = false;
   }
   // Saves the owner's reaction to an item (a rating, an answer, "done"); `note` undefined keeps the stored one.
   async function react(id, value, note, msg, until) {
     const prev = S.feedback[id] ? { ...S.feedback[id] } : null;
+    const idea = ideaCollection().find(entry => entry.s.id === id);
+    const source = idea ? { item: { ...idea.s, kind: idea.kind }, project_id: idea.project || null, title: idea.s.title, first_seen: idea.firstSeen } : {};
     try {
       const result = await call('set_feedback', { item_id: id, value, note: note === undefined ? null : note, until: until === undefined ? null : until });
       const undoToken = typeof result.undo === 'string' ? result.undo.match(/^watchtower undo ([a-f0-9]{32})$/)?.[1] : null;
-      if (value) S.feedback[id] = { value, at: new Date().toISOString(), note: typeof result.note === 'string' ? result.note : (note === undefined ? (prev ? prev.note : '') : note), snoozed_until: Object.hasOwn(result, 'snoozed_until') ? result.snoozed_until : (value === 'later' ? (until || (prev && prev.snoozed_until) || addDays(S.today, S.snooze_days || 7)) : null) }; else delete S.feedback[id];
+      if (value) S.feedback[id] = { ...prev, ...source, value, at: new Date().toISOString(), note: typeof result.note === 'string' ? result.note : (note === undefined ? (prev ? prev.note : '') : note), snoozed_until: Object.hasOwn(result, 'snoozed_until') ? result.snoozed_until : (value === 'later' ? (until || (prev && prev.snoozed_until) || addDays(S.today, S.snooze_days || 7)) : null) }; else delete S.feedback[id];
       render();
       if (msg) toast(msg, undoToken ? async () => {
         noteFor = null;
@@ -1087,7 +1351,7 @@
     const value = S.feedback[id] && S.feedback[id].value === v ? null : v;
     snoozeFor = null;
     noteFor = value === 'down' ? id : null;
-    const msg = value === 'down' ? 'Ausgeblendet. Die Agents schlagen das nicht mehr vor.' : null;
+    const msg = value === 'down' ? 'Unter „Abgelehnt“ gemerkt. Die Agents schlagen das nicht mehr vor.' : value === 'up' && S.prefs.style === 'ideas' ? 'Unter „Gut gefunden“ gemerkt. Noch kein Auftrag.' : null;
     if (await react(id, value, undefined, msg)) focusDraft(id); else noteFor = null;
   }
   function openSnooze(id) {
@@ -1105,15 +1369,50 @@
     else { noteFor = null; snoozeFor = id; render(); }
   }
   async function assignTask(key) {
-    const snapshot = TASKS[key];
-    if (!snapshot || Number.isInteger(snapshot.id) || busyTasks.has(key)) return;
+    if (busyTasks.has(key)) return;
+    if (taskPreview?.key !== key) openTaskPreview(key);
+    const preview = taskPreview;
+    if (!preview || preview.key !== key || preview.busy || preview.uncertain) return;
+    if (missingTaskProjects(preview.task).length) { renderTaskPreview(); toast('Projekt nicht mehr beobachtet. Nimm es vor der Übergabe wieder auf.'); return; }
+    if (Number.isInteger(preview.task.id)) { await copyTask(key); return; }
     busyTasks.add(key);
+    preview.busy = true; preview.message = ''; preview.error = false;
+    renderTaskPreview();
     try {
-      const result = await call('create_task', { payload: snapshot });
+      let result;
+      try {
+        result = await call('create_task', { payload: preview.task });
+        if (!Number.isInteger(result?.task?.id)) throw new Error('Die gespeicherte Auftragsnummer fehlt.');
+      } catch (e) {
+        preview.uncertain = true; preview.error = true;
+        preview.message = 'Beauftragen konnte nicht bestätigt werden. Prüfe zuerst die gespeicherten Aufträge. ' + errText(e);
+        toast(preview.message);
+        return;
+      }
+      // Keep the successful save even if clipboard access or the next state read fails.
+      preview.task = taskCopy(result.task); preview.prompt = taskPrompt(preview.task);
+      TASKS[key] = preview.task;
+      S.tasks = [...(S.tasks || []).filter(t => t.id !== preview.task.id), preview.task];
+      await writeTaskClipboard(preview.task, preview.prompt, preview, true);
       await load(false);
-      toast(result.created ? `Auftrag #${result.task.id} ist als beauftragt gemerkt. Kopiere ihn für deinen Agent.` : `Auftrag #${result.task.id} ist bereits beauftragt.`);
-    } catch (e) { toast('Auftrag nicht gespeichert: ' + errText(e)); }
-    finally { busyTasks.delete(key); }
+    } finally { busyTasks.delete(key); preview.busy = false; renderTaskPreview(); }
+  }
+  async function checkTaskAssignment() {
+    const preview = taskPreview;
+    if (!preview || preview.busy || !preview.uncertain) return;
+    preview.busy = true; renderTaskPreview();
+    try {
+      const state = await call('state', { visit: false });
+      S = state;
+      const saved = activeTaskFor(preview.task);
+      preview.uncertain = false; preview.error = false;
+      if (saved) {
+        preview.task = taskCopy(saved); preview.prompt = taskPrompt(saved); TASKS[preview.key] = preview.task;
+        preview.message = `Auftrag #${saved.id} ist gespeichert. Du kannst ihn jetzt kopieren.`;
+      } else preview.message = 'Kein aktiver Auftrag zu diesem Vorschlag gespeichert. Du kannst ihn jetzt beauftragen.';
+      render();
+    } catch (e) { preview.error = true; preview.message = 'Aufträge konnten nicht geprüft werden. Versuche die Prüfung erneut. ' + errText(e); }
+    finally { preview.busy = false; renderTaskPreview(); }
   }
   async function changeTaskStatus(id, status, revision) {
     const key = `tracked:${id}`;
@@ -1142,10 +1441,26 @@
     catch (e) { toast('Lesestand nicht gespeichert: ' + errText(e)); }
   }
   async function copyTask(key) {
-    const task = TASKS[key];
-    if (!task) return;
-    try { await navigator.clipboard.writeText(taskPrompt(task)); toast('Auftrag kopiert. Füg ihn bei deinem Coding-Agent ein.'); }
-    catch (e) { toast('Kopieren hat nicht geklappt.'); }
+    const preview = taskPreview?.key === key ? taskPreview : null;
+    const task = preview?.task || TASKS[key];
+    if (!task || preview?.busy || preview?.uncertain || busyTasks.has(key)) return;
+    if (missingTaskProjects(task).length) { if (!preview) openTaskPreview(key); else renderTaskPreview(); toast('Projekt nicht mehr beobachtet. Nimm es vor der Übergabe wieder auf.'); return; }
+    busyTasks.add(key);
+    if (preview) { preview.busy = true; renderTaskPreview(); }
+    try { await writeTaskClipboard(task, preview?.prompt || taskPrompt(task), preview, false); }
+    finally { busyTasks.delete(key); if (preview) preview.busy = false; renderTaskPreview(); }
+  }
+  async function writeTaskClipboard(task, prompt, preview, justSaved) {
+    let message, failed = false;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      message = justSaved ? `Auftrag #${task.id} ist beauftragt und kopiert. Füg ihn bei deinem Agent ein.` : Number.isInteger(task.id) ? `Auftrag #${task.id} kopiert. Füg ihn bei deinem Agent ein.` : 'Text kopiert. Es wurde kein Auftrag angelegt. Füg ihn bei deinem Agent ein.';
+    } catch (e) {
+      failed = true;
+      message = Number.isInteger(task.id) ? `Auftrag #${task.id} ist gespeichert. Kopieren hat nicht geklappt. Kopiere erneut oder markiere den Auftragstext unten.` : 'Kopieren hat nicht geklappt. Es wurde kein Auftrag angelegt. Markiere den Auftragstext unten.';
+    }
+    if (preview) { preview.message = message; preview.error = failed; preview.manualCopy = failed; }
+    toast(message);
   }
   async function saveNote(id) {
     const text = (drafts[id] || '').trim();
@@ -1167,10 +1482,11 @@
     const el = $('#idea-text'), text = el ? el.value.trim() : '';
     if (!text) { if (el) el.focus(); return; }
     try {
-      await call('add_idea', { text });
+      const result = await call('add_idea', { text });
       if (ideaDraft.trim() === text) ideaDraft = '';
       await load(false);
-      toast('Idee geparkt. Der nächste Agent-Lauf schätzt sie ein.');
+      if (Number.isInteger(result.id)) await openIdeaResult(`idea:${result.id}`);
+      toast(result.already_exists ? 'Diese Idee war bereits festgehalten.' : 'Idee festgehalten. Der nächste Agent-Lauf schätzt sie ein.');
     } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
   }
   async function removeIdea(id) {
@@ -1281,7 +1597,7 @@
       delete projectEdits[id];
       await load(false);
       toast(result.facts_refresh && result.facts_refresh.ok === false
-        ? 'Projekt geändert. Fakten konnten noch nicht neu gemessen werden. Versuche es mit „Aktualisieren“ erneut.'
+        ? 'Projekt geändert. Fakten konnten noch nicht neu gemessen werden. Versuche es mit „Git-Fakten messen“ erneut.'
         : 'Projekt geändert. Karten und Verlauf bleiben erhalten.');
     } catch (e) {
       edit.busy = null;
@@ -1307,7 +1623,25 @@
 
   document.addEventListener('click', async e => {
     const t = e.target;
+    const nav = t.closest('[data-nav]');
+    if (nav) { await setPref('style', nav.dataset.nav); window.scrollTo(0, 0); return; }
+    const attention = t.closest('[data-attention-project]');
+    if (attention) { openDrawerTarget(attention.dataset.attentionProject, attention.dataset.attentionTab || 'work', attention.dataset.attentionAnchor); return; }
+    if (t.closest('[data-attention-all]')) { showAllAttention = !showAllAttention; render(); return; }
+    if (t.closest('[data-task-inspection-close]')) { inspectedTask = null; render(); return; }
+    if (taskPreview) {
+      if (t.closest('[data-task-preview-close]')) closeTaskPreview();
+      else if (t.closest('[data-task-preview-copy]')) copyTask(taskPreview.key);
+      else if (t.closest('[data-task-preview-assign]')) assignTask(taskPreview.key);
+      else if (t.closest('[data-task-preview-check]')) checkTaskAssignment();
+      else if (!taskPreview.busy && t.closest('[data-idea-restore-project]')) restoreIdeaProject(t.closest('[data-idea-restore-project]').dataset.ideaRestoreProject);
+      return;
+    }
     if ($('#report-status').open && !t.closest('#report-status')) $('#report-status').open = false;
+    const ideaTab = t.closest('[data-idea-filter]');
+    if (ideaTab) { setIdeaFilter(ideaTab.dataset.ideaFilter); return; }
+    const ideaProject = t.closest('[data-idea-restore-project]');
+    if (ideaProject) { restoreIdeaProject(ideaProject.dataset.ideaRestoreProject); return; }
     const expand = t.closest('[data-expand]');
     if (expand && expand.dataset.expand === 'ideas') { expanded.ideas = !expanded.ideas; render(); $('[data-expand="ideas"]').focus({ preventScroll: true }); return; }
     const snoozeOpen = t.closest('[data-snooze-open]');
@@ -1319,7 +1653,7 @@
     const snoozeClear = t.closest('[data-snooze-clear]');
     if (snoozeClear) { snoozeFor = null; noteFor = null; react(snoozeClear.dataset.snoozeClear, null, null, 'Wird wieder angezeigt.'); return; }
     const assign = t.closest('[data-task-assign]');
-    if (assign) { assignTask(assign.dataset.taskAssign); return; }
+    if (assign) { openTaskPreview(assign.dataset.taskAssign); return; }
     const taskStatus = t.closest('[data-task-status]');
     if (taskStatus) { changeTaskStatus(Number(taskStatus.dataset.taskId), taskStatus.dataset.taskStatus, Number(taskStatus.dataset.taskRevision)); return; }
     const warningOpen = t.closest('[data-warning-open]');
@@ -1346,11 +1680,19 @@
     if (t.closest('[data-search-close]')) { closeSearch(); return; }
     const sr = t.closest('[data-sres]');
     if (sr) { pickResult(sr); return; }
+    const drawerTab = t.closest('[data-drawer-tab]');
+    if (drawerTab) { selectDrawerTab(drawerTab.dataset.drawerTab); return; }
+    if (t.closest('[data-drawer-edit]') && openId) {
+      if (drawerEditors.has(openId)) drawerEditors.delete(openId); else drawerEditors.add(openId);
+      openDrawer(openId, true);
+      $('#drawer-root [data-drawer-edit]').focus({ preventScroll: true });
+      return;
+    }
     if (t.closest('[data-idea-add]')) { addIdea(); return; }
     const ir = t.closest('[data-idea-remove]');
     if (ir) { removeIdea(Number(ir.dataset.ideaRemove)); return; }
     const tk = t.closest('[data-task]');
-    if (tk) { copyTask(tk.dataset.task); return; }
+    if (tk) { openTaskPreview(tk.dataset.task); return; }
     const sw = t.closest('.switch button');
     if (sw) { setPref('style', sw.dataset.style); window.scrollTo(0, 0); return; }
     const fbBtn = t.closest('.fb button');
@@ -1358,7 +1700,6 @@
     const moduleToggle = t.closest('[data-mod-toggle]');
     if (moduleToggle) { toggleModule(moduleToggle.dataset.modToggle); return; }
     if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return; }
-    if (t.closest('[data-since-close]')) { if (since) since.dismissed = true; if (openId) openDrawer(openId, true); return; }
     if (t.closest('[data-recent-all]')) { showAllRecent = !showAllRecent; render(); return; }
     const ns = t.closest('[data-note-save]');
     if (ns) { saveNote(ns.dataset.noteSave); return; }
@@ -1429,8 +1770,6 @@
       catch (err) { toast('Notiz nicht gespeichert.'); }
     }
   });
-  // toggle does not bubble, so listen while it travels down
-  document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('[data-hb]')) hbOpen = e.target.open; }, true);
   document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('input', e => {
@@ -1443,7 +1782,18 @@
     const field = { 'status-note': 'status_note', 'goal-text': 'goal', 'goal-due': 'goal_due' }[e.target.id];
     if (field && openId) (projectDrafts[openId] ||= {})[field] = e.target.value;
   });
+  document.addEventListener('toggle', e => {
+    const id = e.target.dataset?.fold;
+    if (id) { if (e.target.open) openFolds.add(id); else openFolds.delete(id); }
+  }, true);
   document.addEventListener('keydown', e => {
+    if (taskPreviewKey(e)) return;
+    if (e.target.dataset && e.target.dataset.drawerTab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+      e.preventDefault();
+      const tabs = ['work', 'handbook', 'history'], current = tabs.indexOf(e.target.dataset.drawerTab);
+      selectDrawerTab(tabs[e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (current + (e.key === 'ArrowRight' ? 1 : 2)) % 3]);
+      return;
+    }
     if (e.target.id === 'idea-text' && e.key === 'Enter') { e.preventDefault(); addIdea(); return; }
     if (round) {
       if (e.key === 'Escape') { e.preventDefault(); closeRound(); return; }

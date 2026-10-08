@@ -6,7 +6,7 @@ This guide covers the cross-project brief: today's focus, shared findings, the u
 
 Run `watchtower portfolio context` and follow every output page before writing. Keep its context token. The context includes compact cards and facts, tracked tasks, warning acknowledgements, reactions, parked ideas, the previous brief and `owner_last_opened`.
 
-- If `owner_last_opened` predates the previous brief, the user has not seen that brief. Carry forward still-important focus items. Otherwise retain them only while they remain true and among the highest priorities.
+- If `owner_last_opened` predates the previous brief or is absent, carry forward still-important focus items: the user has not opened Watchtower since that brief. Opening alone does not prove it was read. Otherwise retain items only while they remain true and among the highest priorities.
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
 - Respect task assignments, reported results awaiting review, project status and acknowledged warnings. Do not suggest assigning the same work twice or reversing a deliberate choice.
@@ -28,7 +28,7 @@ Every text has at most 600 characters. Limits below are words; a word is a space
 | `park_or_revive` | For quiet or stuck projects, each has `id` when retained, `project`, `verdict` (`park`, `revive`, `finish`, `archive`) and `why` (25 words). Respect the user's status and reason. |
 | `attention_note` | Where observed activity goes compared with the user's priorities; at most 30 words. |
 | `idea_checks` | One assessment for each `owner_ideas` entry, including previously checked ideas. Each has `idea` (that numeric idea ID), `verdict` (`build`, `fold_in`, `later`, `drop`), `fits` (project IDs; empty for a standalone app) and `why` (25 words). Keep a prior verdict unless evidence changed. |
-| `week_review` | When `review_week.due` is true, supply `week`, `done`, `stalled` and `time_note` as below. Otherwise omit the field; the review for the same week is kept. |
+| `week_review` | When `review_week.due` is true, supply `week`, `done`, `stalled` and `time_note` as below. Otherwise omit it to keep that week's review, except to correct an evidenced error. |
 
 `done_when` states an observable completion result so the user can hand the item to another agent. Do not replace it with "improve" or "review" without saying what completion means.
 
@@ -38,7 +38,7 @@ For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). Use each projec
 
 ## Retain intent, not stale wording
 
-Check the `why` and `evidence` of retained items against current facts and cards. Keep an unfinished focus item's ID while it remains a priority; replace lower-priority work when a stronger reason appears. Remove completed or disproved items. Items rated `down` never return, including rewordings. Items rated `later` wait until `snoozed_until`, or 14 days after their reaction when no date is present. Focus items marked `done` are finished unless evidence shows remaining work.
+Check the `why` and `evidence` of retained items against current facts and cards. Correct demonstrated errors in retained content even when that field is not due, including misdated weekly claims; preserve its original period rather than rewriting history from today's state. Keep an unfinished focus item's ID while it remains a priority; replace lower-priority work when a stronger reason appears. Remove completed or disproved items. Items rated `down` never return, including rewordings. Items rated `later` wait until `snoozed_until`, or 14 days after their reaction when no date is present. Focus items marked `done` are finished unless evidence shows remaining work.
 
 ## Save
 

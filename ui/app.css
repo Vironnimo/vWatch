@@ -1,4 +1,4 @@
-/* Watchtower window. Three styles: the "handover" reads top to bottom (focus, projects, decisions and news side by side, ideas), the "control room" is a card grid with a side column, the "handbook" lists every project for reference; a shared right-hand drawer holds each project's full record. */
+/* Watchtower: Today, Projects, Ideas and Handbook share project records and owner actions. */
 :root {
   --bg: #f4f2ee;
   --surface: #ffffff;
@@ -118,7 +118,7 @@ details > summary::-webkit-details-marker { display: none; }
 .tile .voice { font-style: italic; color: var(--text-2); font-size: 14.5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .tile .badges { display: flex; flex-wrap: wrap; gap: 5px; }
 .tile .tfoot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; font-size: 12.5px; color: var(--text-3); }
-.tile .tfoot > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.tile .tfoot > span { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .tag.ask { background: var(--accent-soft); color: var(--accent); }
 .tile .spark { height: 22px; }
 
@@ -472,4 +472,140 @@ details.hb > summary:hover h2 { color: var(--accent); }
 @media (max-width: 520px) {
   .digest-summary .linkish { margin-left: 0; }
   .task-actions .btn { white-space: normal; text-align: left; }
+}
+
+/* One collection keeps discovery, owner decisions and assignments distinct. */
+.ideas-page { padding-top: 24px; }
+.ideas-page > .cards2, .idea-pending > .cards2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); align-items: start; }
+.ideas-heading h1 { margin: 0; font-size: 24px; font-weight: 600; }
+.ideas-heading p, .idea-filter-description { color: var(--text-3); font-size: 13px; margin: 6px 0 16px; }
+.idea-add { margin: 20px 0 24px; max-width: 820px; }
+.idea-add > label { font-size: 13px; color: var(--text-2); }
+.idea-add .parkform { margin: 6px 0; }
+.idea-add > p { font-size: 12px; margin: 6px 0; }
+.idea-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.idea-filter { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; color: var(--text-2); font: inherit; font-size: 13px; padding: 7px 11px; cursor: pointer; }
+.idea-filter > span { color: var(--text-3); font-size: 12px; margin-left: 4px; }
+.idea-filter[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.idea-filter[aria-pressed="true"] > span { color: inherit; }
+.idea-pending { padding: 12px 0 20px; }
+.idea-pending > h2 { font-size: 13px; color: var(--text-3); font-weight: 500; margin: 0 0 8px; }
+.idea-empty { padding: 20px 0; font-size: 14px; }
+.idea-returned { font-size: 12px; color: var(--accent); margin: 6px 0; }
+.idea-assessment { margin-top: 8px; font-size: 13px; }
+.idea-assignment { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.idea-assignment > .tracked-task { margin-top: 8px; }
+.idea.search-hit { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Review a handoff before either copying it or recording an assignment. */
+#task-root .scrim { z-index: 40; }
+.task-preview { position: fixed; top: 7vh; left: 50%; transform: translateX(-50%); width: min(700px, calc(100% - 28px)); max-height: 86vh; overflow-y: auto; z-index: 41; padding: 20px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.35); display: grid; gap: 14px; overflow-wrap: anywhere; font-size: 14px; }
+.task-preview-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.task-preview-head h2 { font-size: 19px; margin: 0; }
+.task-preview-head .btn { flex-shrink: 0; }
+.task-preview-fields { display: grid; gap: 12px; margin: 0; }
+.task-preview-fields dt { color: var(--text-3); font-size: 12px; margin-bottom: 3px; }
+.task-preview-fields dd { margin: 0; color: var(--text-2); }
+.task-preview-fields > :first-child dd { color: var(--text); font-weight: 600; font-size: 16px; }
+.task-preview-fields dd.faint { color: var(--text-3); }
+.task-preview-message { padding: 9px 12px; border-left: 2px solid var(--good); background: var(--surface-2); }
+.task-preview-message.is-error { border-color: var(--warn); }
+.task-preview-text summary { cursor: pointer; color: var(--text-3); font-size: 12.5px; }
+.task-preview-text textarea { width: 100%; min-height: 180px; margin-top: 8px; resize: vertical; padding: 10px; background: var(--surface); color: var(--text-2); border: 1px solid var(--line-2); border-radius: 6px; font: 12px/1.5 var(--mono, monospace); }
+.task-preview-actions { display: flex; justify-content: end; flex-wrap: wrap; gap: 8px; }
+.task-preview button:disabled { opacity: .6; cursor: wait; }
+@media (max-width: 520px) { .task-preview { padding: 16px; } .task-preview-actions > .btn { flex: 1 1 auto; white-space: normal; } }
+/* Project details: a short introduction followed by one task-oriented section. */
+.project-drawer { width: min(760px, 100%); }
+.project-drawer .project-summary { clear: both; padding-top: 10px; }
+.project-drawer h2.pname { font-size: 27px; }
+.project-current, .project-next { margin-top: 16px; font-size: 14px; }
+.project-current > .faint, .project-next > .faint { display: block; font-size: 12px; }
+.project-current p, .project-next p { margin: 3px 0 5px; font-size: 16px; line-height: 1.45; }
+.project-next .task-actions { margin-top: 8px; }
+.project-drawer .say { font-size: 15px; line-height: 1.55; }
+.drawer-tabs { position: sticky; top: 31px; z-index: 2; display: flex; gap: 4px; margin-top: 20px; padding: 8px 0; border-bottom: 1px solid var(--line); background: var(--bg); }
+.drawer-tabs button { flex: 1; border: 0; border-radius: 6px; padding: 9px 8px; background: transparent; color: var(--text-2); cursor: pointer; font: inherit; font-size: 13px; }
+.drawer-tabs button[aria-selected="true"] { background: var(--surface); color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+.drawer-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.drawer-panel { padding-top: 14px; }
+.drawer-panel[hidden], #project-owner-fields[hidden] { display: none; }
+.drawer-panel > [data-search-anchor]:first-child .mod { margin-top: 8px; }
+.project-intent { font-size: 13px; margin-bottom: 14px; }
+.intent-summary { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.project-intent p { margin: 6px 0; }
+.project-intent .goal { margin-top: 6px; }
+.project-intent .statusbar { margin-top: 10px; }
+.edit-hint { font-size: 12px; }
+.project-drawer [data-search-anchor] { scroll-margin-top: 100px; }
+.project-drawer .search-hit { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 3px; }
+.project-drawer dt.search-hit + dd { border-bottom: 1px solid var(--accent); }
+.project-drawer .commit-history { margin-top: 22px; color: var(--text-3); font-size: 13px; }
+.commit-history summary, .since summary { cursor: pointer; }
+.commit-history .spark { display: block; margin-top: 12px; height: 48px; }
+.project-drawer .since { margin-top: 8px; }
+@media (max-width: 540px) {
+  .project-drawer { padding-inline: 16px; }
+  .drawer-tabs { gap: 0; }
+  .drawer-tabs button { font-size: 12px; padding-inline: 5px; }
+}
+
+/* Purpose-based navigation and a compact morning read. */
+.top .switch { flex: 1 0 100%; width: 100%; gap: 6px; padding: 10px 0 0; background: transparent; border-radius: 0; }
+.top .switch button { padding: 6px 18px; font-weight: 600; }
+.top .switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.report-freshness { display: block; font-size: 12px; color: var(--text-3); font-weight: 400; line-height: 1.5; }
+.tile .tfoot { display: block; }
+.tile .project-headline { color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.project-overview > .mod:first-child { margin-top: 28px; }
+.morning-attention { margin-top: 28px; padding: 18px 20px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface); }
+.morning-attention h2 { font-size: 20px; }
+.morning-attention p { font-size: 13px; margin-top: 3px; }
+.morning-attention.quiet { background: transparent; border-style: dashed; }
+.attention-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.attention-list { margin-top: 12px; }
+.attention-row, .attention-row > summary { display: grid; grid-template-columns: 124px minmax(0,1fr) auto; align-items: start; gap: 12px; padding: 10px 0; font-size: 14px; }
+.attention-row { border-top: 1px solid var(--line); }
+.attention-row:first-child { border-top: 0; }
+.attention-row .tag { justify-self: start; margin-top: 2px; }
+.attention-row .attention-title { font-size: 14px; text-align: left; font-weight: 500; line-height: 1.5; color: var(--text); }
+.attention-row button.attention-title:hover, .attention-row > summary:hover { color: var(--accent); }
+.attention-project { font-size: 12px; color: var(--text-3); }
+.attention-row:is(details) { display: block; padding: 0; }
+.attention-row > summary::after { content: '›'; grid-column: 3; justify-self: end; }
+.attention-row > summary > .faint { padding-right: 14px; grid-column: 3; grid-row: 1; }
+.attention-row[open] > summary::after { content: '⌄'; }
+.attention-detail { padding: 2px 0 12px; }
+.task-inspection { margin-top: 16px; }
+.task-inspection > .linkish { display: block; margin: 0 0 8px auto; }
+.overview-links { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 34px; }
+.overview-links button { display: grid; gap: 4px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r); background: transparent; text-align: left; cursor: pointer; }
+.overview-links button:hover { border-color: var(--accent); }
+.overview-links button b { font-size: 15px; }
+.overview-links button span { color: var(--text-3); font-size: 13px; }
+.reference-fold { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 16px; }
+.reference-fold > summary { font-size: 16px; font-weight: 600; }
+.reference-fold > summary::before { content: '›'; display: inline-block; width: 18px; color: var(--accent); }
+.reference-fold[open] > summary::before { content: '⌄'; }
+.reference-fold > summary > span { font-size: 13px; font-weight: 400; margin-left: 12px; }
+.reference-fold > .mod { margin-top: 26px; }
+.digest-project { border-top: 1px solid var(--line); }
+.digest-project:first-child { border-top: 0; }
+.digest-project > summary { display: grid; grid-template-columns: auto auto minmax(0,1fr); align-items: baseline; gap: 12px; padding: 12px 0; font-size: 14px; }
+.digest-project > summary:hover { color: var(--accent); }
+.digest-project > summary .count { color: var(--accent); font-size: 12px; }
+.digest-preview { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.digest-project .digest-items { border-left: 2px solid var(--line); padding-left: 14px; margin: 0 0 16px; }
+.digest-other { font-size: 13px; margin-top: 10px; color: var(--text-2); }
+@media (max-width: 700px) {
+  .overview-links { grid-template-columns: minmax(0,1fr); }
+  .attention-head { align-items: start; flex-direction: column; }
+  .attention-row, .attention-row > summary { grid-template-columns: minmax(0,1fr) auto; gap: 5px 10px; }
+  .attention-row .attention-title { grid-row: 2; grid-column: 1/-1; }
+  .attention-project { grid-row: 1; grid-column: 2; }
+  .attention-row > summary::after { grid-column: 2; }
+  .attention-row > summary > .faint { grid-column: 2; }
+  .reference-fold > summary > span { display: block; margin-left: 18px; }
+  .digest-project > summary { grid-template-columns: minmax(0,1fr) auto; gap: 3px 10px; }
+  .digest-preview { grid-row: 2; grid-column: 1/-1; }
 }

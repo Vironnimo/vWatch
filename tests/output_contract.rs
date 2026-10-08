@@ -138,6 +138,97 @@ fn context_exposes_write_token_before_long_documents_without_placeholder_command
 }
 
 #[test]
+fn current_document_text_omits_legacy_estimates_and_context_references_week_evidence() {
+    use chrono::Datelike;
+    let temp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(temp.path());
+    let home = temp.path().join("data");
+    std::fs::create_dir(&home).unwrap();
+    let (svc, _) = common::service(&home);
+    svc.add_project(repo.to_str().unwrap(), Some("demo"), Some("Demo"))
+        .unwrap();
+    let today = chrono::Local::now().date_naive();
+    let week_start = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
+    let previous_week = (week_start - chrono::Duration::days(3)).to_string();
+    svc.put_card("demo", common::card_with(serde_json::json!({
+        "recent_changes": [
+            {"date": today.to_string(), "title": "Neuer Export", "detail": "Dieses Detail stammt aus der aktuellen Woche."},
+            {"date": previous_week, "title": "Datiertes Ergebnis", "detail": "Ein eindeutiger Beleg aus der Berichtswoche."}
+        ],
+        "milestones": [{"date": previous_week, "title": "Erster erfolgreicher Import"}]
+    })), false, false).unwrap();
+    let mut card = svc.card("demo").unwrap()["card"].clone();
+    card["reentry"]["effort"] = serde_json::json!("half-day");
+    card["suggestions"][0]["effort"] = serde_json::json!("S");
+    svc.store().rewrite_latest_card("demo", &card).unwrap();
+    svc.put_portfolio(serde_json::json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let mut brief = svc.portfolio().unwrap()["portfolio"].clone();
+    brief["focus"] = serde_json::json!([{"id": "old-focus", "title": "Unveränderte Aktion", "effort": "half-day"}]);
+    svc.store().rewrite_latest_portfolio(&brief).unwrap();
+
+    for args in [&["card", "show", "demo"][..], &["portfolio", "show"][..]] {
+        let (code, plain) = run(&home, args);
+        assert_eq!(code, 0, "{plain}");
+        assert!(
+            !plain.contains("half-day") && !plain.contains("Effort:"),
+            "{plain}"
+        );
+        let mut args = args.to_vec();
+        args.push("--json");
+        let (code, raw) = run(&home, &args);
+        assert_eq!(code, 0, "{raw}");
+        assert!(
+            raw.contains("half-day"),
+            "explicit JSON preserves the document"
+        );
+    }
+    let (code, context) = run(&home, &["portfolio", "context"]);
+    assert_eq!(code, 0, "{context}");
+    assert_eq!(
+        context
+            .matches("Ein eindeutiger Beleg aus der Berichtswoche.")
+            .count(),
+        1
+    );
+    assert_eq!(context.matches("Erster erfolgreicher Import").count(), 1);
+    assert!(
+        context.contains("card.recent_changes: 2 (1-based positions; full evidence above)"),
+        "{context}"
+    );
+    assert!(
+        context.contains("card.milestones: 1 (1-based positions; full evidence above)"),
+        "{context}"
+    );
+    assert!(context.contains("Neuer Export"));
+    assert!(!context.contains("half-day") && !context.contains("Effort:"));
+    let (code, raw) = run(&home, &["portfolio", "context", "--json"]);
+    assert_eq!(code, 0, "{raw}");
+    let parsed: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        parsed["projects"][0]["review_week_evidence"]["recent_changes"][0],
+        card["recent_changes"][1]
+    );
+    assert_eq!(
+        parsed["projects"][0]["review_week_evidence"]["milestones"],
+        card["milestones"]
+    );
+
+    // Similar dated titles do not justify picking one abbreviated row and losing
+    // the other finding's evidence. Ambiguous matches keep both full entries.
+    card["recent_changes"] = serde_json::json!([
+        {"date": previous_week, "title": "Gleicher Titel", "detail": "Erster eigenständiger Befund."},
+        {"date": previous_week, "title": "Gleicher Titel", "detail": "Zweiter eigenständiger Befund."}
+    ]);
+    svc.store().rewrite_latest_card("demo", &card).unwrap();
+    let (code, context) = run(&home, &["portfolio", "context"]);
+    assert_eq!(code, 0, "{context}");
+    assert!(!context.contains("this project's card.recent_changes:"));
+    assert_eq!(context.matches("Erster eigenständiger Befund.").count(), 1);
+    assert_eq!(context.matches("Zweiter eigenständiger Befund.").count(), 1);
+}
+
+#[test]
 fn snapshot_offsets_are_unicode_characters_and_never_repeat_a_change() {
     let home = tempfile::tempdir().unwrap();
     let original = format!(

@@ -201,8 +201,15 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     0,
                     "Note: archived and removed projects are excluded from the portfolio.",
                 );
+                tree_except(
+                    &mut out,
+                    &portfolio_context_view(data),
+                    &["context_token"],
+                    0,
+                );
+            } else {
+                tree_except(&mut out, data, &["context_token"], 0);
             }
-            tree_except(&mut out, data, &["context_token"], 0);
         }
         "card.show" | "portfolio.show" => {
             line(
@@ -218,7 +225,16 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     text(&data["version"])
                 ),
             );
-            tree(&mut out, data, 0);
+            let mut view = data.clone();
+            let (field, kind) = if command == "card.show" {
+                ("card", crate::cards::Kind::Card)
+            } else {
+                ("portfolio", crate::cards::Kind::Portfolio)
+            };
+            if let Some(doc) = view.get_mut(field) {
+                *doc = kind.current_view(doc);
+            }
+            tree(&mut out, &view, 0);
         }
         "card.put" | "portfolio.put" | "card.restore" | "portfolio.restore" => {
             let subject = if command.starts_with("card.") {
@@ -651,6 +667,62 @@ fn line(out: &mut String, depth: usize, content: &str) {
     out.push_str(content);
     out.push('\n');
 }
+/// Render weekly findings once, adding their full evidence to the matching card
+/// entry before referencing its position. JSON retains the complete arrays;
+/// unmatched or ambiguous evidence remains fully rendered in its original place.
+fn portfolio_context_view(data: &Value) -> Value {
+    let mut view = data.clone();
+    for project in view["projects"].as_array_mut().into_iter().flatten() {
+        for key in ["recent_changes", "milestones"] {
+            let (Some(evidence), Some(entries)) = (
+                project["review_week_evidence"][key].as_array(),
+                project["card"][key].as_array(),
+            ) else {
+                continue;
+            };
+            if evidence.is_empty() {
+                continue;
+            }
+            let matches = evidence
+                .iter()
+                .map(|item| {
+                    let candidates = entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| {
+                            entry.as_object().is_some_and(|fields| {
+                                !fields.is_empty()
+                                    && fields
+                                        .iter()
+                                        .all(|(key, value)| item.get(key) == Some(value))
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    (candidates.len() == 1).then(|| (candidates[0].0, item.clone()))
+                })
+                .collect::<Option<Vec<_>>>();
+            if let Some(matches) = matches {
+                // Do not fold distinct evidence into the same abbreviated row.
+                let unique = matches
+                    .iter()
+                    .map(|(index, _)| *index)
+                    .collect::<std::collections::HashSet<_>>();
+                if unique.len() != matches.len() {
+                    continue;
+                }
+                for (index, evidence) in &matches {
+                    project["card"][key][*index] = evidence.clone();
+                }
+                project["review_week_evidence"][key] = json!(format!(
+                    "Same entries as this project's card.{key}: {} (1-based positions; full evidence above).",
+                    matches.iter().map(|(index, _)| (index + 1).to_string()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+    }
+    view
+}
+
 fn fields(out: &mut String, data: &Value, keys: &[&str], depth: usize) {
     for key in keys {
         if let Some(value) = data.get(*key) {

@@ -16,12 +16,7 @@
         <summary id="report-status-summary"></summary>
         <div class="report-status-body" id="report-status-body"></div>
       </details>
-      <button class="btn" id="refresh" type="button">Aktualisieren</button>
-      <div class="switch" role="group" aria-label="Darstellung">
-        <button data-style="handover" aria-pressed="true" type="button">Übergabe</button>
-        <button data-style="board" aria-pressed="false" type="button">Leitstand</button>
-        <button data-style="handbook" aria-pressed="false" type="button">Handbuch</button>
-      </div>
+      <button class="btn" id="refresh" type="button">Git-Fakten messen</button>
       <button class="icon-btn" type="button" data-search title="Suchen (Strg+K)" aria-label="Suchen">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
@@ -29,6 +24,12 @@
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       </button>
     </div>
+    <nav class="switch" aria-label="Bereiche">
+      <button data-style="handover" aria-pressed="true" type="button">Heute</button>
+      <button data-style="board" aria-pressed="false" type="button">Projekte</button>
+      <button data-style="ideas" aria-pressed="false" type="button">Ideen</button>
+      <button data-style="handbook" aria-pressed="false" type="button">Handbuch</button>
+    </nav>
   </header>
   <main id="view"><p class="muted" style="margin-top:40px">Lade …</p></main>
   <footer id="foot" class="pagefoot"></footer>
@@ -37,6 +38,7 @@
 <div id="panel-root"></div>
 <div id="search-root"></div>
 <div id="round-root"></div>
+<div id="task-root"></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="app.js"></script>
 </body>

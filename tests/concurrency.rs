@@ -258,6 +258,53 @@ fn stale_briefs_preserve_cards_owner_reactions_and_ideas() {
 }
 
 #[test]
+fn portfolio_context_ignores_repeat_visits_but_guards_the_previous_brief_boundary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let empty = portfolio_token(&svc);
+    svc.state(true).unwrap();
+    assert_eq!(portfolio_token(&svc), empty, "no earlier brief can be seen");
+
+    clock.advance(chrono::Duration::minutes(1));
+    svc.put_portfolio(json!({"greeting": "Guten Morgen"}), false, false)
+        .unwrap();
+    let unseen = portfolio_token(&svc);
+    // A later timestamp before the brief is still on the same side of the boundary.
+    svc.store()
+        .set_pref("last_visit", &json!("2026-09-30T08:00:30Z"))
+        .unwrap();
+    assert_eq!(portfolio_token(&svc), unseen);
+    clock.advance(chrono::Duration::hours(5));
+    svc.state(true).unwrap();
+    rejected_portfolio_leaves_state(&svc, &unseen);
+
+    let opened = portfolio_token(&svc);
+    let first_opened = svc.portfolio_context().unwrap()["owner_last_opened"].clone();
+    clock.advance(chrono::Duration::hours(5));
+    svc.state(true).unwrap();
+    assert_ne!(
+        svc.portfolio_context().unwrap()["owner_last_opened"],
+        first_opened
+    );
+    assert_eq!(portfolio_token(&svc), opened);
+    clock.advance(chrono::Duration::seconds(1));
+    assert_eq!(
+        svc.put_portfolio_guarded(
+            json!({"greeting": "Aktueller Brief"}),
+            true,
+            false,
+            Some(&opened)
+        )
+        .unwrap()["version"],
+        2
+    );
+    let unseen_new = portfolio_token(&svc);
+    clock.advance(chrono::Duration::hours(5));
+    svc.state(true).unwrap();
+    rejected_portfolio_leaves_state(&svc, &unseen_new);
+}
+
+#[test]
 fn changing_only_a_snooze_date_invalidates_both_contexts() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

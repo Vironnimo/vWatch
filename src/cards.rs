@@ -313,6 +313,34 @@ const PORTFOLIO: &[Field] = &[
 ];
 
 impl Kind {
+    /// A current reading view, without obsolete agent estimates. Stored documents,
+    /// unknown data and explicitly requested history remain untouched.
+    pub fn current_view(self, doc: &Value) -> Value {
+        let mut view = doc.clone();
+        let lists: &[&str] = match self {
+            Kind::Card => {
+                if let Some(reentry) = view.get_mut("reentry").and_then(Value::as_object_mut) {
+                    reentry.remove("effort");
+                }
+                &["suggestions"]
+            }
+            Kind::Portfolio => &["focus", "synergies", "new_apps", "idea_checks"],
+        };
+        for list in lists {
+            for item in view
+                .get_mut(*list)
+                .and_then(Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(item) = item.as_object_mut() {
+                    item.remove("effort");
+                }
+            }
+        }
+        view
+    }
+
     fn fields(self) -> &'static [Field] {
         match self {
             Kind::Card => CARD,

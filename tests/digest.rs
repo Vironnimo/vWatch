@@ -8,6 +8,12 @@ fn changes(svc: &watchtower::Watchtower) -> Value {
     svc.state(false).unwrap()["changes"].clone()
 }
 
+fn acknowledge(svc: &watchtower::Watchtower) {
+    let current = changes(svc);
+    svc.mark_changes_read(current["token"].as_str().unwrap())
+        .unwrap();
+}
+
 fn titles(digest: &Value, kind: &str) -> Vec<String> {
     digest["entries"]
         .as_array()
@@ -40,6 +46,12 @@ fn meaningful_changes_persist_until_the_viewed_snapshot_is_acknowledged() {
         "Background reads cannot mark anything read"
     );
     assert_eq!(svc.state(true).unwrap()["changes"]["total"], 0);
+    assert_eq!(
+        changes(&svc)["has_baseline"],
+        false,
+        "Even the first visit is not a read acknowledgement"
+    );
+    acknowledge(&svc);
     let before = changes(&svc)["since"].clone();
 
     clock.advance(Duration::hours(2));
@@ -119,15 +131,23 @@ fn an_owner_reply_is_only_incorporated_after_a_subsequent_card_consumes_it() {
         .as_str()
         .unwrap()
         .to_owned();
-    svc.state(true).unwrap();
+    acknowledge(&svc);
     svc.set_feedback(&id, Some("answered"), Some("Blau"))
         .unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["pending_owner_replies"],
+        1
+    );
     assert!(titles(&changes(&svc), "decision_applied").is_empty());
     let after_answer = changes(&svc);
     svc.mark_changes_read(after_answer["token"].as_str().unwrap())
         .unwrap();
     svc.put_card("demo", json!({"waiting_on_you": []}), true, false)
         .unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["pending_owner_replies"],
+        0
+    );
     let applied = changes(&svc);
     assert_eq!(
         titles(&applied, "decision_applied"),
@@ -176,7 +196,7 @@ fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest()
     svc.store()
         .save_facts("demo", "2026-09-30T08:00:00Z", "base", &base)
         .unwrap();
-    svc.state(true).unwrap();
+    acknowledge(&svc);
     svc.put_card(
         "demo",
         card_with(json!({"open_ends": [{"title": "Export verschluckt Zeilen"}]})),
@@ -263,7 +283,7 @@ fn legacy_fact_snapshots_keep_the_read_baseline_and_only_compare_card_changes() 
         false,
     )
     .unwrap();
-    svc.state(true).unwrap();
+    acknowledge(&svc);
     let mut legacy = svc.store().pref("changes_read").unwrap().unwrap();
     legacy["at"] = json!("2026-09-29T08:00:00Z");
     legacy["snapshot"]["projects"][0]["facts"] = json!({
@@ -305,7 +325,7 @@ fn concurrent_writes_cannot_be_silently_included_in_read_acknowledgement() {
     owner
         .add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
-    owner.state(true).unwrap();
+    acknowledge(&owner);
     let viewed = changes(&owner);
     let (agent, _) = service(tmp.path());
     agent
@@ -328,5 +348,87 @@ fn concurrent_writes_cannot_be_silently_included_in_read_acknowledgement() {
     assert_eq!(
         titles(&changes(&owner), "new"),
         vec!["Neu offen: Concurrent new work"]
+    );
+}
+
+#[test]
+fn report_and_event_markers_share_the_explicit_read_snapshot() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    let original =
+        json!({"date": "2026-09-30", "title": "Suche ergänzt", "detail": "Ergebnisse im Fenster."});
+    svc.put_card(
+        "demo",
+        card_with(json!({
+            "recent_changes": [original],
+            "open_ends": [{"title": "Export prüfen", "source": "src/export.rs", "age_days": 1}],
+        })),
+        false,
+        false,
+    )
+    .unwrap();
+    let unvisited = svc.state(false).unwrap();
+    assert!(unvisited["projects"][0]["card_unread"].is_null());
+    assert!(unvisited["projects"][0]["unread_recent_changes"].is_null());
+    svc.state(true).unwrap();
+    assert!(svc.store().pref("changes_read").unwrap().is_none());
+    acknowledge(&svc);
+    let baseline = svc.store().pref("changes_read").unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["card_unread"],
+        false
+    );
+
+    // A fresh save, new item ids and incidental age/spacing changes do not invent news.
+    clock.advance(Duration::hours(2));
+    svc.put_card("demo", json!({"open_ends": [{"title": "Export  prüfen", "source": "src/export.rs", "age_days": 3}]}), true, false).unwrap();
+    assert_eq!(
+        svc.state(true).unwrap()["projects"][0]["card_unread"],
+        false
+    );
+    assert_eq!(svc.store().pref("changes_read").unwrap(), baseline);
+
+    let shown = changes(&svc);
+    svc.put_card(
+        "demo",
+        json!({"headline": "Die Suche ist jetzt nutzbar"}),
+        true,
+        false,
+    )
+    .unwrap();
+    let state = svc.state(true).unwrap();
+    assert_eq!(state["projects"][0]["card_unread"], true);
+    assert_eq!(state["projects"][0]["unread_recent_changes"], json!([]));
+    assert_eq!(
+        state["changes"]["total"], 0,
+        "Other report changes do not fill the curated digest"
+    );
+    assert_eq!(
+        svc.mark_changes_read(shown["token"].as_str().unwrap())
+            .unwrap_err()
+            .code,
+        "stale_changes"
+    );
+
+    svc.put_card("demo", json!({"recent_changes": [original, {
+        "date": "2026-09-29", "title": "Nachgetragener älterer Befund", "detail": "War vorher nicht im Bericht."
+    }]}), true, false).unwrap();
+    clock.advance(Duration::days(1));
+    let state = svc.state(true).unwrap();
+    assert_eq!(
+        state["projects"][0]["unread_recent_changes"],
+        json!([1]),
+        "Unread follows content, not the visit or event date"
+    );
+    acknowledge(&svc);
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["card_unread"],
+        false
+    );
+    assert_eq!(
+        svc.state(false).unwrap()["projects"][0]["unread_recent_changes"],
+        json!([])
     );
 }

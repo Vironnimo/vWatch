@@ -42,7 +42,7 @@ Common recoveries:
 
 Use `--file <path>` for card and portfolio documents. Paths are absolute Windows paths or relative to the command's working directory; use forward slashes. `--file -` reads stdin. `--input-json '<object>'` supplies inline JSON; it cannot be combined with `--file`. Files and stdin accept UTF-8, with or without BOM, and BOM-marked UTF-16. Prefer a file for multi-line content to avoid shell quoting changes. Keep temporary files in your own folder outside watched repositories.
 
-Do not copy legacy `effort` fields from older documents. Task duration and size estimates are no longer part of either schema; old payloads are accepted with those fields dropped and reported as ignored. Stored history is preserved.
+Task duration and size estimates are no longer part of either schema. Current contexts and readable latest-document views omit legacy `effort` fields; stored history and explicit JSON document views preserve them. Do not copy them back: old payloads are accepted with those fields dropped and reported as ignored.
 
 `card put <project-id>` and `portfolio put` save versions. Both require `--context-token` from the corresponding complete context. `--merge` keeps omitted top-level fields; a supplied list or nested object replaces the whole field. `--dry-run` validates without saving, needs no token and reserves nothing. Use it when validation alone is the goal, not before every normal save.
 
@@ -80,7 +80,7 @@ Multiple paths can be added in one call. `--id` and `--name` apply only when add
 
 ## Owner decisions
 
-`feedback` or `feedback list` returns reactions, newest first; `--project <project-id>` selects one project. Context already includes the reactions needed for interpretation. Each reaction carries its item ID, project, value, note, timestamp, snooze date and the item as it read when rated. Item kinds are `suggestion`, `question`, `focus`, `pattern`, `synergy`, `new_app` and `verdict`.
+`feedback` or `feedback list` returns reactions, newest first; `--project <project-id>` selects one project. Context already includes the reactions needed for interpretation. Each reaction carries its item ID, project, value, note, timestamp, snooze date and the item as it read when rated. Item kinds are `suggestion`, `question`, `focus`, `pattern`, `synergy`, `new_app`, `verdict` and `owner_idea`. Ratings retain their original item when a later report omits it; `up` is a preference, never an assignment.
 
 Take `<item-id>` from a card or brief. Questions accept `answered` or `done`; focus items accept `done`; suggestions, patterns, synergies, app ideas and verdicts accept `up`, `later` or `down`. For an explicit user request to defer a suggestion until a date, use its item ID:
 
@@ -88,9 +88,9 @@ Take `<item-id>` from a card or brief. Questions accept `answered` or `done`; fo
 watchtower feedback set <item-id> --value later --until <YYYY-MM-DD>
 ```
 
-Use `--note` for the user's answer or reason. Omission keeps the prior note. For `later`, an omitted `--until` preserves the existing date or sets 14 days. Reactions without a snooze date suppress an item for 14 days after their timestamp. `feedback clear <item-id>` withdraws a reaction. `feedback restore <item-id> --file <snapshot-file>` restores the reaction snapshot from a previous result; JSON null means no reaction. Prefer an emitted `Undo:` command for accidental edits.
+Use `--note` for the user's answer or reason. Omission keeps the prior note. For `later`, an omitted `--until` preserves the existing date or sets 14 days. Legacy `later` reactions without a snooze date defer an item for 14 days after their timestamp. `feedback clear <item-id>` withdraws a reaction. `feedback restore <item-id> --file <snapshot-file>` restores the reaction snapshot from a previous result; JSON null means no reaction. Prefer an emitted `Undo:` command for accidental edits.
 
-`ideas list` shows the user's parked ideas. `ideas add <text>` records the user's idea for the next brief to assess. `ideas remove <idea-id>` moves it to `ideas trash`; `ideas restore <idea-id>` restores the same idea ID. The brief's `idea_checks[].idea` refers to this numeric ID.
+`ideas list` shows the user's own ideas. `ideas add <text>` records the user's idea for the next brief to assess. `ideas remove <idea-id>` moves it to `ideas trash`; `ideas restore <idea-id>` restores the same idea ID. The brief's `idea_checks[].idea` refers to this numeric ID. To rate an active owner idea with `up`, `later` or `down`, or use it as a task source, use `idea:<idea-id>`. This prefix is reserved for owner ideas; never use it as a card or brief item ID. The agent's assessment does not set the owner's rating or assign work.
 
 `warnings list <project-id>` shows measured warnings and acknowledgements. Only on the user's request, record a deliberate condition with `warnings acknowledge <project-id> --key <key> --note <reason>`. The complete keys are `no_remote`, `ci_none` and `worktrees`. `warnings clear <project-id> --key <key>` withdraws it. The measured fact stays visible, and material worsening invalidates the acknowledgement.
 
@@ -98,7 +98,7 @@ Use `--note` for the user's answer or reason. Omission keeps the prior note. For
 
 ## Assigned work
 
-`tasks list --project <project-id>` returns assignments and results; omit the filter for every task. `tasks show <task-id>` includes the original project/name/path snapshot, title, reason, evidence, completion criterion, result, revision and history. Copying task text is not an assignment.
+`tasks list --project <project-id>` returns assignments and results; omit the filter for every task. `tasks show <task-id>` includes the original project/name/path snapshot, title, reason, evidence, completion criterion, result, revision and history. New assignments also retain a recognized source in `source_snapshot`; older or independent tasks may lack it. Copying task text is not an assignment. The window's preview offers copying alone or explicitly assigning before copying the task number and reporting instructions.
 
 Create assignments only when the user requests them. Use project IDs from the selected projects and, for an existing suggestion or focus item, its source ID. Omit `--source-id` for independent work:
 
@@ -116,9 +116,9 @@ On the user's explicit decision, use `tasks confirm <task-id> --revision <revisi
 
 `overview` returns the same stored portfolio, projects and facts as the window. Add `--refresh` when the user asks to measure fresh facts before reading it. `overview --visit` records that the user visited the overview; `projects visit <project-id>` records a project visit. Use visit operations only when the user requests recording that visit, not when an agent merely reads data.
 
-`changes show` returns changes in project reports (progress, open ends, questions, decisions and incorporated replies) since the last acknowledgement, plus its snapshot token. Measured Git/CI changes stay in project facts; they neither create digest entries nor invalidate its token. `changes read --token <token>` marks that snapshot read on the user's request. Reading views, refreshing facts and recording visits do not silently acknowledge the digest. An open end removed from a card is not proof of completion.
+`changes show` returns changes in project reports (progress, open ends, questions, decisions and incorporated replies) since the last acknowledgement, plus its snapshot token. Measured Git/CI changes stay in project facts; they neither create digest entries nor invalidate its token. `changes read --token <token>` marks that snapshot read on the user's request. The same snapshot controls unread project and activity markers, including other changed report text. Reading views, refreshing facts and visits never acknowledge reports, including the first visit; without an explicit baseline, read status is unknown. An open end removed from a card is not proof of completion.
 
-`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|handbook>` changes the requested style. `--hidden-modules <comma-separated-ids>` collapses those sections; their headers stay visible for reopening. An empty value expands every section. The existing flag and stored key retain their names for compatibility; previously hidden sections now appear collapsed. Omitted options remain unchanged. Autostart and PATH cannot be toggled through these commands; those are the user's choices in the window's settings.
+`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|ideas|handbook>` selects "Heute", "Projekte", "Ideen" or "Handbuch", respectively; existing preference values remain valid. `--hidden-modules <comma-separated-ids>` collapses those sections; their headers stay visible for reopening. An empty value expands every section. The existing flag and stored key retain their names for compatibility; previously hidden sections now appear collapsed. Omitted options remain unchanged. Autostart and PATH cannot be toggled through these commands; those are the user's choices in the window's settings.
 
 ## Daily-run data
 
@@ -146,7 +146,7 @@ Portfolio due reasons are `missing`, `new_day`, `owner_idea`, `cards_changed` an
 
 `portfolio context` includes all project summaries, `previous_portfolio`, `owner_ideas`, `owner_last_opened`, `review_week`, tasks, reactions and its own token. Each card includes its `version`, `outdated`, `changed_since_brief`, finding details/sources, question options and suggestion evidence/completion criteria. Facts include `ok`, `error` and `collected_at`; unknown counts are null, not zero. Current valid facts override stale card claims.
 
-`review_week` specifies the previous calendar week's ID, inclusive start/end dates and whether its review is due. Each project's `review_week_evidence` contains only changes and milestones in that period, or null without a card. The card's ordinary change summaries also include newer work. `commits_review_week` is taken from stored weekly buckets relative to their collection date; it is null if the measurement cannot establish that completed week's count.
+`review_week` specifies the previous calendar week's ID, inclusive start/end dates and whether its review is due. Each project's `review_week_evidence` contains only changes and milestones in that period, or null without a card. Readable output references matching entries already printed in that project's card by 1-based position; no extra read is needed. The card's ordinary change summaries also include newer work. `commits_review_week` is taken from stored weekly buckets relative to their collection date; it is null if the measurement cannot establish that completed week's count.
 
 ## Facts
 
@@ -169,4 +169,4 @@ When code parses a result, add global `--json`, before or after the command. Ord
 
 Success exits 0 with one object containing `ok: true` and the operation's data. Failure, partial completion or an unfinished job exits 1; invalid usage exits 2. Errors include `error.code`, `error.message` and recovery information such as `hint`. Results and expected errors go to stdout; stderr is reserved for exceptional transport failures. Inspect the outcome and partial-effect fields, not the exit code alone.
 
-For a saved card or brief, code can read `saved`, `version`, `warnings` and `items`. Card writes also return `changed_fields` and `unfilled_fields`. `schema card --json` and `schema portfolio --json` return the complete document schema. A successful context read returns its opaque `context_token`; changing data makes an old token fail rather than silently overwrite later work.
+For a saved card or brief, code can read `saved`, `version`, `warnings` and `items`. Card writes also return `changed_fields` and `unfilled_fields`. `schema card --json` and `schema portfolio --json` return the complete document schema. A successful context read returns its opaque `context_token`; relevant changes make an old token fail rather than silently overwrite later work. Portfolio context protects whether the owner has opened Watchtower since its previous brief; further visits on the same side of that boundary do not invalidate it.

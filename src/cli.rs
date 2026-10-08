@@ -244,7 +244,7 @@ enum SettingsCmd {
     /// Set display preferences only when the owner asks; preserves omitted values
     #[command(alias = "set")]
     Update {
-        #[arg(long, value_parser = ["handover", "board", "handbook"], ignore_case = true)]
+        #[arg(long, value_parser = ["handover", "board", "ideas", "handbook"], ignore_case = true)]
         style: Option<String>,
         /// Collapse these module IDs (comma-separated); headers stay visible. Empty expands all.
         #[arg(long)]
@@ -1063,7 +1063,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             {
                 if style.is_none() && hidden_modules.is_none() {
                     return Err(WatchtowerError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
-                        .hint("Pass --style handover, --style board or --style handbook, or pass --hidden-modules with comma-separated module IDs."));
+                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas or --style handbook, or pass --hidden-modules with comma-separated module IDs."));
                 }
                 let mut updates = Vec::new();
                 if let Some(style) = style {
