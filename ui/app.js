@@ -16,6 +16,7 @@
   let S = null;           // state from the app core
   let showRated = false;  // show suggestions the owner already rated away
   let showAllRecent = false;
+  const expanded = { ideas: false };
   let noteFor = null;     // item whose "why?" field shows right after a later/down rating
   let snoozeFor = null;
   let snoozeDate = '';
@@ -222,23 +223,56 @@
     return project ? dmod('Aufträge', body) : mod('tasks', 'Deine Aufträge', `${active.filter(t => t.status === 'review').length} zur Prüfung · ${active.filter(t => t.status === 'blocked').length} blockiert · ${active.filter(t => t.status === 'assigned').length} beauftragt`, body);
   }
 
-  function runStatus() {
+  function renderRunStatus() {
     const r = S.run_status;
-    if (!r) return '';
-    const labels = { unknown: 'Noch kein Agent-Lauf erfasst', running: 'Agent-Lauf arbeitet', stalled: 'Agent-Lauf hängt fest', incomplete: 'Agent-Lauf unvollständig', failed: 'Agent-Lauf fehlgeschlagen', complete: 'Agent-Lauf abgeschlossen' };
+    const control = $('#report-status');
+    control.hidden = !r;
+    if (!r) return;
+    const labels = { unknown: 'Berichte noch ungeprüft', running: 'Berichte werden geprüft', stalled: 'Prüfung unvollständig', incomplete: 'Prüfung unvollständig', failed: 'Prüfung fehlgeschlagen', complete: 'Berichte geprüft' };
     const latest = r.latest || {}, counts = latest.counts || {};
     const pending = Array.isArray(r.pending_owner_replies) ? r.pending_owner_replies.length : Number(r.pending_owner_replies || 0);
     const reasonText = value => {
       if (Array.isArray(value)) return value.map(reasonText).join(', ');
       if (value && typeof value === 'object') return reasonText(value.message || value.code);
-      const labels = { no_card: 'Einschätzung fehlt', changed: 'Projekt hat sich geändert', ci_changed: 'CI hat sich geändert', answered: 'Deine Antwort fehlt noch in der Karte', status_changed: 'Deine Vorgaben haben sich geändert', new_fields: 'Einschätzung muss ergänzt werden', stale: 'Einschätzung ist veraltet', missing: 'Gesamtbrief fehlt', new_day: 'Gesamtbrief für heute fehlt', owner_idea: 'Deine neue Idee muss eingeschätzt werden', cards_changed: 'Karten wurden aktualisiert', cards_will_change: 'Offene Karten müssen zuerst aktualisiert werden', facts_unreadable: 'Fakten konnten nicht gelesen werden', facts_missing: 'Fakten fehlen', path_missing: 'Projektordner fehlt', not_a_git_repository: 'Kein Git-Repository', git_status_failed: 'Git-Status konnte nicht gelesen werden', agent_failed: 'Agent konnte das Projekt nicht abschließen', project_removed: 'Projekt nicht mehr beobachtet', project_archived: 'Projekt archiviert' };
+      const labels = { no_card: 'Einschätzung fehlt', changed: 'Projekt hat sich geändert', ci_changed: 'CI hat sich geändert', answered: 'Deine Antwort fehlt noch im Bericht', status_changed: 'Deine Vorgaben haben sich geändert', new_fields: 'Einschätzung muss ergänzt werden', stale: 'Einschätzung ist veraltet', missing: 'Projektüberblick fehlt', new_day: 'Projektüberblick für heute fehlt', owner_idea: 'Deine neue Idee muss eingeschätzt werden', cards_changed: 'Projektberichte wurden aktualisiert', cards_will_change: 'Offene Projektberichte müssen zuerst aktualisiert werden', facts_unreadable: 'Fakten konnten nicht gelesen werden', facts_missing: 'Fakten fehlen', path_missing: 'Projektordner fehlt', not_a_git_repository: 'Kein Git-Repository', git_status_failed: 'Git-Status konnte nicht gelesen werden', agent_failed: 'Agent konnte die Prüfung nicht abschließen', project_removed: 'Projekt nicht mehr beobachtet', project_archived: 'Projekt archiviert' };
       return labels[value] || (typeof value === 'string' && !/^[a-z]+(?:_[a-z]+)+$/.test(value) ? value : 'Weitere Prüfung nötig');
     };
-    const problems = (latest.projects || []).filter(p => !['current', 'complete', 'completed', 'skipped'].includes(p.status));
-    const lines = problems.map(p => `<li>${plink(p.id)}: ${esc(({ pending: 'steht noch aus', failed: 'fehlgeschlagen', changed: 'erneut geändert', running: 'in Arbeit' })[p.status] || 'noch offen')}${p.error || p.reason ? ` · ${esc(reasonText(p.error || p.reason))}` : ''}</li>`).join('');
+    const name = p => byId(p.id) ? plink(p.id) : esc(p.name || p.id);
+    const projects = latest.projects || [];
+    const completed = p => ['current', 'complete', 'completed', 'written'].includes(p.status);
+    const excluded = p => ['project_removed', 'project_archived'].includes(p.reason) || p.status === 'skipped';
+    const checked = projects.filter(p => completed(p) && !excluded(p));
+    const versionChange = p => {
+      const version = p.card_version ?? p.version;
+      return Number.isInteger(p.initial_version) && Number.isInteger(version) && version >= p.initial_version && version > 0 ? version - p.initial_version : null;
+    };
+    const updated = checked.filter(p => versionChange(p) > 0);
+    const unchanged = checked.filter(p => versionChange(p) === 0);
+    const unspecified = checked.filter(p => versionChange(p) == null);
+    const group = (title, list) => list.length ? `<p><b>${title} (${list.length}):</b> ${list.map(name).join(', ')}.</p>` : '';
+    const outcomes = group('Berichte aktualisiert', updated) + group('Unverändert übernommen', unchanged)
+      + (unspecified.length ? `${group('Berichte geprüft', unspecified)}<p class="faint">Ob diese Berichte überarbeitet wurden, ist nicht erfasst.</p>` : '')
+      + (!checked.length && counts.current ? `<p>${counts.current} von ${counts.total || counts.current} Projektberichten waren aktuell. Einzelne Aktualisierungen sind nicht erfasst.</p>` : '');
+    const problems = projects.filter(p => !completed(p) && !excluded(p));
+    const lines = problems.map(p => `<li>${name(p)}: ${esc(({ pending: 'steht noch aus', failed: 'fehlgeschlagen', changed: 'erneut geändert', running: 'in Arbeit' })[p.status] || 'noch offen')}${p.error || p.reason ? ` · ${esc(reasonText(p.error || p.reason))}` : ''}</li>`).join('');
     const repair = typeof r.repair_task === 'string' ? r.repair_task : r.repair_task && (r.repair_task.prompt || r.repair_task.text);
     const pf = latest.portfolio;
-    return `<section class="run-status" data-state="${esc(r.state || 'unknown')}" aria-label="Agent-Lauf"><div class="run-status-head"><strong>${esc(labels[r.state] || labels.unknown)}</strong><span class="faint">${counts.total ? `${counts.current || 0} von ${counts.total} Karten im Lauf aktuell` : ''}${latest.started_at ? ` · ${ago(latest.started_at)}` : ''}${pending ? ` · ${pending} ${pending === 1 ? 'Antwort wartet' : 'Antworten warten'} auf Übernahme` : ''}</span></div>${r.last_successful ? `<div class="faint">Letzter vollständiger Lauf: ${fmtDate(r.last_successful.finished_at || r.last_successful.started_at || r.last_successful)}</div>` : ''}${lines || pf || repair ? `<details class="run-status-details"><summary class="more">${['failed', 'stalled', 'incomplete'].includes(r.state) ? 'Was fehlt und wie es weitergeht' : 'Lauf ansehen'}</summary>${lines ? `<ul class="run-status-problems">${lines}</ul>` : ''}${pf ? `<p class="faint">Gesamtbrief: ${esc(({ current: 'aktuell', complete: 'aktuell', pending: 'steht aus', failed: 'fehlgeschlagen', written: 'geschrieben' })[pf.status] || 'noch offen')}${pf.error || pf.reason ? ` · ${esc(reasonText(pf.error || pf.reason))}` : ''}</p>` : ''}${repair ? `<button class="btn" type="button" data-copy="${esc(repair)}">Auftrag zum Fortsetzen kopieren</button>` : ''}</details>` : ''}</section>`;
+    const portfolioText = !pf ? '' : completed(pf)
+      ? versionChange(pf) > 0 || pf.status === 'written' ? 'Projektüberblick neu geschrieben. Er bündelt Prioritäten, Verbindungen und Ideen.'
+        : versionChange(pf) === 0 ? 'Projektüberblick geprüft und unverändert übernommen.'
+          : 'Projektüberblick geprüft. Ob er überarbeitet wurde, ist nicht erfasst.'
+      : `Projektüberblick ${pf.status === 'failed' ? 'konnte nicht aktualisiert werden' : 'steht noch aus'}${pf.error || pf.reason ? `: ${reasonText(pf.error || pf.reason)}` : '.'}`;
+    const timestamp = value => {
+      const date = new Date(value);
+      return value && Number.isFinite(date.getTime()) ? `${date.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} Uhr` : null;
+    };
+    const finished = timestamp(r.last_successful && r.last_successful.finished_at || (r.state === 'complete' && latest.finished_at));
+    const started = timestamp(latest.started_at);
+    const timing = finished ? `Letzte vollständige Prüfung: ${finished}.` : r.state === 'complete' ? 'Prüfung abgeschlossen; Abschlusszeit nicht erfasst.' : 'Noch keine vollständige Prüfung erfasst.';
+    // Keep the native details element itself in place so refresh preserves open state and summary focus.
+    control.setAttribute('data-state', pending && r.state === 'complete' ? 'incomplete' : r.state || 'unknown');
+    $('#report-status-summary').textContent = `${labels[r.state] || labels.unknown}${pending ? ` · ${pending} ${pending === 1 ? 'Antwort offen' : 'Antworten offen'}` : ''}`;
+    $('#report-status-body').innerHTML = `<p class="faint">${esc(timing)}</p>${r.state !== 'complete' && started ? `<p>Aktuelle Prüfung begonnen: ${esc(started)}.</p>` : ''}${outcomes}${portfolioText ? `<p>${esc(portfolioText)}</p>` : ''}${lines ? `<ul class="report-status-problems">${lines}</ul>` : ''}${pending ? `<p>${pending} ${pending === 1 ? 'Antwort wartet' : 'Antworten warten'} noch darauf, in die Projektberichte übernommen zu werden.</p>` : ''}${r.state === 'unknown' ? '<p>Ein Agent prüft die Projekte und schreibt bei Bedarf neue Berichte. „Aktualisieren“ misst nur die Git-Fakten.</p>' : ''}${repair ? `<button class="btn" type="button" data-copy="${esc(repair)}">Auftrag zum Fortsetzen kopieren</button>` : ''}`;
   }
 
   function blockChanges() {
@@ -279,7 +313,7 @@
   function ideaCard(s, projects, projectId, kind) {
     if (noteFor === s.id) return noteForm(s.id, s.title);
     if (hiddenByRating(s.id)) return '';
-    return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div>${s.effort ? `<span class="effort">${esc(s.effort)}</span>` : ''}</div>
+    return `<div class="idea">${kind ? `<div class="kind">${kind}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
@@ -293,7 +327,7 @@
     if (!t.length) return '';
     return mod('focus', 'Heute zuerst', 'Über alle Projekte hinweg ausgewählt', `<div class="focus">${t.slice(0, 3).map((it, i) => `
       <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
-      <div class="meta">${plink(it.project)}<span class="effort">${esc(it.effort)}</span>${taskBtn(it.id || `focus-${i}`, { projects: [it.project], title: it.title, why: it.why, done_when: it.done_when })}${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
+      <div class="meta">${plink(it.project)}${taskBtn(it.id || `focus-${i}`, { projects: [it.project], title: it.title, why: it.why, done_when: it.done_when })}${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
       <div class="why">${esc(it.why)}</div></div></div>`).join('')}</div>`);
   }
 
@@ -468,14 +502,20 @@
   }
 
   function blockIdeas() {
-    const fromProjects = visible().map(p => {
+    let total = 0, canExpand = false;
+    const fromProjects = visible().flatMap(p => {
       const list = ((p.card || {}).suggestions || []).filter(s => s.id === noteFor || !hiddenByRating(s.id));
-      const s = list.find(x => x.id === noteFor || x.id === snoozeFor) || list.find(x => x.type === 'feature') || list[0];
-      return s ? ideaCard(s, [p.id], p.id, 'Aus dem Projekt') : '';
+      total += list.length;
+      canExpand ||= list.length > 1;
+      const first = list.find(x => x.id === noteFor || x.id === snoozeFor) || list[0];
+      return (expanded.ideas ? list : first ? [first] : []).map(s => ideaCard(s, [p.id], p.id, 'Aus dem Projekt'));
     });
-    const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App'));
+    const apps = ((S.portfolio || {}).new_apps || []).map(s => ideaCard(s, [], null, 'Neue App')).filter(Boolean);
+    total += apps.length;
     const cards = [...fromProjects, ...apps].filter(Boolean);
-    return cards.length ? mod('ideas', 'Ideen', 'Pro Projekt der interessanteste Vorschlag, dazu neue App-Ideen. Weitere stehen im Steckbrief', `<div class="cards3">${cards.join('')}</div>`) : '';
+    const count = cards.length < total ? `${cards.length} von ${total} Vorschlägen` : `${total} ${total === 1 ? 'Vorschlag' : 'Vorschläge'}`;
+    const control = `<div class="recent-controls"><span class="faint">${count}</span>${canExpand ? `<button class="more" type="button" data-expand="ideas" aria-expanded="${expanded.ideas}" aria-controls="ideas-list">${expanded.ideas ? 'wieder einen pro Projekt anzeigen' : `alle ${total} anzeigen`}</button>` : ''}</div>`;
+    return cards.length ? mod('ideas', 'Ideen', 'Vorschläge aus deinen Projekten und neue App-Ideen', `${control}<div class="cards3" id="ideas-list">${cards.join('')}</div>`) : '';
   }
 
   // ideas the owner parks; the next brief says whether and where each one is worth doing
@@ -486,7 +526,7 @@
       const c = checks.find(x => x.idea === i.id);
       const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
       const verdict = c
-        ? `<div class="h"><span class="tag ${v[1]}">${esc(v[0])}</span><span class="effort">${esc(c.effort)}</span></div><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}`
+        ? `<div class="h"><span class="tag ${v[1]}">${esc(v[0])}</span></div><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}`
         : '<div class="faint" style="font-size:13px">Der nächste Agent-Lauf schätzt sie ein.</div>';
       const task = c && (c.verdict === 'build' || c.verdict === 'fold_in') ? taskBtn(`idea:${i.id}`, { projects: c.fits || [], title: i.text, why: c.why }) : '';
       return `<div class="idea"><div class="h"><div class="t">${esc(i.text)}</div><button class="linkish faint" type="button" data-idea-remove="${i.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${verdict}<div class="foot"><span class="faint mono" style="font-size:12px">geparkt ${fmtShort(i.added_at)}</span>${task}</div></div>`;
@@ -546,7 +586,7 @@
       ${spark(weekly(p), color(p.id))}
       <div class="stats"><span>zuletzt ${ago(lastWork(p))}</span><span class="mono">${num(commits.last_30d)} / 30 T</span></div>
       ${badges ? `<div class="badges">${badges}</div>` : ''}
-      ${c ? `<div class="next"><span class="faint" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">Wiedereinstieg</span><b>${esc(c.reentry.next_step)}</b><span><span class="effort">${esc(c.reentry.effort)}</span> · ${openQs(c).length} Entscheidungen · ${c.open_ends.length} offene Enden</span></div>` : ''}
+      ${c ? `<div class="next"><span class="faint" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">Wiedereinstieg</span><b>${esc(c.reentry.next_step)}</b><span>${openQs(c).length} Entscheidungen · ${c.open_ends.length} offene Enden</span></div>` : ''}
     </button>`;
   }
 
@@ -669,7 +709,7 @@
       const stampOf = at => new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
       const histRow = (h, i, a) => `<li><span class="when">${stampOf(h.at)}</span><span class="rail"></span><span class="what">${esc(h.headline)}${a[i + 1] && a[i + 1].phase !== h.phase ? ` <span class="pill ${esc(h.phase)}">${esc(PHASE[h.phase] || h.phase)}</span>` : ''}</span></li>`;
       const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
-      body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(r.next_step)}</div><div class="rmeta"><span class="effort">${esc(r.effort)}</span>${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
+      body += dmod('Wiedereinstieg', `<div class="reentry"><div class="t">${esc(r.next_step)}</div><div class="rmeta">${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>${c.reentry.why ? `<div class="muted" style="font-size:14px">${esc(c.reentry.why)}</div>` : ''}</div>`)
         + dmod('Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true)).join('')}</ul>` : '')
         + dmod('Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map(o => `<div class="row"><div class="t">${esc(o.title)}</div><div style="display:flex;gap:6px;align-items:start"><span class="tag ${o.kind === 'uncommitted' || o.kind === 'ci' ? 'bad' : o.kind === 'unpushed' ? 'warn' : ''}">${esc(KIND[o.kind] || o.kind)}</span>${o.age_days != null ? `<span class="faint mono" style="font-size:12px">${o.age_days} T</span>` : ''}</div>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono" style="font-size:12px">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '', 'Angefangenes, Liegengebliebenes, Ungesichertes')
         + dmod('Zuletzt passiert', c.recent_changes.length ? `<div class="list">${[...c.recent_changes].sort((a, b) => b.date.localeCompare(a.date)).map(ch => `<div class="row"><div class="t">${esc(ch.title)}</div><div class="faint mono" style="font-size:12px">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
@@ -978,11 +1018,12 @@
     const d = new Date(S.today + 'T12:00:00');
     $('#date').textContent = d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const collected = S.projects.map(p => p.facts_collected_at).filter(Boolean).sort()[0];
-    $('#fresh').textContent = collected ? `Fakten von vor ${minutesAgo(collected)} Min` : '';
+    $('#fresh').textContent = collected ? `Git-Fakten vor ${minutesAgo(collected)} Min` : '';
+    renderRunStatus();
     $('#refresh').hidden = $('.switch').hidden = !S.projects.length;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
     const style = { board: renderBoard, handbook: renderHandbook }[S.prefs.style] || renderHandover;
-    $('#view').innerHTML = runStatus() + (S.projects.length ? blockChanges() : '') + blockTasks() + (!S.projects.length ? renderEmpty() : style());
+    $('#view').innerHTML = (S.projects.length ? blockChanges() : '') + blockTasks() + (!S.projects.length ? renderEmpty() : style());
     renderFoot();
     if (openId) openDrawer(openId, true);
     if (panelOpen) renderPanel(true);
@@ -1266,6 +1307,9 @@
 
   document.addEventListener('click', async e => {
     const t = e.target;
+    if ($('#report-status').open && !t.closest('#report-status')) $('#report-status').open = false;
+    const expand = t.closest('[data-expand]');
+    if (expand && expand.dataset.expand === 'ideas') { expanded.ideas = !expanded.ideas; render(); $('[data-expand="ideas"]').focus({ preventScroll: true }); return; }
     const snoozeOpen = t.closest('[data-snooze-open]');
     if (snoozeOpen) { openSnooze(snoozeOpen.dataset.snoozeOpen); return; }
     const snoozeDays = t.closest('[data-snooze-days]');
@@ -1433,7 +1477,11 @@
       else { if (note) { delete drafts[id]; noteFor = null; } else answering = null; render(); }
       return;
     }
-    if (e.key === 'Escape') { if (panelOpen) closePanel(); else closeDrawer(); }
+    if (e.key === 'Escape') {
+      if ($('#report-status').open) { e.preventDefault(); $('#report-status').open = false; $('#report-status-summary').focus(); }
+      else if (panelOpen) closePanel();
+      else closeDrawer();
+    }
   });
   $('#refresh').addEventListener('click', refreshFacts);
 

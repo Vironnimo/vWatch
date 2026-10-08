@@ -91,8 +91,6 @@ const WHY: Ty = Ty::Str {
     max: 600,
     words: Some(25),
 };
-const EFFORT: &[&str] = &["15min", "1h", "half-day", "day+"];
-const SIZE: &[&str] = &["S", "M", "L"];
 /// A command, URL, shortcut or path the owner types or clicks.
 const COMMAND: Ty = Ty::Str {
     min: 1,
@@ -161,7 +159,6 @@ const VISION: &[Field] = &[
 const DONE_WHEN: Ty = sentence(20);
 const REENTRY: &[Field] = &[
     f("next_step", words(20), Required),
-    f("effort", Ty::Enum(EFFORT), Required),
     f("why", SENTENCE, Text("")),
     f("done_when", DONE_WHEN, Text("")),
 ];
@@ -201,7 +198,6 @@ const SUGGESTION: &[Field] = &[
     f("title", words(8), Required),
     f("why", WHY, Required),
     f("evidence", TEXT, Text("")),
-    f("effort", Ty::Enum(SIZE), Required),
     f("done_when", DONE_WHEN, Text("")),
 ];
 const CARD: &[Field] = &[
@@ -234,7 +230,6 @@ const FOCUS: &[Field] = &[
     f("project", SHORT, Required),
     f("title", words(8), Required),
     f("why", WHY, Required),
-    f("effort", Ty::Enum(EFFORT), Required),
     f("done_when", DONE_WHEN, Text("")),
 ];
 const PATTERN: &[Field] = &[
@@ -255,14 +250,12 @@ const SYNERGY: &[Field] = &[
     f("why", WHY, Required),
     f("projects", Ty::List(&SHORT, None), Empty),
     f("evidence", TEXT, Text("")),
-    f("effort", Ty::Enum(SIZE), Required),
 ];
 const APP_IDEA: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f("title", words(8), Required),
     f("pitch", WHY, Required),
     f("because", WHY, Required),
-    f("effort", Ty::Enum(SIZE), Required),
 ];
 const VERDICT: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
@@ -291,7 +284,6 @@ const IDEA_CHECK: &[Field] = &[
     ),
     f("fits", Ty::List(&SHORT, None), Empty),
     f("why", WHY, Required),
-    f("effort", Ty::Enum(SIZE), Required),
 ];
 /// What the past calendar week brought, written by the first brief of a week.
 const WEEK_REVIEW: &[Field] = &[

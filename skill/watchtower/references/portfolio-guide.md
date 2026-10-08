@@ -10,6 +10,7 @@ Run `watchtower portfolio context` and follow every output page before writing. 
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
 - Respect task assignments, reported results awaiting review, project status and acknowledged warnings. Do not suggest assigning the same work twice or reversing a deliberate choice.
+- Actively consider new app ideas and cross-project opportunities in every daily brief, even when suggestions already exist. Look for concrete unmet needs or useful combinations of existing capabilities. Retained ideas do not reserve all available places; compare them with new candidates. Add ideas when the evidence supports them, without a daily novelty quota.
 
 ## Field meanings
 
@@ -20,13 +21,13 @@ Every text has at most 600 characters. Limits below are words; a word is a space
 | Field | Content |
 |---|---|
 | `greeting` | Friendly, slightly playful summary of the actual state; at most 30 words. |
-| `focus` | Aim for 3 priorities, fewer when appropriate. Each has `id` when retained, `project`, action `title` (8 words), `why` (25 words), `effort` (`15min`, `1h`, `half-day`, `day+`) and `done_when` (20 words). Prioritize urgent risk or a near goal deadline, then quick wins and rewarding progress. Urgency wins over variety. |
+| `focus` | Aim for 3 priorities, fewer when appropriate. Each has `id` when retained, `project`, action `title` (8 words), `why` (25 words) and `done_when` (20 words). Prioritize urgent risk, the user's goals and useful progress. Urgency wins over variety; do not rank by guessed duration. |
 | `patterns` | Aim for 2–4 shared behaviors or risks with evidence. Each has `id` when retained, `title` (8 words), `why` (25 words), `projects`, `evidence` and `severity` (`info`, `warn`, `risk`). |
-| `synergies` | Aim for 2–4 concrete opportunities to reuse or combine work. Each has `id` when retained, `title` (8 words), `why` (25 words), `projects`, `evidence` and `effort` (`S`, `M`, `L`). Name the relevant projects and existing work. |
-| `new_apps` | At most 3 evidence-based app ideas. Each has `id` when retained, `title` (8 words), `pitch` (25 words), `because` (25 words) and `effort` (`S`, `M`, `L`). Omit speculative filler. |
+| `synergies` | Aim for 2–4 concrete opportunities to reuse or combine work. Each has `id` when retained, `title` (8 words), `why` (25 words), `projects` and `evidence`. Name the relevant projects and existing work. |
+| `new_apps` | At most 3 evidence-based app ideas. Each has `id` when retained, `title` (8 words), `pitch` (25 words) and `because` (25 words). Omit speculative filler. |
 | `park_or_revive` | For quiet or stuck projects, each has `id` when retained, `project`, `verdict` (`park`, `revive`, `finish`, `archive`) and `why` (25 words). Respect the user's status and reason. |
-| `attention_note` | Where effort goes compared with where it is needed; at most 30 words. |
-| `idea_checks` | One assessment for each `owner_ideas` entry, including previously checked ideas. Each has `idea` (that numeric idea ID), `verdict` (`build`, `fold_in`, `later`, `drop`), `fits` (project IDs; empty for a standalone app), `why` (25 words) and `effort` (`S`, `M`, `L`). Keep a prior verdict unless evidence changed. |
+| `attention_note` | Where observed activity goes compared with the user's priorities; at most 30 words. |
+| `idea_checks` | One assessment for each `owner_ideas` entry, including previously checked ideas. Each has `idea` (that numeric idea ID), `verdict` (`build`, `fold_in`, `later`, `drop`), `fits` (project IDs; empty for a standalone app) and `why` (25 words). Keep a prior verdict unless evidence changed. |
 | `week_review` | When `review_week.due` is true, supply `week`, `done`, `stalled` and `time_note` as below. Otherwise omit the field; the review for the same week is kept. |
 
 `done_when` states an observable completion result so the user can hand the item to another agent. Do not replace it with "improve" or "review" without saying what completion means.

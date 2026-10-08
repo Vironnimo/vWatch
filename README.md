@@ -11,9 +11,15 @@ You rate every suggestion in the window (gut / später / Quatsch), optionally wi
 
 The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. "Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes (including uncommitted files, unpushed commits, worktrees, branches, remotes and CI) stay in the project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Changes remain unread until you explicitly mark them read.
 
+A compact report-status control beside fact freshness shows the last check's completion time, which project reports changed and which were kept, plus any unfinished work. Failures and pending replies remain visible in its label. The overview summary uses ordinary reading size so project content comes first.
+
 Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
 
 Copy a task and separately mark it assigned when you hand it to an agent. Watchtower keeps its completion criterion and reported result even when the original suggestion changes; you confirm the result or reopen the task. Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact remains visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
+
+Tasks and ideas show the action, reason and completion criterion without agent estimates of duration or effort. Existing estimates are hidden throughout the window, and new cards and briefs no longer request or store them. Owner-set due dates and measured activity remain available.
+
+The ideas overview follows the agent's priority order and offers all remaining suggestions directly through its list-size control. Existing suggestions do not block new ones: each review looks for useful new possibilities while preserving still-relevant ideas and respecting rejected or deferred proposals.
 
 ## One folder, two entry points
 

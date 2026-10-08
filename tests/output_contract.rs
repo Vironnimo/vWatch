@@ -216,7 +216,7 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
         .collect::<Vec<_>>());
     // Item receipts remain complete even when their IDs and titles need pages.
     card["suggestions"] = serde_json::json!((0..100)
-        .map(|i| serde_json::json!({"type":"feature", "title":format!("Suggestion{i}{}", "x".repeat(100)), "why":"Prüfen", "effort":"S"}))
+        .map(|i| serde_json::json!({"type":"feature", "title":format!("Suggestion{i}{}", "x".repeat(100)), "why":"Prüfen"}))
         .collect::<Vec<_>>());
     let file = temp.path().join("card.json");
     std::fs::write(&file, serde_json::to_vec(&card).unwrap()).unwrap();

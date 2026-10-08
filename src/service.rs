@@ -1977,7 +1977,7 @@ impl Watchtower {
                     "open_ends": picked("open_ends", &["kind", "title", "detail", "source", "age_days"]),
                     "health_notes": c["health_notes"],
                     "decisions": c["decisions"],
-                    "suggestions": picked("suggestions", &["id", "type", "title", "why", "evidence", "effort", "done_when"]),
+                    "suggestions": picked("suggestions", &["id", "type", "title", "why", "evidence", "done_when"]),
                     "cross_project_hints": c["cross_project_hints"],
                     "recent_changes": dated_since(&c["recent_changes"], &week_from),
                     "milestones": dated_since(&c["milestones"], &week_from),

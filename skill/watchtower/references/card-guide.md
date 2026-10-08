@@ -42,7 +42,7 @@ A word is a space-separated piece containing a letter or digit. A standalone das
 | `open_ends` | Each has `kind`, `title` (10 words), `detail` (30 words), `source` and `age_days`. Kinds: `worktree`, `branch`, `uncommitted`, `unpushed`, `ci`, `flagged`, `todo`, `plan`, `other`. Sources identify a file, git ref, or fact such as `facts: has_remote`. Use the oldest dated evidence for age, or null if unknown. |
 | `waiting_on_you` | Consequential questions in priority order; aim for 0–3. Each has `id` when retained, `title` as a question (12 words), `source` and `options`. Each of at most 3 options has `answer` (8 words) and `effect` (20 words). Use options only for known alternatives; for names, places or unknown values, use an empty list. Remove answered or dismissed questions. |
 | `vision` | `statement`: documented goal, one sentence or null. `progress_note`: progress against that goal, one sentence or null. `progress_pct`: integer 0–100 only when derivable from stated work, otherwise null. |
-| `reentry` | One useful next step: `next_step` (20 words), `effort` (`15min`, `1h`, `half-day`, `day+`), `why` (30 words), `done_when` (20 words). Completion must be observable. |
+| `reentry` | One useful next step: `next_step` (20 words), `why` (30 words), `done_when` (20 words). Completion must be observable. |
 | `health_notes` | Concrete risks or deterioration, each at most 30 words. Empty when none were found. |
 | `decisions` | Recorded deliberate choices with their source, each at most 20 words. Example: "Kein Remote: bewusst nur lokal (AGENTS.md)." These are the user's decisions, not your conclusions. |
 | `suggestions` | Up to 4 distinct proposals; fields and selection below. |
@@ -53,11 +53,13 @@ For ages, use `dirty.oldest_change` for uncommitted work, `unpushed_since` for u
 
 ## Suggestions
 
-Each suggestion has `id` when retained, `type` (`next`, `feature`, `cleanup`, `park`), `title` (8 words), `why` (25 words), `evidence`, `effort` (`S`, `M`, `L`) and `done_when` (20 words). Name files, functions or commits in evidence; line numbers drift. Tie features to the project's vision or the user's notes. A parking proposal is useful when the scope is complete or remaining work depends on people, money or decisions.
+Each suggestion has `id` when retained, `type` (`next`, `feature`, `cleanup`, `park`), `title` (8 words), `why` (25 words), `evidence` and `done_when` (20 words). Name files, functions or commits in evidence; line numbers drift. Tie features to the project's vision or the user's notes. A parking proposal is useful when the scope is complete or remaining work depends on people, money or decisions.
 
 The user can turn a suggestion or `reentry` into an assigned task. Write `done_when` so another agent can tell whether it succeeded: "Monatsraten stimmen mit dem Kalender überein; dokumentierter Planungstest besteht." Include an exact test command only when the repository actually defines it. Assignments keep their original text through card rewrites.
 
 Read feedback before choosing suggestions. Never reintroduce a rejected idea through rewording. Preserve a still-relevant item's ID, respect snooze dates and remove completed proposals. The user's recorded choices take priority over generic advice.
+
+During each project review, actively look for new useful features or opportunities in its goals, existing capabilities and recent changes. Unfinished suggestions do not block new ideas. Order proposals by usefulness now; a stronger new idea belongs before a weaker retained one. Keep existing ideas when they still earn their place, and do not invent novelty to fill a quota.
 
 ## Handbook
 

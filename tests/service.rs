@@ -241,6 +241,30 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
     );
     assert_eq!(current["suggestions"][0]["id"], json!(sid));
     assert_eq!(current["handbook"], handbook);
+
+    // Old documents can carry retired estimates; merging keeps their useful
+    // content and item identity without rewriting the historical version.
+    let mut legacy = current.clone();
+    legacy["reentry"]["effort"] = json!("half-day");
+    legacy["suggestions"][0]["effort"] = json!("S");
+    svc.store().rewrite_latest_card("demo", &legacy).unwrap();
+    let saved = svc
+        .put_card("demo", json!({"headline": "Noch neuer"}), true, false)
+        .unwrap();
+    for field in ["reentry.effort", "suggestions[0].effort"] {
+        assert!(saved["warnings"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(format!("ignored unknown field: {field}"))));
+    }
+    let new_card = &svc.card("demo").unwrap()["card"];
+    let mut expected = current.clone();
+    expected["headline"] = json!("Noch neuer");
+    assert_eq!(new_card, &expected);
+    assert_eq!(
+        svc.store().card_version("demo", 2).unwrap().unwrap().data,
+        legacy
+    );
 }
 
 #[test]
@@ -273,7 +297,7 @@ fn item_ids_cannot_transfer_reactions_between_documents() {
     assert_eq!(svc.card("second").unwrap_err().code, "no_card");
 
     let brief = json!({"greeting": "Moin", "new_apps": [{
-        "id": "shared-item", "title": "Andere Idee", "pitch": "Ein Werkzeug", "because": "Hilft", "effort": "S"
+        "id": "shared-item", "title": "Andere Idee", "pitch": "Ein Werkzeug", "because": "Hilft"
     }]});
     assert_eq!(
         svc.put_portfolio(brief, false, false).unwrap_err().code,
@@ -295,7 +319,7 @@ fn item_ids_cannot_transfer_reactions_between_documents() {
 
     // A focus item's project is its subject; the portfolio still owns its identity.
     let brief = json!({"greeting": "Moin", "focus": [{
-        "id": "focus-owned", "project": "demo", "title": "Prüfen", "why": "Hilft", "effort": "1h"
+        "id": "focus-owned", "project": "demo", "title": "Prüfen", "why": "Hilft"
     }]});
     svc.put_portfolio(brief.clone(), false, false).unwrap();
     svc.set_feedback("focus-owned", Some("done"), None).unwrap();
@@ -329,19 +353,18 @@ fn invalid_cards_are_refused_with_field_paths() {
     let err = svc
         .put_card(
             "demo",
-            card_with(json!({"phase": "sleepy", "reentry": {"next_step": "x"}})),
+            card_with(json!({"phase": "sleepy", "reentry": {}})),
             false,
             false,
         )
         .unwrap_err();
     assert_eq!(err.code, "invalid_card");
     assert!(
-        err.message.contains("phase:") && err.message.contains("reentry.effort: Field required"),
+        err.message.contains("phase:") && err.message.contains("reentry.next_step: Field required"),
         "{}",
         err.message
     );
-    let empty_title =
-        json!({"suggestions": [{"type": "feature", "title": "", "why": "w", "effort": "S"}]});
+    let empty_title = json!({"suggestions": [{"type": "feature", "title": "", "why": "w"}]});
     let err = svc
         .put_card("demo", card_with(empty_title), false, false)
         .unwrap_err();
@@ -437,7 +460,8 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
-    let mut brief = json!({"greeting": "Moin", "focus": [{"project": "ghost", "title": "x", "why": "y", "effort": "1h"}]});
+    let mut brief =
+        json!({"greeting": "Moin", "focus": [{"project": "ghost", "title": "x", "why": "y"}]});
     let err = svc.put_portfolio(brief.clone(), false, false).unwrap_err();
     assert_eq!(err.code, "unknown_project");
     let four = json!({"greeting": "Moin", "focus": vec![brief["focus"][0].clone(); 4]});
@@ -562,7 +586,8 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     );
     assert_eq!(ctx["projects"][0]["facts"]["commits_review_week"], 0);
 
-    let check = json!({"idea": id, "verdict": "fold_in", "fits": ["demo"], "why": "Passt in demo.", "effort": "S"});
+    let check =
+        json!({"idea": id, "verdict": "fold_in", "fits": ["demo"], "why": "Passt in demo."});
     let with = |c: &Value| json!({"greeting": "Moin", "idea_checks": [c]});
     let altered = |key: &str, value: Value| {
         let mut c = check.clone();
@@ -635,7 +660,7 @@ fn portfolio_context_exposes_action_evidence_and_measurement_limits() {
         card_with(json!({
             "open_ends": [{"kind": "todo", "title": "Export fehlt", "detail": "Das Format ist noch offen.", "source": "TODO.md", "age_days": 2}],
             "waiting_on_you": [{"title": "Welches Format?", "source": "README.md", "options": [{"answer": "CSV", "effect": "Tabellen können die Daten lesen."}]}],
-            "suggestions": [{"type": "next", "title": "Export umsetzen", "why": "Daten weiterverwenden.", "evidence": "src/export.rs", "effort": "S", "done_when": "Die Beispieldatei lässt sich öffnen."}]
+            "suggestions": [{"type": "next", "title": "Export umsetzen", "why": "Daten weiterverwenden.", "evidence": "src/export.rs", "done_when": "Die Beispieldatei lässt sich öffnen."}]
         })),
         false,
         false,
@@ -1272,7 +1297,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
     let rating = &ctx["feedback"][0];
     assert_eq!(
         rating["item"],
-        json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "effort": "S", "done_when": ""})
+        json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "done_when": ""})
     );
     assert_eq!(
         (rating["project"].as_str(), rating["note"].as_str()),
@@ -1345,7 +1370,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
     );
 
     // a focus item can be marked done for the next brief
-    let brief = json!({"greeting": "Moin", "focus": [{"project": "demo", "title": "Offline klären", "why": "Beantwortet.", "effort": "1h"}]});
+    let brief = json!({"greeting": "Moin", "focus": [{"project": "demo", "title": "Offline klären", "why": "Beantwortet."}]});
     let fid = svc.put_portfolio(brief, false, false).unwrap()["items"][0]["id"]
         .as_str()
         .unwrap()

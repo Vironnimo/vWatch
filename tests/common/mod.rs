@@ -82,8 +82,8 @@ pub fn card() -> Value {
         "one_liner": "Ein Testprojekt",
         "phase": "active",
         "headline": "Alles ruhig",
-        "reentry": {"next_step": "Tests laufen lassen", "effort": "15min"},
-        "suggestions": [{"type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "effort": "S"}],
+        "reentry": {"next_step": "Tests laufen lassen"},
+        "suggestions": [{"type": "feature", "title": "Dark Mode", "why": "Weil nachts."}],
     })
 }
 

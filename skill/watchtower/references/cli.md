@@ -42,6 +42,8 @@ Common recoveries:
 
 Use `--file <path>` for card and portfolio documents. Paths are absolute Windows paths or relative to the command's working directory; use forward slashes. `--file -` reads stdin. `--input-json '<object>'` supplies inline JSON; it cannot be combined with `--file`. Files and stdin accept UTF-8, with or without BOM, and BOM-marked UTF-16. Prefer a file for multi-line content to avoid shell quoting changes. Keep temporary files in your own folder outside watched repositories.
 
+Do not copy legacy `effort` fields from older documents. Task duration and size estimates are no longer part of either schema; old payloads are accepted with those fields dropped and reported as ignored. Stored history is preserved.
+
 `card put <project-id>` and `portfolio put` save versions. Both require `--context-token` from the corresponding complete context. `--merge` keeps omitted top-level fields; a supplied list or nested object replaces the whole field. `--dry-run` validates without saving, needs no token and reserves nothing. Use it when validation alone is the goal, not before every normal save.
 
 The result states whether it saved, item IDs and warnings; a save also returns its `version`. Readable saves return a receipt without repeating the submitted document; `show` and explicit JSON still return the full document. Card writes include `changed_fields` and `unfilled_fields`. Fill all unfilled fields before declaring a card current. Unknown fields are dropped with warnings. With a merge, an untouched field over its word limit is retained with a warning; shorten it when updating that field. Without a previous card or brief, send a complete document without `--merge`.

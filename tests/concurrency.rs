@@ -211,7 +211,7 @@ fn stale_briefs_preserve_cards_owner_reactions_and_ideas() {
     svc.put_portfolio(
         json!({
             "greeting": "Guten Morgen",
-            "focus": [{"id": "focus-context", "project": "demo", "title": "Tests prüfen", "why": "Release vorbereiten", "effort": "15min"}]
+            "focus": [{"id": "focus-context", "project": "demo", "title": "Tests prüfen", "why": "Release vorbereiten"}]
         }),
         false,
         false,
@@ -479,7 +479,7 @@ fn simultaneous_projects_cannot_claim_the_same_item_id() {
                         project,
                         card_with(json!({"suggestions": [{
                             "id": "sg-shared", "type": "feature", "title": "Offline nutzen",
-                            "why": "Auch unterwegs arbeiten", "effort": "M"
+                            "why": "Auch unterwegs arbeiten"
                         }]})),
                         false,
                         false,

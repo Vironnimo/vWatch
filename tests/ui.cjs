@@ -27,7 +27,7 @@ function fixture() {
       card: {
         headline: 'Ready', phase: 'active', features: [], open_ends: [],
         recent_changes: [], milestones: [], health_notes: [], cross_project_hints: [],
-        reentry: { next_step: 'Continue', effort: 'S' },
+        reentry: { next_step: 'Continue' },
         suggestions: [{ id: 's1', title: 'Suggestion', why: 'Useful', type: 'feature' }],
         waiting_on_you: [1, 2, 3].map(n => ({
           id: `q${n}`, title: `Question ${n}`, options: [{ answer: `Option ${n}` }],
@@ -45,7 +45,7 @@ async function app(invoke = () => ({})) {
       innerHTML: '', value: '', textContent: '', hidden: false, scrollTop: 0,
       focus() { document.activeElement = this; }, select() {},
       setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
-      addEventListener() {}, setAttribute() {},
+      attributes: {}, addEventListener() {}, setAttribute(key, value) { this.attributes[key] = value; },
       querySelector: child => node(`${selector} ${child}`), querySelectorAll: () => [],
     });
     return nodes.get(selector);
@@ -80,6 +80,101 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+test('legacy effort estimates stay invisible while recommendations and task actions remain usable', async () => {
+  const a = await app();
+  const card = a.state.projects[0].card;
+  card.reentry = { next_step: 'Continue the work', why: 'A concrete next step', done_when: 'The result works', effort: 'S' };
+  card.suggestions[0] = { ...card.suggestions[0], effort: 'M', evidence: 'Observed need', done_when: 'Suggestion delivered' };
+  a.state.ideas = [{ id: 7, text: 'Parked idea', added_at: '2026-10-07' }];
+  a.state.portfolio = {
+    focus: [{ id: 'f1', project: 'sample', title: 'Focus item', why: 'First priority', done_when: 'Focus delivered', effort: 'half-day' }],
+    patterns: [{ id: 'p1', projects: ['sample'], title: 'Pattern item', why: 'Shared issue', effort: 'hour' }],
+    synergies: [{ id: 'y1', projects: ['sample'], title: 'Synergy item', why: 'Shared solution', effort: 'day' }],
+    new_apps: [{ id: 'n1', title: 'New app item', pitch: 'Useful app', effort: 'week' }],
+    idea_checks: [{ idea: 7, verdict: 'fold_in', fits: ['sample'], why: 'Fits the existing project', effort: 'L' }],
+  };
+  const noEstimates = markup => {
+    assert.doesNotMatch(markup, /class="effort"/);
+    assert.doesNotMatch(markup, />(?:half-day|hour|day|week|S|M|L)</);
+  };
+  for (const style of ['handover', 'board', 'handbook']) {
+    a.state.prefs.style = style;
+    await a.ui.load(false);
+    const overview = a.node('#view').innerHTML;
+    noEstimates(overview);
+    if (style !== 'handbook') {
+      for (const title of ['Focus item', 'Pattern item', 'Synergy item', 'Parked idea', 'Fits the existing project']) assert.ok(overview.includes(title));
+      for (const id of ['f1', 'p1', 'y1', 'idea:7']) assert.ok(overview.includes(`data-task="${id}"`));
+      assert.match(overview, /data-focus-done="f1"/);
+    }
+    if (style === 'handover') {
+      assert.match(overview, /New app item/);
+      assert.match(overview, /data-task="n1"/);
+      assert.match(overview, /data-task="s1"/);
+    }
+    if (style === 'board') assert.match(overview, /3 Entscheidungen · 0 offene Enden/);
+    a.ui.openDrawer('sample');
+    const drawer = a.node('#drawer-root').innerHTML;
+    noEstimates(drawer);
+    assert.match(drawer, /Continue the work/);
+    assert.match(drawer, /Observed need/);
+    assert.match(drawer, /data-task="reentry:sample"/);
+    assert.match(drawer, /data-task="s1"/);
+  }
+  await a.ui.copyTask('reentry:sample');
+  assert.match(a.copied.at(-1), /Fertig, wenn: The result works/);
+  await a.ui.copyTask('s1');
+  assert.match(a.copied.at(-1), /Beleg: Observed need/);
+  assert.match(a.copied.at(-1), /Fertig, wenn: Suggestion delivered/);
+});
+
+test('ideas follow authored priority and expand in place without losing ratings or task actions', async () => {
+  const a = await app();
+  a.state.projects[0].card.suggestions = [
+    { id: 'first', type: 'next', title: 'First priority', why: 'Highest value' },
+    { id: 'feature', type: 'feature', title: 'Later feature', why: 'Useful next', done_when: 'Feature works' },
+    { id: 'cleanup', type: 'cleanup', title: 'Third suggestion', why: 'Less urgent' },
+    { id: 'rejected', type: 'feature', title: 'Rejected suggestion' },
+    { id: 'later', type: 'feature', title: 'Postponed suggestion' },
+  ];
+  a.state.feedback = { feature: { value: 'up' }, rejected: { value: 'down' }, later: { value: 'later', snoozed_until: '2026-10-14' } };
+  a.state.portfolio = { new_apps: [{ id: 'app', title: 'An app idea', pitch: 'Useful separately' }] };
+  await a.ui.load(false);
+  let markup = a.ui.blockIdeas();
+  assert.match(markup, /2 von 4 Vorschläge/);
+  assert.match(markup, /First priority/);
+  assert.match(markup, /An app idea/);
+  assert.doesNotMatch(markup, /Later feature|Third suggestion|Rejected suggestion|Postponed suggestion/);
+  assert.ok(markup.indexOf('data-expand="ideas"') < markup.indexOf('id="ideas-list"'));
+  const toggle = () => a.dispatch('click', { target: { closest: selector => selector === '[data-expand]' ? { dataset: { expand: 'ideas' } } : null } });
+  toggle();
+  markup = a.ui.blockIdeas();
+  assert.match(markup, /4 Vorschläge/);
+  assert.match(markup, /wieder einen pro Projekt anzeigen/);
+  assert.ok(markup.indexOf('First priority') < markup.indexOf('Later feature'));
+  assert.ok(markup.indexOf('Later feature') < markup.indexOf('Third suggestion'));
+  assert.match(markup, /data-task="feature"/);
+  assert.match(markup, /data-item="feature"[^]*?data-v="up" aria-pressed="true"/);
+  assert.doesNotMatch(markup, /Rejected suggestion|Postponed suggestion/);
+  await a.ui.copyTask('feature');
+  assert.match(a.copied.at(-1), /Fertig, wenn: Feature works/);
+  toggle();
+  markup = a.ui.blockIdeas();
+  assert.match(markup, /2 von 4 Vorschläge/);
+  assert.match(markup, /data-task="first"/);
+  assert.match(markup, /data-task="app"/);
+  assert.match(markup, /data-mod-toggle="ideas" aria-expanded="true"/);
+  assert.doesNotMatch(markup, /Later feature/);
+  a.ui.note('feature');
+  a.ui.render();
+  assert.match(a.ui.blockIdeas(), /data-note-save="feature"/);
+  a.ui.note(null);
+  a.ui.openSnooze('cleanup');
+  assert.match(a.ui.blockIdeas(), /Third suggestion/);
+  assert.match(a.ui.blockIdeas(), /data-snooze-save/);
+  assert.equal(a.calls.filter(c => c.command === 'set_pref' || c.command === 'set_feedback').length, 0);
+});
 
 test('previously hidden sections remain reachable and expand without changing other preferences', async () => {
   const a = await app((command, args, state) => {
@@ -590,7 +685,44 @@ test('read acknowledgement uses the displayed token and is never automatic', asy
   assert.doesNotMatch(a.node('#view').innerHTML, /data-mod="changes"/);
 });
 
-test('agent status remains distinct from fact freshness in every layout', async () => {
+test('report checks stay compact, concrete and distinct from Git freshness in every layout', async () => {
+  const a = await app();
+  a.state.projects[0].facts_collected_at = '2026-10-07T09:00:00Z';
+  a.state.run_status = { state: 'complete', pending_owner_replies: 0,
+    last_successful: { finished_at: '2026-10-07T07:30:00Z' },
+    latest: { started_at: '2026-10-07T07:00:00Z', finished_at: '2026-10-07T07:30:00Z', counts: { total: 2, current: 2 },
+      projects: [{ id: 'sample', status: 'current', initial_version: 4, card_version: 5 },
+        { id: 'other', name: 'Other project', status: 'current', initial_version: 3, card_version: 3 }],
+      portfolio: { status: 'current', initial_version: 8, version: 9 } } };
+  for (const style of ['handover', 'board', 'handbook']) {
+    a.state.prefs.style = style;
+    await a.ui.load(false);
+    assert.equal(a.node('#report-status-summary').textContent, 'Berichte geprüft');
+    assert.equal(a.node('#report-status').hidden, false);
+    assert.match(a.node('#fresh').textContent, /^Git-Fakten vor .* Min$/);
+    assert.doesNotMatch(a.node('#view').innerHTML, /run-status|report-status|Agent-Lauf abgeschlossen/);
+    const details = a.node('#report-status-body').innerHTML;
+    assert.match(details, /Letzte vollständige Prüfung: 07\.10\.2026, \d{2}:\d{2} Uhr/);
+    assert.match(details, /Berichte aktualisiert \(1\):.*Sample/);
+    assert.match(details, /Unverändert übernommen \(1\):.*Other project/);
+    assert.match(details, /Projektüberblick neu geschrieben\. Er bündelt Prioritäten, Verbindungen und Ideen/);
+    assert.doesNotMatch(details, /Gesamtbrief|Karten im Lauf aktuell/);
+  }
+  a.node('#report-status').open = true;
+  a.state.run_status.latest.portfolio.version = 8;
+  await a.ui.load(false);
+  assert.equal(a.node('#report-status').open, true);
+  assert.match(a.node('#report-status-body').innerHTML, /Projektüberblick geprüft und unverändert übernommen/);
+  a.dispatch('keydown', { target: { id: '', closest: () => null }, key: 'Escape', preventDefault() {} });
+  assert.equal(a.node('#report-status').open, false);
+  assert.equal(a.document.activeElement, a.node('#report-status-summary'));
+  a.node('#report-status').open = true;
+  a.dispatch('click', { target: { closest: () => null } });
+  assert.equal(a.node('#report-status').open, false);
+  assert.equal(a.calls.filter(c => c.command === 'set_pref').length, 0);
+});
+
+test('incomplete report checks and waiting replies stay visible with actionable details', async () => {
   const a = await app();
   a.state.run_status = { state: 'incomplete', pending_owner_replies: 2, repair_task: 'Continue this run',
     latest: { started_at: '2026-10-07T07:00:00Z', counts: { total: 2, current: 1 },
@@ -598,13 +730,43 @@ test('agent status remains distinct from fact freshness in every layout', async 
   for (const style of ['handover', 'board', 'handbook']) {
     a.state.prefs.style = style;
     await a.ui.load(false);
-    assert.match(a.node('#view').innerHTML, /Agent-Lauf unvollständig/);
-    assert.match(a.node('#view').innerHTML, /2 Antworten warten/);
-    assert.match(a.node('#view').innerHTML, /data-copy="Continue this run"/);
-    assert.match(a.node('#view').innerHTML, /Einschätzung fehlt/);
-    assert.match(a.node('#view').innerHTML, /Gesamtbrief fehlt/);
-    assert.doesNotMatch(a.node('#view').innerHTML, /no_card|· missing/);
+    assert.equal(a.node('#report-status-summary').textContent, 'Prüfung unvollständig · 2 Antworten offen');
+    const details = a.node('#report-status-body').innerHTML;
+    assert.match(details, /2 Antworten warten/);
+    assert.match(details, /data-copy="Continue this run"/);
+    assert.match(details, /Einschätzung fehlt/);
+    assert.match(details, /Projektüberblick fehlt/);
+    assert.match(details, /Aktuelle Prüfung begonnen: 07\.10\.2026, \d{2}:\d{2} Uhr/);
+    assert.doesNotMatch(details, /no_card|· missing/);
+    assert.doesNotMatch(a.node('#view').innerHTML, /run-status|report-status/);
   }
+  a.state.run_status.state = 'failed';
+  a.state.run_status.latest.projects[0] = { id: 'sample', status: 'failed', error: 'path_missing' };
+  await a.ui.load(false);
+  assert.match(a.node('#report-status-summary').textContent, /Prüfung fehlgeschlagen/);
+  assert.match(a.node('#report-status-body').innerHTML, /Projektordner fehlt/);
+  a.state.run_status.state = 'complete';
+  await a.ui.load(false);
+  assert.match(a.node('#report-status-summary').textContent, /2 Antworten offen/);
+  assert.equal(a.node('#report-status').attributes['data-state'], 'incomplete');
+});
+
+test('older check records do not pretend reports were rewritten or invent a completion time', async () => {
+  const a = await app();
+  a.state.run_status = { state: 'complete', latest: { started_at: '2026-10-07T07:00:00Z',
+    projects: [{ id: 'sample', status: 'current' }], portfolio: { status: 'current' } } };
+  await a.ui.load(false);
+  let details = a.node('#report-status-body').innerHTML;
+  assert.match(details, /Abschlusszeit nicht erfasst/);
+  assert.match(details, /Berichte geprüft \(1\)/);
+  assert.match(details, /Ob diese Berichte überarbeitet wurden, ist nicht erfasst/);
+  assert.match(details, /Projektüberblick geprüft\. Ob er überarbeitet wurde, ist nicht erfasst/);
+  assert.doesNotMatch(details, /Berichte aktualisiert|Unverändert übernommen|07\.10\.2026/);
+  a.state.run_status = { state: 'unknown' };
+  await a.ui.load(false);
+  assert.equal(a.node('#report-status-summary').textContent, 'Berichte noch ungeprüft');
+  details = a.node('#report-status-body').innerHTML;
+  assert.match(details, /„Aktualisieren“ misst nur die Git-Fakten/);
 });
 
 test('recent activity puts newer same-day reports before the initial limit without promoting older events', async () => {
