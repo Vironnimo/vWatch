@@ -424,6 +424,46 @@ fn dated_since(list: &Value, from: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Keep historical review evidence separate from changes that happened this week.
+fn dated_between(list: &Value, from: &str, to: &str) -> Vec<Value> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item["date"]
+                .as_str()
+                .is_some_and(|date| date >= from && date <= to)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Weekly buckets are anchored to the collection date, not the context's date.
+/// A measurement made during the review week cannot establish its final total.
+fn commits_in_review_week(stored: &StoredFacts, from: NaiveDate) -> Option<u64> {
+    if stored.data["ok"] != true {
+        return None;
+    }
+    let collected = DateTime::parse_from_rfc3339(&stored.collected_at)
+        .ok()?
+        .with_timezone(&Local)
+        .date_naive();
+    let monday =
+        collected - chrono::Duration::days(collected.weekday().num_days_from_monday().into());
+    let weeks_ago = (monday - from).num_days() / 7;
+    if weeks_ago < 1 {
+        return None;
+    }
+    let weekly = stored.data["commits"]["weekly"].as_array()?;
+    weekly
+        .get(
+            weekly
+                .len()
+                .checked_sub(usize::try_from(weeks_ago).ok()? + 1)?,
+        )?
+        .as_u64()
+}
+
 /// Whether a handbook command reads like something other than what the owner types:
 /// commands quoted in a sentence, a URL behind a command, or a shortcut to click.
 fn not_typed(how: &str) -> bool {
@@ -1974,8 +2014,9 @@ impl Watchtower {
         let mut rows = Vec::new();
         let previous = self.store.latest_portfolio()?;
         let reactions = self.store.feedback()?;
-        // changes and milestones from the start of the review week on, the material for `week_review`
-        let week_from = self.review_week().1.to_string();
+        let (week, from, to) = self.review_week();
+        let week_from = from.to_string();
+        let week_to = to.to_string();
         for p in self.store.projects()? {
             if p.status == "archived" {
                 continue;
@@ -1994,19 +2035,27 @@ impl Watchtower {
                 &self.warning_acknowledgements(&p.id)?,
                 &self.project_task_basis(&p.id)?,
             );
-            let f = stored.map(|s| s.data).unwrap_or_else(|| json!({}));
+            let collected_at = stored.as_ref().map(|s| &s.collected_at);
+            let review_commits = stored
+                .as_ref()
+                .and_then(|s| commits_in_review_week(s, from));
+            let f = stored.as_ref().map(|s| &s.data).unwrap_or(&Value::Null);
+            let review_evidence = card.as_ref().map(|card| json!({
+                "recent_changes": dated_between(&card.data["recent_changes"], &week_from, &week_to),
+                "milestones": dated_between(&card.data["milestones"], &week_from, &week_to),
+            }));
             let card_json = card.map(|card| {
                 let c = &card.data;
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
                 json!({
-                    "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
+                    "version": card.version, "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
                     "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
-                    "waiting_on_you": picked("waiting_on_you", &["id", "title"]),
-                    "open_ends": picked("open_ends", &["kind", "title", "age_days"]),
+                    "waiting_on_you": picked("waiting_on_you", &["id", "title", "source", "options"]),
+                    "open_ends": picked("open_ends", &["kind", "title", "detail", "source", "age_days"]),
                     "health_notes": c["health_notes"],
                     "decisions": c["decisions"],
-                    "suggestions": picked("suggestions", &["id", "type", "title", "why"]),
+                    "suggestions": picked("suggestions", &["id", "type", "title", "why", "evidence", "effort", "done_when"]),
                     "cross_project_hints": c["cross_project_hints"],
                     "recent_changes": dated_since(&c["recent_changes"], &week_from),
                     "milestones": dated_since(&c["milestones"], &week_from),
@@ -2016,20 +2065,21 @@ impl Watchtower {
                 "id": p.id, "name": p.name, "status": p.status, "status_note": p.status_note, "goal": p.goal, "goal_due": p.goal_due,
                 "warning_acknowledgements": self.warning_acknowledgements(&p.id)?,
                 "facts": {
+                    "ok": f["ok"], "error": f["error"], "collected_at": collected_at,
                     "last_work": f["last_work"],
                     "commits": pick(&f["commits"], &["total", "last_7d", "last_30d", "last"]),
-                    "commits_review_week": f["commits"]["weekly"].as_array().and_then(|w| w.len().checked_sub(2).map(|i| w[i].clone())),
+                    "commits_review_week": review_commits,
                     "has_remote": f["has_remote"], "ahead": f["ahead"],
                     "dirty": pick(&f["dirty"], &["files", "lines_added", "lines_removed", "oldest_change"]),
                     "ci": pick(&f["ci"], &["state", "failing", "at"]),
-                    "unmerged_branches": f["branches"]["unmerged"].as_array().map_or(0, Vec::len),
+                    "unmerged_branches": f["branches"]["unmerged"].as_array().map(Vec::len),
                     "extra_worktrees": f["worktrees"]["count"],
                 },
                 "card": card_json,
+                "review_week_evidence": review_evidence,
             }));
         }
         let unchecked = self.unchecked_ideas(previous.as_ref().map(|p| &p.data))?;
-        let (week, from, to) = self.review_week();
         let reviewed = previous
             .as_ref()
             .is_some_and(|p| p.data["week_review"]["week"] == week.as_str());

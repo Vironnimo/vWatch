@@ -44,7 +44,7 @@ Use `--file <path>` for card and portfolio documents. Paths are absolute Windows
 
 `card put <project-id>` and `portfolio put` save versions. Both require `--context-token` from the corresponding complete context. `--merge` keeps omitted top-level fields; a supplied list or nested object replaces the whole field. `--dry-run` validates without saving, needs no token and reserves nothing. Use it when validation alone is the goal, not before every normal save.
 
-The result states whether it saved, item IDs and warnings; a save also returns its `version`. Card writes include `changed_fields` and `unfilled_fields`. Fill all unfilled fields before declaring a card current. Unknown fields are dropped with warnings. With a merge, an untouched field over its word limit is retained with a warning; shorten it when updating that field. Without a previous card or brief, send a complete document without `--merge`.
+The result states whether it saved, item IDs and warnings; a save also returns its `version`. Readable saves return a receipt without repeating the submitted document; `show` and explicit JSON still return the full document. Card writes include `changed_fields` and `unfilled_fields`. Fill all unfilled fields before declaring a card current. Unknown fields are dropped with warnings. With a merge, an untouched field over its word limit is retained with a warning; shorten it when updating that field. Without a previous card or brief, send a complete document without `--merge`.
 
 Retain an item's ID only for the same item in its original document and kind. IDs from another project, another kind or removed items' feedback cannot be reused. Omit the ID for a new item.
 
@@ -142,7 +142,9 @@ Portfolio due reasons are `missing`, `new_day`, `owner_idea`, `cards_changed` an
 
 `context <project-id>` includes `project`, `facts`, `previous_card`, `since_previous_card`, `new_fields`, `tasks`, `warning_acknowledgements`, `feedback`, `feedback_summary` and `context_token`. The project contains its ID, name, path, status, note, goal and goal date. Previous card and changes are null when absent.
 
-`portfolio context` includes all project summaries, `previous_portfolio`, `owner_ideas`, `owner_last_opened`, `review_week`, tasks, reactions and its own token. `review_week` specifies the previous calendar week's ID, start/end dates and whether its review is due. Each compact card has `outdated` and `changed_since_brief`; current facts override stale card claims.
+`portfolio context` includes all project summaries, `previous_portfolio`, `owner_ideas`, `owner_last_opened`, `review_week`, tasks, reactions and its own token. Each card includes its `version`, `outdated`, `changed_since_brief`, finding details/sources, question options and suggestion evidence/completion criteria. Facts include `ok`, `error` and `collected_at`; unknown counts are null, not zero. Current valid facts override stale card claims.
+
+`review_week` specifies the previous calendar week's ID, inclusive start/end dates and whether its review is due. Each project's `review_week_evidence` contains only changes and milestones in that period, or null without a card. The card's ordinary change summaries also include newer work. `commits_review_week` is taken from stored weekly buckets relative to their collection date; it is null if the measurement cannot establish that completed week's count.
 
 ## Facts
 
@@ -150,7 +152,7 @@ Portfolio due reasons are `missing`, `new_day`, `owner_idea`, `cards_changed` an
 
 The measurements cover:
 
-- `head`, `branch`, `commits` (total, first/last, 7/30/90-day counts and 26 weekly counts oldest first), remotes and upstream. `ahead`, `behind` and `unpushed_since` are null without an upstream.
+- `head`, `branch`, `commits` (total, first/last, 7/30/90-day counts and 26 weekly counts oldest first), remotes and upstream. `ahead`, `behind` and `unpushed_since` are null without an upstream and otherwise compare locally known refs; Watchtower never fetches. A configured remote neither verifies a remote backup nor describes other backup methods.
 - `dirty`: file/line counts, change signature and oldest/newest uncommitted edit times. These times use edits after the last commit; if all files predate it, that commit's time is used.
 - `worktrees`: additional checkouts, branch/head, prune eligibility and dirty counts/signatures. Null dirty counts mean unreadable; the main checkout is excluded. `branches` includes merged count and unmerged names, heads and last dates.
 - `release`: newest tag reachable from HEAD, its date and commits since; null without tags. `night`: work since 18:00 local time yesterday, including all local branches, reverts and touched uncommitted files.

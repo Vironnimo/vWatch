@@ -232,7 +232,16 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     0,
                     &format!("{subject} is valid. Dry run: nothing was saved."),
                 );
-            } else if data["already_saved"] == true || data["saved"] == false {
+            } else if data["already_saved"] == true {
+                line(
+                    &mut out,
+                    0,
+                    &format!(
+                        "{subject} already saved as version {}; no version was added.",
+                        text(&data["version"])
+                    ),
+                );
+            } else if data["saved"] == false {
                 line(
                     &mut out,
                     0,
@@ -248,12 +257,56 @@ pub(super) fn human(command: &str, data: &Value) -> String {
             if let Some(token) = data.get("context_token") {
                 field(&mut out, "Context token", token, 0);
             }
-            tree_except(
-                &mut out,
-                data,
-                &["saved", "dry_run", "already_saved", "context_token"],
-                0,
-            );
+            if matches!(command, "card.put" | "portfolio.put") {
+                fields(&mut out, data, &["project"], 0);
+                for key in ["changed_fields", "unfilled_fields"] {
+                    if let Some(value) = data.get(key) {
+                        line(
+                            &mut out,
+                            0,
+                            &format!(
+                                "{}: {}",
+                                label(key),
+                                if list(value).is_empty() {
+                                    "none".to_owned()
+                                } else {
+                                    text(value)
+                                }
+                            ),
+                        );
+                    }
+                }
+                fields(&mut out, data, &["warnings"], 0);
+                let items = list(&data["items"]);
+                line(
+                    &mut out,
+                    0,
+                    &format!("Items: {} (ID | kind | title)", items.len()),
+                );
+                for item in items {
+                    line(
+                        &mut out,
+                        1,
+                        &format!(
+                            "- {} | {} | {}",
+                            if item["id"].is_null() && data["dry_run"] == true {
+                                "assigned on save".to_owned()
+                            } else {
+                                text(&item["id"])
+                            },
+                            text(&item["kind"]),
+                            text(&item["title"])
+                        ),
+                    );
+                }
+            } else {
+                tree_except(
+                    &mut out,
+                    data,
+                    &["saved", "dry_run", "already_saved", "context_token"],
+                    0,
+                );
+            }
         }
         "card.history" | "portfolio.history" => {
             line(&mut out, 0, "Saved document versions, oldest first.");

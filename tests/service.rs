@@ -498,10 +498,20 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     let (svc, clock) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
-    let changes = json!([{"date": "2026-09-20", "title": "Davor"}, {"date": "2026-09-22", "title": "In der Woche"}]);
+    let changes = json!([
+        {"date": "2026-09-20", "title": "Davor"},
+        {"date": "2026-09-21", "title": "Wochenanfang", "detail": "Erste Funktion fertig."},
+        {"date": "2026-09-27", "title": "Wochenende", "detail": "Release veröffentlicht."},
+        {"date": "2026-09-28", "title": "Diese Woche"}
+    ]);
+    let milestones = json!([
+        {"date": "2026-09-20", "title": "Davor"},
+        {"date": "2026-09-27", "title": "Release"},
+        {"date": "2026-09-28", "title": "Neuer Anfang"}
+    ]);
     svc.put_card(
         "demo",
-        card_with(json!({"recent_changes": changes})),
+        card_with(json!({"recent_changes": changes, "milestones": milestones})),
         false,
         false,
     )
@@ -531,11 +541,26 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
         ctx["review_week"],
         json!({"week": "2026-W39", "from": "2026-09-21", "to": "2026-09-27", "due": true})
     );
-    // the review gets the card changes from the review week's start on
+    // Current context retains this week's changes; historical evidence is bounded on both sides.
     assert_eq!(
         ctx["projects"][0]["card"]["recent_changes"],
-        json!([{"date": "2026-09-22", "title": "In der Woche"}])
+        json!([
+            {"date": "2026-09-21", "title": "Wochenanfang"},
+            {"date": "2026-09-27", "title": "Wochenende"},
+            {"date": "2026-09-28", "title": "Diese Woche"}
+        ])
     );
+    assert_eq!(
+        ctx["projects"][0]["review_week_evidence"],
+        json!({
+            "recent_changes": [
+                {"date": "2026-09-21", "title": "Wochenanfang", "detail": "Erste Funktion fertig."},
+                {"date": "2026-09-27", "title": "Wochenende", "detail": "Release veröffentlicht."}
+            ],
+            "milestones": [{"date": "2026-09-27", "title": "Release"}]
+        })
+    );
+    assert_eq!(ctx["projects"][0]["facts"]["commits_review_week"], 0);
 
     let check = json!({"idea": id, "verdict": "fold_in", "fits": ["demo"], "why": "Passt in demo.", "effort": "S"});
     let with = |c: &Value| json!({"greeting": "Moin", "idea_checks": [c]});
@@ -582,8 +607,66 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     );
     assert_eq!(svc.portfolio_context().unwrap()["review_week"]["due"], true);
 
+    // A cached measurement from inside the review week cannot supply its final count.
+    let ctx = svc.portfolio_context().unwrap();
+    assert!(ctx["projects"][0]["facts"]["commits_review_week"].is_null());
+    assert_eq!(
+        ctx["projects"][0]["facts"]["collected_at"],
+        "2026-09-30T08:00:00Z"
+    );
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(
+        svc.portfolio_context().unwrap()["projects"][0]["facts"]["commits_review_week"],
+        1
+    );
+
     assert_eq!(svc.remove_idea(id).unwrap()["removed"], id);
     assert_eq!(svc.remove_idea(id).unwrap()["already_removed"], true);
+}
+
+#[test]
+fn portfolio_context_exposes_action_evidence_and_measurement_limits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card(
+        "demo",
+        card_with(json!({
+            "open_ends": [{"kind": "todo", "title": "Export fehlt", "detail": "Das Format ist noch offen.", "source": "TODO.md", "age_days": 2}],
+            "waiting_on_you": [{"title": "Welches Format?", "source": "README.md", "options": [{"answer": "CSV", "effect": "Tabellen können die Daten lesen."}]}],
+            "suggestions": [{"type": "next", "title": "Export umsetzen", "why": "Daten weiterverwenden.", "evidence": "src/export.rs", "effort": "S", "done_when": "Die Beispieldatei lässt sich öffnen."}]
+        })),
+        false,
+        false,
+    )
+    .unwrap();
+    let stored_card = svc.card("demo").unwrap();
+    let context = svc.portfolio_context().unwrap();
+    let project = &context["projects"][0];
+    assert_eq!(project["card"]["version"], stored_card["version"]);
+    for field in ["open_ends", "waiting_on_you", "suggestions"] {
+        assert_eq!(project["card"][field], stored_card["card"][field]);
+    }
+    assert_eq!(project["facts"]["ok"], true);
+    assert!(project["facts"]["error"].is_null());
+    assert_eq!(project["facts"]["collected_at"], svc.now());
+    assert_eq!(project["facts"]["unmerged_branches"], 0);
+    assert_eq!(project["facts"]["extra_worktrees"], 0);
+
+    // A failed read must not masquerade as zero unfinished branches or worktrees.
+    let plain = tmp.path().join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    svc.update_project("demo", None, Some(plain.to_str().unwrap()))
+        .unwrap();
+    let context = svc.portfolio_context().unwrap();
+    let measured = &context["projects"][0]["facts"];
+    assert_eq!(measured["ok"], false);
+    assert_eq!(measured["error"], "not_a_git_repository");
+    assert_eq!(measured["collected_at"], svc.now());
+    assert!(measured["unmerged_branches"].is_null());
+    assert!(measured["extra_worktrees"].is_null());
+    assert!(measured["commits_review_week"].is_null());
 }
 
 #[test]

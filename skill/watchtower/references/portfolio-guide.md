@@ -8,7 +8,7 @@ Run `watchtower portfolio context` and follow every output page before writing. 
 
 - If `owner_last_opened` predates the previous brief, the user has not seen that brief. Carry forward still-important focus items. Otherwise retain them only while they remain true and among the highest priorities.
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
-- Check every number, date and state against today's facts. An `outdated` card predates changed facts, settled CI or user instructions; trust the current evidence where it disagrees. Attribute unchecked card statements as statements from that card. Inspect the repository only when the brief depends on a claim its current card cannot establish.
+- Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
 - Respect task assignments, reported results awaiting review, project status and acknowledged warnings. Do not suggest assigning the same work twice or reversing a deliberate choice.
 
 ## Field meanings
@@ -33,7 +33,7 @@ Every text has at most 600 characters. Limits below are words; a word is a space
 
 For `idea_checks`, `build` means worth a standalone app, `fold_in` means existing projects fit better, `later` means sound but not timely, and `drop` means not worth pursuing. Cite a concrete need, overlap or goal conflict in `why`. The user parked ideas to receive an honest assessment, not automatic approval.
 
-For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). `done` holds up to 6 strings of 10 words drawn from changes and milestones dated in that calendar week. `stalled` holds up to 6 strings of 10 words about expected progress that did not happen, open focus items or work left uncommitted. `time_note` has at most 30 words comparing `commits_review_week` with the priorities; that count covers the review week, not the last seven days. Keep lists empty when no dated evidence supports an entry.
+For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). Use each project's `review_week_evidence`: its changes and milestones fall within that week's inclusive dates. `done` holds up to 6 strings of 10 words drawn from those entries. `stalled` holds up to 6 strings of 10 words about work demonstrably unfinished during that week; today's open ends do not prove past state. `time_note` has at most 30 words comparing `commits_review_week` with the priorities; null means the stored measurement cannot establish that week's final count. Keep lists empty when no dated evidence supports an entry. A retained review describes its historical week, not today's remaining work.
 
 ## Retain intent, not stale wording
 

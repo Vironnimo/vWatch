@@ -110,6 +110,10 @@ Common noun/verb aliases and case-insensitive enumerated values tolerate clear s
 
 Plain output is the default regardless of redirection. Its first line states the outcome; lists state their scope, order and total. `Note:` explains limitations or partial effects, `Next:` is an executable continuation, `Error:` identifies failure, and `Undo:` names a supported reversal. Stored content is escaped and indented so text inside an item cannot forge a top-level marker.
 
+Card and brief writes return concise readable receipts: saved version or replay/preview state, context token, warnings, card field changes/omissions, item IDs and guarded Undo. They do not echo the submitted document. Explicit JSON and document `show` retain the full content; large sets of item receipts still use normal paging.
+
+Portfolio context carries each card's version and actionable finding evidence (details, sources, question options, suggestion effort and completion criteria). Measurement validity, errors and collection time remain visible; missing branch counts remain null. Per-project `review_week_evidence` separates strictly week-bounded changes/milestones from current card summaries. The review's commit count is selected relative to the stored measurement's calendar week and remains null when that sample cannot establish the completed week's count. These are additive JSON fields except for correcting previously fabricated zero or misdated counts.
+
 Ordinary responses, including oversized errors, fit within 10,000 Unicode characters including instance framing. The pager limits each saved page to 8,500 characters, reserves room for the instance note and bounds the page body at 7,500 characters. A complete immutable snapshot is stored locally; `output <token> --start <offset>` reads it by zero-based Unicode character offset. Snapshots never rerun writes or remeasure facts. Failure to persist output reports that the original operation has already run and directs the caller to current-state inspection.
 
 Potentially slow operations use a 45-second inline wait budget, then return an explicit unfinished job and exact continuation. Each `jobs wait` uses the same bounded wait and returns the original result when complete. Workers use the captured instance and working directory; they do not retain the shell's output pipe. A completed job can be reread without rerunning a mutation. Lost-worker outcomes are reported as unknown, not rolled back or successful.
@@ -237,3 +241,25 @@ Release verification completed on 2026-10-07:
 - After the final UI restoration adapters and readable undo-conflict text, desktop compilation, 11 focused recovery/undo tests, all 25 UI tests and both strict Clippy configurations passed again.
 
 No `agent-eval` Skill was read or run, as requested. Deterministic tests establish command behavior and text contracts; they do not establish that every model follows the Skill or reaches the ideal call count. No fresh-model usability result is claimed.
+
+## Daily-run follow-up, 2026-10-08
+
+The production run exposed three concrete gaps: successful writes repeated entire submitted documents; the portfolio lost finding sources and action criteria during projection; and weekly material mixed the reviewed week with newer changes. Inspection also found that failed measurements could appear as zero branches and cached weekly counts were indexed against the current week instead of the collection week.
+
+The fixes preserve evidence through the portfolio projection, distinguish unknown measurements, provide bounded historical evidence, and replace repeated document bodies with save receipts. The Skill now distinguishes Git remotes from backup evidence and recorded checks from newly executed tests. No broad context compression was added: the larger context supplies information needed to substantiate priorities.
+
+Local token measurements compare baseline `0fb9a8a` with this change using the same SQLite backup in separate scratch instances, the real console executables and `o200k_base` (tiktoken 0.14.0). Text totals include instance framing and every output-page continuation; each returned page is counted once. Payload input, repeated conversation history and Provider wrappers are excluded. These are local estimates, not Provider billing or a model evaluation.
+
+| Surface | Before tokens | After tokens | Change | Calls before → after |
+|---|---:|---:|---:|---:|
+| Complete operating Skill, four Markdown files | 11,033 | 11,314 | +281 | — |
+| Top-level CLI help | 1,552 | 1,552 | 0 | 1 → 1 |
+| Portfolio context, eight projects | 13,333 | 19,558 | +6,225 | 7 → 10 |
+| Portfolio save receipt | 1,965 | 404 | −1,561 | 1 → 1 |
+| Card merge receipt | 4,767 | 257 | −4,510 | 3 → 1 |
+
+The sampled context and two saves total 20,065 → 20,219 tokens (+154) and 11 → 12 calls: substantially more evidence at nearly the same one-time output cost, not an overall speedup. Save receipts alone fall from 6,732 to 661 tokens. Command definitions are unchanged; only top-level help was separately measured. Skill text recurs when loaded into model context, with later exposure depending on host caching and framing. Private sample captures remain in the local temporary directory and are not committed.
+
+Validation for this follow-up: 133 Rust tests pass with desktop features and 133 without; both strict Clippy configurations, formatting and all 25 Node UI checks pass. Added contracts cover receipt save/merge/preview/replay and full JSON/show preservation, failed measurement limits, preserved action evidence, inclusive review dates and cached counts across a week boundary. Real-process measurements use isolated database copies; no owner decisions or production documents were changed by these checks. This is deterministic and process evidence, not a new model usability trial.
+
+Installed both release executables and reopened the previously running window. Binary hashes match the release build; an installed-CLI check against isolated data confirms the richer context. The four Skill files match the repository, installed export and Nabu's existing private package byte for byte. Its scope remains `agent:nabu`, without sharing grants or a new global package.

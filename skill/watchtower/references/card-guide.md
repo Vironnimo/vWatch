@@ -11,7 +11,7 @@ This guide covers studying a due project and writing every field of its card. Th
 5. For a changed or missing handbook, read the project's documented start/test/release commands, data locations, installation and shortcuts. Inspect the installed version without starting the app or changing its files. Never execute the handbook's commands during this observation run.
 6. Check task results against evidence before describing progress. Assigned work is unfinished; `review` means reported but unconfirmed; `done` is confirmed. Respect deliberate warning acknowledgements and recorded decisions. Report material worsening instead of repeating an unwanted proposal.
 
-Measured facts already appear in the window. Use them to interpret a finding; do not fill card text with numbers already visible there. Useful signals include `collisions` (overlapping changes), `release.commits_since` (work after the reachable release tag) and `night.reverts` (reverted commits since yesterday evening). Facts cover git-visible work, not ignored data. A failed facts measurement does not mean a clean repository. Timestamps containing a time are UTC; dates such as `last_work` are local.
+Measured facts already appear in the window. Use them to interpret a finding; do not fill card text with numbers already visible there. Useful signals include `collisions` (overlapping changes), `release.commits_since` (work after the reachable release tag) and `night.reverts` (reverted commits since yesterday evening). Facts cover git-visible work, not ignored data. A failed facts measurement does not mean a clean repository. A configured remote does not prove a backup exists; no remote does not rule out other backups. Distinguish committed, tested, installed and actually used: each needs its own evidence. Attribute recorded test results to their date rather than implying you ran them. Timestamps containing a time are UTC; dates such as `last_work` are local.
 
 ## Place each finding once
 
@@ -20,7 +20,7 @@ Measured facts already appear in the window. Use them to interpret a finding; do
 - `waiting_on_you`: a decision only the user can settle.
 - `suggestions`: a distinct proposal grounded in a finding and the project's goals.
 
-The obvious repair of an open end is not an additional suggestion. The `reentry` step does not reappear as a suggestion. `headline` and `reentry` can refer to the leading finding without duplicating it in other sections. Remove finished, disproved or rejected items. Keep IDs for retained questions and suggestions; omit IDs for new ones.
+The obvious repair of an open end is not an additional suggestion. The `reentry` step does not reappear as a suggestion. `headline` and `reentry` can refer to the leading finding without duplicating it in other sections. Remove finished, disproved or rejected items; do not replace completed work with an unsupported generic testing task. Keep IDs for retained questions and suggestions; omit IDs for new ones.
 
 ## Fields and limits
 
