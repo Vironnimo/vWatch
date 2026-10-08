@@ -1151,8 +1151,8 @@ pub(crate) struct ChangesSnapshot {
 
 fn changes_source(db: &Connection) -> Result<Value> {
     let mut statement = db.prepare(
-        "SELECT p.id, p.name, p.status, f.data, c.id, c.data, c.owner_basis
-         FROM projects p LEFT JOIN facts f ON f.project_id = p.id
+        "SELECT p.id, p.name, p.status, c.id, c.data, c.owner_basis
+         FROM projects p
          LEFT JOIN cards c ON c.id = (SELECT MAX(id) FROM cards WHERE project_id = p.id)
          WHERE p.removed_at IS NULL ORDER BY p.id",
     )?;
@@ -1161,10 +1161,9 @@ fn changes_source(db: &Connection) -> Result<Value> {
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)?,
                 "status": row.get::<_, String>(2)?,
-                "facts": row.get::<_, Option<String>>(3)?.map(json),
-                "card_version": row.get::<_, Option<i64>>(4)?,
-                "card": row.get::<_, Option<String>>(5)?.map(json),
-                "owner_basis": row.get::<_, Option<String>>(6)?.map(json),
+                "card_version": row.get::<_, Option<i64>>(3)?,
+                "card": row.get::<_, Option<String>>(4)?.map(json),
+                "owner_basis": row.get::<_, Option<String>>(5)?.map(json),
             }))
         })?
         .collect::<Result<_>>()?;

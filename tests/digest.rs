@@ -163,79 +163,138 @@ fn an_owner_reply_is_only_incorporated_after_a_subsequent_card_consumes_it() {
 }
 
 #[test]
-fn risk_changes_require_measurements_and_do_not_follow_warning_acknowledgements() {
+fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
-    let base = json!({"ok": true, "is_git": true, "has_remote": true, "dirty": {"files": 0}, "ahead": 0, "ci": {"state": "green"}});
+    let base = json!({
+        "ok": true, "is_git": true, "has_remote": true, "head": "first",
+        "dirty": {"files": 0}, "ahead": 0, "ci": {"state": "green"},
+        "branches": {"unmerged": []}, "worktrees": {"items": []},
+    });
     svc.store()
         .save_facts("demo", "2026-09-30T08:00:00Z", "base", &base)
         .unwrap();
     svc.state(true).unwrap();
-    let mut risky = base.clone();
-    risky["dirty"]["files"] = json!(2);
-    risky["ci"]["state"] = json!("red");
-    svc.store()
-        .save_facts("demo", "2026-09-30T09:00:00Z", "risky", &risky)
-        .unwrap();
-    let digest = changes(&svc);
-    assert_eq!(titles(&digest, "new").len(), 2);
-    svc.mark_changes_read(digest["token"].as_str().unwrap())
-        .unwrap();
-    let mut unknown = risky.clone();
-    unknown["ci"]["state"] = json!("unknown");
-    svc.store()
-        .save_facts("demo", "2026-09-30T09:01:00Z", "unknown", &unknown)
-        .unwrap();
-    assert!(
-        titles(&changes(&svc), "resolved").is_empty(),
-        "Unknown CI never means fixed CI"
-    );
-    let while_unknown = changes(&svc);
-    svc.mark_changes_read(while_unknown["token"].as_str().unwrap())
-        .unwrap();
-    svc.store()
-        .save_facts(
-            "demo",
-            "2026-09-30T09:02:00Z",
-            "failed",
-            &json!({"ok": false, "error": "path_missing"}),
-        )
-        .unwrap();
-    assert!(
-        titles(&changes(&svc), "resolved").is_empty(),
-        "An unreadable repo never means its warnings are fixed"
-    );
-    let while_unreadable = changes(&svc);
-    svc.mark_changes_read(while_unreadable["token"].as_str().unwrap())
-        .unwrap();
-    svc.store()
-        .save_facts("demo", "2026-09-30T09:03:00Z", "base", &base)
-        .unwrap();
-    assert_eq!(titles(&changes(&svc), "resolved").len(), 2);
-    let resolved = changes(&svc);
-    svc.mark_changes_read(resolved["token"].as_str().unwrap())
-        .unwrap();
-    let mut local = base;
-    local["has_remote"] = json!(false);
-    svc.store()
-        .save_facts("demo", "2026-09-30T09:04:00Z", "local", &local)
-        .unwrap();
-    let before_ack = changes(&svc);
-    assert_eq!(titles(&before_ack, "new").len(), 1);
+    svc.put_card(
+        "demo",
+        card_with(json!({"open_ends": [{"title": "Export verschluckt Zeilen"}]})),
+        false,
+        false,
+    )
+    .unwrap();
+    let viewed = changes(&svc);
+    assert_eq!(viewed["total"], 1);
+    let busy = json!({
+        "ok": true, "is_git": true, "has_remote": false, "head": "second",
+        "dirty": {"files": 3}, "ahead": 6, "ci": {"state": "red"},
+        "branches": {"unmerged": [{"name": "feature"}]},
+        "worktrees": {"items": [{"path": "C:/work/feature", "head": "topic", "dirty_files": 2, "prunable": true}]},
+    });
+    for (label, facts) in [
+        ("busy", busy.clone()),
+        ("no_ci", {
+            let mut f = busy.clone();
+            f["ci"]["state"] = json!("none");
+            f
+        }),
+        ("unknown", {
+            let mut f = busy.clone();
+            f["ci"]["state"] = json!("unknown");
+            f
+        }),
+        ("failed", json!({"ok": false, "error": "path_missing"})),
+        ("clean", base),
+        ("busy_again", busy),
+    ] {
+        svc.store()
+            .save_facts("demo", "2026-09-30T09:00:00Z", label, &facts)
+            .unwrap();
+        let state = svc.state(false).unwrap();
+        assert_eq!(
+            state["projects"][0]["facts"], facts,
+            "{label}: measured facts stay visible"
+        );
+        assert_eq!(
+            state["changes"], viewed,
+            "{label}: only meaningful card changes belong in the digest"
+        );
+    }
     svc.set_warning_ack("demo", "no_remote", Some("Bleibt absichtlich lokal."))
         .unwrap();
     assert_eq!(
-        changes(&svc)["entries"],
-        before_ack["entries"],
-        "Acknowledging a warning does not change measured facts"
+        changes(&svc),
+        viewed,
+        "Acknowledging a warning does not affect the digest"
     );
+    assert_eq!(
+        svc.mark_changes_read(viewed["token"].as_str().unwrap())
+            .unwrap()["changes"]["total"],
+        0,
+        "Facts refreshed after reading must not prevent acknowledging the viewed changes"
+    );
+
+    svc.put_card(
+        "demo",
+        json!({"open_ends": [{"title": "Weiterer Befund"}]}),
+        true,
+        false,
+    )
+    .unwrap();
     svc.set_status("demo", "archived", None).unwrap();
     assert_eq!(
         changes(&svc)["total"],
         0,
         "Archiving hides a project without declaring its work completed"
+    );
+}
+
+#[test]
+fn legacy_fact_snapshots_keep_the_read_baseline_and_only_compare_card_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card(
+        "demo",
+        card_with(json!({"open_ends": [{"title": "Alten Export prüfen"}]})),
+        false,
+        false,
+    )
+    .unwrap();
+    svc.state(true).unwrap();
+    let mut legacy = svc.store().pref("changes_read").unwrap().unwrap();
+    legacy["at"] = json!("2026-09-29T08:00:00Z");
+    legacy["snapshot"]["projects"][0]["facts"] = json!({
+        "ok": true, "has_remote": false, "dirty": {"files": 3}, "ahead": 6,
+        "ci": {"state": "red"}, "branches": {"unmerged": [{"name": "feature"}]},
+        "worktrees": {"items": [{"path": "C:/work/feature"}]},
+    });
+    svc.store().set_pref("changes_read", &legacy).unwrap();
+    svc.put_card(
+        "demo",
+        json!({"recent_changes": [{
+            "date": "2026-09-30", "title": "Suche ergänzt", "detail": "Ergebnisse jetzt im Fenster."
+        }]}),
+        true,
+        false,
+    )
+    .unwrap();
+
+    let digest = svc.state(true).unwrap()["changes"].clone();
+    assert_eq!(digest["since"], legacy["at"]);
+    assert_eq!(digest["total"], 1);
+    assert_eq!(titles(&digest, "new"), vec!["Neu: Suche ergänzt"]);
+    assert!(titles(&digest, "resolved").is_empty());
+    assert_eq!(svc.store().pref("changes_read").unwrap().unwrap(), legacy);
+    svc.mark_changes_read(digest["token"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(changes(&svc)["total"], 0);
+    assert!(
+        svc.store().pref("changes_read").unwrap().unwrap()["snapshot"]["projects"][0]
+            .get("facts")
+            .is_none()
     );
 }
 

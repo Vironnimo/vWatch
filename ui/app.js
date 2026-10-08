@@ -245,11 +245,11 @@
     const c = S.changes;
     if (!c) return '';
     const entries = c.entries || [];
-    if (c.has_baseline && !entries.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">Keine neuen Befunde seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
+    if (c.has_baseline && !entries.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">Keine neuen Projektmeldungen seit deinem Lesestand${c.since ? ` vom ${fmtDate(c.since)}` : ''}.</p>`;
     const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: 'Neu', resolved: 'Nicht mehr offen', decision_applied: 'Antwort übernommen' })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${esc(e.title)}</div>${e.detail ? `<div class="why">${esc(e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>Nächster Schritt:</b> ${esc(e.next_step)}</div>` : ''}</div>`;
-    const body = entries.length ? `<div class="digest-items">${entries.slice(0, 3).map(row).join('')}</div>${entries.length > 3 ? `<details><summary class="more">${entries.length - 3} weitere Änderungen</summary><div class="digest-items">${entries.slice(3).map(row).join('')}</div></details>` : ''}` : `<p class="faint">${c.has_baseline ? 'Keine neuen Befunde seit deinem letzten Lesestand.' : 'Markiere den aktuellen Stand als gelesen. Danach siehst du hier nur neue Befunde, erledigte Punkte und übernommene Antworten.'}</p>`;
+    const body = entries.length ? `<div class="digest-items">${entries.slice(0, 3).map(row).join('')}</div>${entries.length > 3 ? `<details><summary class="more">${entries.length - 3} weitere Änderungen</summary><div class="digest-items">${entries.slice(3).map(row).join('')}</div></details>` : ''}` : `<p class="faint">${c.has_baseline ? 'Keine neuen Projektmeldungen seit deinem letzten Lesestand.' : 'Markiere den aktuellen Stand als gelesen. Danach siehst du hier neue Fortschritte, offene Punkte, Fragen und Entscheidungen aus den Projektberichten.'}</p>`;
     const action = c.token && (entries.length || !c.has_baseline) ? `<div class="actions"><button class="btn" type="button" data-changes-read="${esc(c.token)}">${c.has_baseline ? 'Diese Änderungen als gelesen markieren' : 'Aktuellen Stand als gelesen markieren'}</button></div>` : '';
-    return mod('changes', 'Seit deinem letzten Lesen', c.since ? `Lesestand vom ${fmtDate(c.since)}` : 'Du bestimmst, wann der Stand gelesen ist', `<div class="digest-summary">${body}${action}</div>`);
+    return mod('changes', 'Seit deinem letzten Lesen', `Fortschritte, offene Punkte und Entscheidungen${c.since ? ` · Lesestand vom ${fmtDate(c.since)}` : ''}`, `<div class="digest-summary">${body}${action}</div>`);
   }
 
   function spark(weekly, col, h = 38) {

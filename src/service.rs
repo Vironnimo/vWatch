@@ -148,29 +148,6 @@ fn digest_identity(category: &str, item: &Value) -> String {
     )
 }
 
-/// An unavailable observation cannot erase the last known risk when the owner
-/// acknowledges other changes. The window still renders the actual facts.
-fn digest_measurements(current: &Value, baseline: Option<&Value>) -> Value {
-    let mut current = current.clone();
-    let Some(previous) = baseline.and_then(|b| b["snapshot"]["projects"].as_array()) else {
-        return current;
-    };
-    for project in current["projects"].as_array_mut().into_iter().flatten() {
-        let Some(old) = previous.iter().find(|p| p["id"] == project["id"]) else {
-            continue;
-        };
-        if project["facts"]["ok"] != true {
-            project["facts"] = old["facts"].clone();
-        } else if !matches!(
-            project["facts"]["ci"]["state"].as_str(),
-            Some("green" | "red" | "none")
-        ) {
-            project["facts"]["ci"] = old["facts"]["ci"].clone();
-        }
-    }
-    current
-}
-
 struct DigestItem {
     category: &'static str,
     title: String,
@@ -184,63 +161,8 @@ fn digest_items(
     feedback: &[Value],
 ) -> std::collections::BTreeMap<String, DigestItem> {
     let mut items = std::collections::BTreeMap::new();
-    let facts = &project["facts"];
-    for warning in fact_warnings(facts) {
-        let key = warning["key"].as_str().unwrap_or("");
-        let title = warning["title"].as_str().unwrap_or("").to_owned();
-        // A new HEAD is not a new warning. Worktree identities and dirtiness are
-        // meaningful; elapsed age and collection times never are.
-        let comparison = if key == "worktrees" {
-            warning["basis"].clone()
-        } else {
-            json!(title)
-        };
-        items.insert(
-            format!("risk:{key}"),
-            DigestItem {
-                category: "risk",
-                title,
-                detail: String::new(),
-                next_step: "Projekt prüfen und nächsten Schritt festlegen.".into(),
-                comparison,
-            },
-        );
-    }
-    for (key, count, title, step) in [
-        (
-            "dirty",
-            facts["dirty"]["files"].as_u64().unwrap_or(0),
-            "Dateien nicht committet",
-            "Offene Arbeit prüfen und einen Auftrag daraus machen.",
-        ),
-        (
-            "ahead",
-            facts["ahead"].as_u64().unwrap_or(0),
-            "Commits nicht gepusht",
-            "Lokale Commits prüfen und bei Bedarf sichern lassen.",
-        ),
-        (
-            "branches",
-            facts["branches"]["unmerged"]
-                .as_array()
-                .map_or(0, |v| v.len() as u64),
-            "Branches nicht gemergt",
-            "Offene Branches prüfen und das weitere Vorgehen festlegen.",
-        ),
-    ] {
-        if count > 0 {
-            items.insert(
-                format!("risk:{key}"),
-                DigestItem {
-                    category: "risk",
-                    title: format!("{count} {title}"),
-                    detail: String::new(),
-                    next_step: step.into(),
-                    comparison: json!(count),
-                },
-            );
-        }
-    }
+    // Only authored developments belong in this reading list. Measured Git
+    // state has its own project view, including when old baselines contain it.
     let card = &project["card"];
     for item in card["open_ends"].as_array().into_iter().flatten() {
         let detail = item["detail"].as_str().unwrap_or("").to_owned();
@@ -3211,7 +3133,7 @@ impl Watchtower {
     /// snapshot they saw, including across window refreshes and restarts.
     fn changes_digest(&self, first_visit: bool) -> Result<Value> {
         let state = self.store.changes_snapshot(first_visit, &self.now())?;
-        let current_snapshot = digest_measurements(&state.current, state.baseline.as_ref());
+        let current_snapshot = &state.current;
         let mut entries = Vec::new();
         if let Some(baseline) = &state.baseline {
             let before = &baseline["snapshot"];
@@ -3242,8 +3164,6 @@ impl Watchtower {
                     }
                     let (kind, prefix) = match item.category {
                         "applied" => ("decision_applied", "Antwort in Karte berücksichtigt"),
-                        "risk" if prior.is_some() => ("new", "Risiko verändert"),
-                        "risk" => ("new", "Neues Risiko"),
                         "open" if prior.is_some() => ("new", "Offenes Ende aktualisiert"),
                         "open" => ("new", "Neu offen"),
                         "question" if prior.is_some() => ("new", "Frage aktualisiert"),
@@ -3262,25 +3182,10 @@ impl Watchtower {
                         continue;
                     }
                     let (prefix, detail) = match item.category {
-                        "risk" => ("Nicht mehr gemessen", "Die aktuellen Git-Fakten zeigen dieses Risiko nicht mehr."),
                         "open" => ("Nicht mehr offen in der Karte", "Die aktuelle Karte führt dieses offene Ende nicht mehr auf."),
                         "question" => ("Frage nicht mehr offen", "Die Frage ist beantwortet, abgehakt oder wird in der aktuellen Karte nicht mehr gestellt."),
                         _ => continue,
                     };
-                    // A failed measurement is not proof that measured risks
-                    // disappeared. Keep the last known warning unread instead.
-                    if item.category == "risk"
-                        && (project["facts"]["ok"] != true
-                            || (key == "risk:ci_red" && project["facts"]["ci"]["state"] != "green")
-                            || (key == "risk:ci_none"
-                                && !matches!(
-                                    project["facts"]["ci"]["state"].as_str(),
-                                    Some("green" | "red")
-                                ))
-                            || (key == "risk:no_remote" && project["facts"]["has_remote"] != true))
-                    {
-                        continue;
-                    }
                     entries.push(json!({
                         "project": project["id"], "kind": "resolved",
                         "title": format!("{prefix}: {}", item.title),
@@ -3298,11 +3203,10 @@ impl Watchtower {
 
     pub fn mark_changes_read(&self, token: &str) -> Result<Value> {
         let state = self.store.changes_snapshot(false, &self.now())?;
-        let snapshot = digest_measurements(&state.current, state.baseline.as_ref());
         if state.token != token
             || !self
                 .store
-                .acknowledge_changes(token, &snapshot, &self.now())?
+                .acknowledge_changes(token, &state.current, &self.now())?
         {
             return Err(WatchtowerError::new(
                 "stale_changes",

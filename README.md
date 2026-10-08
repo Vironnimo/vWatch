@@ -9,7 +9,7 @@ Watchtower holds two kinds of data:
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
-The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. A changes digest lists new and resolved open ends since you last marked it read.
+The morning view distinguishes fresh git measurements from a completed agent run. It shows unfinished projects, failed updates and replies still waiting to be incorporated. "Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes (including uncommitted files, unpushed commits, worktrees, branches, remotes and CI) stay in the project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Changes remain unread until you explicitly mark them read.
 
 Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
 
