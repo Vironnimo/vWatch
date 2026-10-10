@@ -44,6 +44,7 @@ Ideas sort newest first by the first saved appearance of their stable ID, includ
 - `watchtower <command>` shows readable text for people and agents. Add `--json` when a program needs structured output, for example `watchtower projects list --json`. Document input uses `--file <path>`, `--file -` for stdin, or `--input-json '<object>'`.
 - The CLI is a native console program independent of the window. A long operation returns within its 45-second wait budget with either its result or an exact `jobs wait` continuation. A command that is still running says so; follow its continuation instead of starting it again. Output is complete when the console process exits; there is no late GUI output to poll for.
 - Long text results have an exact `Next:` command for the remaining pages. Errors name what failed, any partial effect and the recovery. `Undo:` identifies a supported reversal. `watchtower activity` helps recover after a lost response.
+- Task reports also accept `watchtower tasks report <id> --file <path>` for multiline results and evidence. The file contains `status`, `result` and `evidence`; reporting `done` requests your review rather than confirming completion.
 - `WATCHTOWER_HOME` or `--data-dir <folder>` selects another data folder. Continuation commands retain the selected instance.
 
 Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin Watchtower`.

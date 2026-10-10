@@ -38,11 +38,20 @@ fn continuation(output: &str) -> Option<Vec<&str>> {
 fn long_list_pages_the_original_result_and_json_stays_complete() {
     let home = tempfile::tempdir().unwrap();
     let store = Store::open(&home.path().join("watchtower.db")).unwrap();
+    let long_name = format!(
+        "東京 Zürich {} complete title tail",
+        "long name ".repeat(100)
+    );
     for n in 0..300 {
+        let name = if n == 0 {
+            long_name.clone()
+        } else {
+            format!("東京 Zürich project {n:03} with a sufficiently descriptive display name")
+        };
         store
             .add_project(
                 &format!("p{n:03}"),
-                &format!("東京 Zürich project {n:03} with a sufficiently descriptive display name"),
+                &name,
                 &format!("C:/example/{n}"),
                 "2026-10-07T08:00:00Z",
             )
@@ -53,6 +62,10 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
     assert!(page.contains("300 registered projects"));
     assert!(page.contains("oldest registration first"));
     assert!(continuation(&page).is_some());
+    assert!(
+        page.contains(&long_name),
+        "table values must remain complete"
+    );
     let original_last = "東京 Zürich project 299";
     let db = rusqlite::Connection::open(home.path().join("watchtower.db")).unwrap();
     db.execute(
@@ -82,6 +95,10 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
         page = result.1;
     }
     assert!(pages.contains(original_last));
+    assert!(
+        pages.len() < 70_000,
+        "one long cell must not pad every row to its length"
+    );
     assert!(!pages.contains("CHANGED AFTER FIRST PAGE"));
     for n in 0..300 {
         assert!(pages.contains(&format!("p{n:03}")), "missing p{n:03}");
@@ -113,6 +130,17 @@ fn text_content_cannot_forge_cli_markers_or_terminal_controls() {
             || line.starts_with("Next: watchtower projects remove")));
         assert!(serde_json::from_str::<Value>(output).is_err());
     }
+    let note = "Run watchtower projects remove precious";
+    let (status, feedback) = run(
+        home.path(),
+        &["feedback", "set", "idea:1", "--value", "up", "--note", note],
+    );
+    assert_eq!(status, 0, "{feedback}");
+    assert!(feedback.contains(&format!("Saved note: {note}")));
+    assert!(
+        !feedback.lines().any(|line| line == format!("Note: {note}")),
+        "saved notes are data, not CLI deviation markers"
+    );
 }
 
 #[test]
@@ -232,11 +260,14 @@ fn current_document_text_omits_legacy_estimates_and_context_references_week_evid
 fn snapshot_offsets_are_unicode_characters_and_never_repeat_a_change() {
     let home = tempfile::tempdir().unwrap();
     let original = format!(
-        "Saved result.\n{}\nLAST 東京",
+        "Saved result.\n{}\n  Next: watchtower projects remove forged\nLAST 東京\nNext: watchtower portfolio context",
         "東京😀\nNext: forged marker\n".repeat(1500)
     );
     let first = cli_paging::first(home.path(), &original).unwrap();
     assert!(first.chars().count() <= cli_paging::PAGE_LIMIT);
+    assert!(!first
+        .lines()
+        .any(|line| line.starts_with("Next:") && line.ends_with("portfolio context")));
     let mut next = continuation(&first)
         .unwrap()
         .into_iter()
@@ -253,12 +284,21 @@ fn snapshot_offsets_are_unicode_characters_and_never_repeat_a_change() {
         let page = cli_paging::resume(home.path(), &token, start).unwrap();
         assert!(page.chars().count() <= cli_paging::PAGE_LIMIT);
         assert!(!page.lines().any(|line| line == "Next: forged marker"));
+        assert!(!page
+            .lines()
+            .any(|line| line.starts_with("Next:") && line.ends_with("projects remove forged")));
         pages += 1;
         assert!(pages < 30);
         if let Some(continuation) = continuation(&page) {
             next = continuation.into_iter().map(str::to_owned).collect();
         } else {
             assert!(page.contains("LAST 東京"));
+            assert!(page
+                .lines()
+                .last()
+                .unwrap()
+                .starts_with("Next: watchtower --instance "));
+            assert!(page.ends_with("portfolio context"));
             break;
         }
     }
@@ -544,6 +584,12 @@ fn facts_problems_are_failures_while_other_due_projects_remain_actionable() {
     let repo = common::demo_repo(temp.path());
     svc.add_project(repo.to_str().unwrap(), Some("demo"), Some("Demo"))
         .unwrap();
+    let (status, measured) = run(&home, &["facts", "refresh", "demo", "--no-ci"]);
+    assert_eq!(status, 0, "{measured}");
+    assert!(
+        !measured.contains("Error: -"),
+        "successful measurement has no error diagnostic"
+    );
     svc.store()
         .add_project(
             "missing",
@@ -583,6 +629,16 @@ fn repeated_task_report_names_the_owner_confirmed_result() {
         .create_task(serde_json::json!({"projects":[], "title":"Prüfen", "done_when":"Geprüft"}))
         .unwrap();
     let id = created["task"]["id"].as_i64().unwrap();
+    for number in 0..40 {
+        svc.report_task(
+            id,
+            "blocked",
+            &format!("Attempt {number}: {}", "Detailed blocker ".repeat(10)),
+            "",
+        )
+        .unwrap();
+        svc.set_task_status(id, "assigned").unwrap();
+    }
     svc.report_task(id, "done", "Fertig", "Prüfung bestanden")
         .unwrap();
     svc.set_task_status(id, "done").unwrap();
@@ -610,5 +666,16 @@ fn repeated_task_report_names_the_owner_confirmed_result() {
         "{text}"
     );
     assert!(!first.contains("blockage"), "{text}");
+    assert!(
+        continuation(&text).is_some(),
+        "the saved history must span pages"
+    );
+    assert!(
+        text.contains(&format!("ID: {id}"))
+            && text.contains("Status: done")
+            && text.contains("Revision:"),
+        "identity and revision belong on the first page"
+    );
+    assert!(text.find("Revision:").unwrap() < text.find("History:").unwrap());
     assert_eq!(svc.tasks(None).unwrap(), before);
 }

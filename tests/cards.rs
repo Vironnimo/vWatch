@@ -58,6 +58,23 @@ fn documents_need_no_effort_estimates_and_drop_legacy_estimates() {
                 "{kind:?}: {warnings:?}"
             );
         }
+        // A later list item can still lack a field even when the first is current.
+        let list = if kind == Kind::Card {
+            "suggestions"
+        } else {
+            "focus"
+        };
+        let mut partial = clean.clone();
+        let mut incomplete = partial[list][0].clone();
+        incomplete.as_object_mut().unwrap().remove("done_when");
+        partial[list]
+            .as_array_mut()
+            .unwrap()
+            .extend([incomplete.clone(), incomplete]);
+        assert_eq!(
+            kind.missing_fields(&partial),
+            vec![format!("{list}[].done_when")]
+        );
     }
 }
 

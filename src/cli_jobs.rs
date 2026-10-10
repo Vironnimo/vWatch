@@ -194,42 +194,60 @@ fn recovery(request: &Request) -> String {
 
 fn inspect(data_dir: &Path, token: &str) -> Result<Value> {
     let request = read_request(data_dir, token)?;
+    if let Some(result) = completed_result(data_dir, token, &request)? {
+        return Ok(result);
+    }
+    inspect_pending(data_dir, token, &request)
+}
+
+fn completed_result(data_dir: &Path, token: &str, request: &Request) -> Result<Option<Value>> {
     let path = job_path(data_dir, token)?;
     let wait = format!("{} jobs wait {token}", prefix(data_dir, request.json));
     match fs::read(path.join("result.json")) {
         Ok(bytes) => {
             let result: Completed = serde_json::from_slice(&bytes).map_err(|_| WatchtowerError::new("job_result_invalid", "The saved result is unreadable. The command may have changed data; its outcome is unknown.")
-                .hint(format!("Inspect the current state before retrying: {}", recovery(&request))))?;
-            Ok(
+                .hint(format!("Inspect the current state before retrying: {}", recovery(request))))?;
+            Ok(Some(
                 json!({"finished":true,"job":{"token":token,"state":"completed","command":request.command,"created_at":request.created_at,"next":wait},"result":result,"next":wait}),
-            )
+            ))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let active = running(&path)?;
-            // A newly spawned child takes the lock before writing started.json.
-            // Concurrent readers can briefly observe this immutable request first.
-            let starting = !path.join("started.json").exists()
-                && fs::metadata(path.join("request.json"))
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|age| age < Duration::from_secs(3));
-            let state = if active || starting {
-                "running"
-            } else {
-                "unknown"
-            };
-            let next = if state == "running" {
-                wait
-            } else {
-                recovery(&request)
-            };
-            Ok(
-                json!({"finished":false,"job":{"token":token,"state":state,"command":request.command,"created_at":request.created_at,"next":next},"next":next}),
-            )
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(io_error("read", error)),
     }
+}
+
+fn inspect_pending(data_dir: &Path, token: &str, request: &Request) -> Result<Value> {
+    let path = job_path(data_dir, token)?;
+    let active = running(&path)?;
+    // The worker can save its result and release the lock after the initial
+    // result read. Once the lock is free, recheck that durable result before
+    // describing the outcome as unknown.
+    if !active {
+        if let Some(result) = completed_result(data_dir, token, request)? {
+            return Ok(result);
+        }
+    }
+    // A newly spawned child takes the lock before writing started.json.
+    // Concurrent readers can briefly observe this immutable request first.
+    let starting = !path.join("started.json").exists()
+        && fs::metadata(path.join("request.json"))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age < Duration::from_secs(3));
+    let state = if active || starting {
+        "running"
+    } else {
+        "unknown"
+    };
+    let next = if state == "running" {
+        format!("{} jobs wait {token}", prefix(data_dir, request.json))
+    } else {
+        recovery(request)
+    };
+    Ok(
+        json!({"finished":false,"job":{"token":token,"state":state,"command":request.command,"created_at":request.created_at,"next":next},"next":next}),
+    )
 }
 
 fn deadline(data_dir: &Path) -> Duration {
@@ -615,4 +633,63 @@ pub fn main(args: Vec<OsString>) -> i32 {
     let _ = stdout.flush();
     let _ = err.flush();
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_between_result_and_liveness_reads_is_not_unknown() {
+        let home = tempfile::tempdir().unwrap();
+        let token = format!("job_{}", "a".repeat(40));
+        let request = Request {
+            token: token.clone(),
+            command: "runs.start".into(),
+            arguments: Vec::new(),
+            working_dir: home.path().into(),
+            data_dir: home.path().into(),
+            created_at: "2026-10-10T08:00:00Z".into(),
+            identity: "fixture".into(),
+            json: false,
+        };
+        let path = job_path(home.path(), &token).unwrap();
+        fs::create_dir_all(&path).unwrap();
+        atomic_json(&path.join("request.json"), &request).unwrap();
+        atomic_json(
+            &path.join("started.json"),
+            &json!({"started_at":request.created_at}),
+        )
+        .unwrap();
+        assert!(completed_result(home.path(), &token, &request)
+            .unwrap()
+            .is_none());
+
+        // The first probe saw no result. The worker now saves it and exits
+        // before the reader can inspect the liveness lock.
+        let result = Completed {
+            exit_code: 0,
+            stdout: json!({"ok":true,"run_id":7}).to_string(),
+            stderr: String::new(),
+        };
+        atomic_json(&path.join("result.json"), &result).unwrap();
+        let status = inspect_pending(home.path(), &token, &request).unwrap();
+        assert_eq!(status["job"]["state"], "completed");
+        assert_eq!(status["result"]["stdout"], result.stdout);
+        assert_eq!(status["result"]["exit_code"], 0);
+
+        // A file appearing in the same window is not automatically success.
+        fs::write(path.join("result.json"), "incomplete").unwrap();
+        assert_eq!(
+            inspect_pending(home.path(), &token, &request)
+                .unwrap_err()
+                .code,
+            "job_result_invalid"
+        );
+        fs::remove_file(path.join("result.json")).unwrap();
+        assert_eq!(
+            inspect_pending(home.path(), &token, &request).unwrap()["job"]["state"],
+            "unknown"
+        );
+    }
 }

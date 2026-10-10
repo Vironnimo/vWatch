@@ -143,7 +143,19 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
     let undo_size = undo
         .as_ref()
         .map_or(0, |command| command.chars().count().min(400) + 1);
-    let framing = 600 + continuation.chars().count() + undo_size;
+    let next = snapshot
+        .text
+        .lines()
+        .rev()
+        .find(|line| line.starts_with("Next: watchtower "))
+        .map(|line| {
+            format!(
+                "Next: {}",
+                crate::cli::scoped_command(data_dir, line.trim_start_matches("Next: "))
+            )
+        });
+    let next_size = next.as_ref().map_or(0, |command| command.chars().count());
+    let framing = 600 + continuation.chars().count().max(next_size) + undo_size;
     let body_limit = PAGE_LIMIT.saturating_sub(framing).min(BODY_LIMIT);
     if body_limit < 128 {
         return Err(WatchtowerError::new("output_scope_too_long", "The instance path is too long for a safe continuation within the output limit. The original command has already run.")
@@ -212,6 +224,12 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
         ));
     } else {
         out.push_str("End of saved output.");
+        // The final page resumes the original workflow. Earlier pages expose
+        // only the output continuation so context is read before the next step.
+        if let Some(next) = next {
+            out.push('\n');
+            out.push_str(&next);
+        }
     }
     debug_assert!(out.chars().count() <= PAGE_LIMIT);
     Ok(out)

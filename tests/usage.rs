@@ -80,6 +80,27 @@ fn an_unfinished_metadata_record_reports_unknown_not_unchanged() {
     assert_eq!(result["activity"][0]["outcome"], "unknown");
     assert!(result["note"].as_str().unwrap().contains("never proves"));
     assert_eq!(result["next"], "watchtower jobs list");
+
+    let (code, activity) = command(home.path(), &["activity"]);
+    assert_eq!(code, 0);
+    assert_eq!(activity["activity"].as_array().unwrap().len(), 1);
+    assert_eq!(activity["activity"][0]["command"], "projects.update");
+    assert_eq!(activity["activity"][0]["outcome"], "unknown");
+    let (code, usage) = command(home.path(), &["usage"]);
+    assert_eq!(code, 0);
+    assert_eq!(usage["calls"], 2);
+    assert!(usage["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["command"] != "usage"));
+    let recorded = watchtower::cli_usage::activity(home.path()).unwrap();
+    assert_eq!(recorded["activity"].as_array().unwrap().len(), 3);
+    assert!(recorded["activity"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["command"] == "activity" && row["outcome"] == "returned_success"));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # Writing the Watchtower portfolio brief
 
-This guide covers the cross-project brief: today's focus, shared findings, the user's parked ideas and the weekly review. Write in German, address the user as "du", and prioritize what changes a decision this morning.
+This guide covers the cross-project brief: today's focus, shared findings, the user's parked ideas and the weekly review. Prioritize what changes a decision this morning.
 
 ## Read the full context
 
@@ -17,15 +17,15 @@ Do this in every daily run, even when no report is due. Bring together the proje
 
 Look for repeated friction, complementary capabilities, useful transfers of a proven approach, and work that could disappear through simplification. Also consider unmet needs that none of the current projects serves well. Derive concrete possibilities from these connections; a list of shared risks or today's focus is not a substitute for ideas. Check the strongest candidates against actual capabilities, current proposals, user decisions and assigned work. Read more source only where it changes that judgment.
 
-Choose where each useful idea belongs: improve one project through its `suggestions`; connect existing work through `synergies`; propose `new_apps` when a distinct need warrants a separate app. Do not force every idea into existing projects, and do not invent an app merely because the list is empty. Evidence supports the need and available building blocks; the proposed solution may be new. Explain the user benefit and relevant sources in the destination field. Keep useful `cross_project_hints` in mind even if no combination is ready yet.
+Choose where each useful idea belongs: improve one project through its `suggestions`; connect existing work through `synergies`; propose `new_apps` when a distinct need warrants a separate app. Do not force every idea into existing projects or invent an app to fill the list. Evidence supports the need and available building blocks; the solution can be new. Explain the benefit and sources in the destination field, considering `cross_project_hints` too.
 
 Evaluate the user's unmet need before choosing a project or implementation. Existing project boundaries are not fixed: consider the wider workflow and gaps between the apps. A missing integration, shared format or identifier is design work, not evidence against an idea's usefulness. Separate uncertain benefit from unresolved implementation; for a promising idea, name the assumption and a concrete way to check it instead of silently discarding it.
 
-Compare new candidates with retained ideas rather than treating occupied slots as unavailable. Preserve IDs for the same ideas and omit IDs for new ones. Record worthwhile ideas in Watchtower, not only in the final chat reply. If nothing new qualifies, the run reply should name a concrete candidate direction and why it did not qualify. This is a selection result, not a demand for filler or a new user-facing checklist.
+Compare candidates with retained ideas rather than treating occupied slots as unavailable. Record worthwhile ideas in Watchtower, not only in chat. Keep discarded candidates and their reasons for the run reply, not as a checklist in the brief.
 
 ## Field meanings
 
-Only `greeting` is required by the schema. Fill the other fields when findings warrant them. Empty lists are better than filler. `watchtower schema portfolio` gives the exact accepted shape and limits when needed. Project references use the stable IDs from the context.
+Only `greeting` is required by the schema. Fill other fields when findings warrant them; use empty lists for no findings and null only for `week_review`. `watchtower schema portfolio` gives exact shapes and limits when needed. Project references use the stable IDs from context.
 
 Every text has at most 600 characters. Limits below are words; a word is a space-separated piece containing a letter or digit. `evidence` has no word limit. Retained items keep their IDs in `focus`, `patterns`, `synergies`, `new_apps` and `park_or_revive`; omit `id` for a new item.
 
@@ -49,14 +49,14 @@ For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). Use each projec
 
 ## Retain intent, not stale wording
 
-Check the `why` and `evidence` of retained items against current facts and cards. Correct demonstrated errors in retained content even when that field is not due, including misdated weekly claims; preserve its original period rather than rewriting history from today's state. Keep an unfinished focus item's ID while it remains a priority; replace lower-priority work when a stronger reason appears. Remove completed or disproved items. Items rated `down` never return, including rewordings. Items rated `later` wait until `snoozed_until`, or 14 days after their reaction when no date is present. Focus items marked `done` are finished unless evidence shows remaining work.
+Check retained `why` and `evidence` against current facts and cards. Correct demonstrated errors even when a field is not due, including misdated weekly claims; preserve the review's historical period. Keep an unfinished focus item's ID while it remains a priority; replace lower-priority work when a stronger reason appears. Apply the Skill's feedback and task rules, and remove completed or disproved items.
 
 ## Save
 
 Write the brief as UTF-8 JSON in your own temporary folder. Replace `<context-token>` with the token from the complete context and `<brief-file>` with the absolute Windows path to the payload:
 
 ```powershell
-watchtower portfolio put --context-token <context-token> --file <brief-file>
+watchtower portfolio put --context-token <context-token> --file "<brief-file>"
 ```
 
-Read the save result and warnings. With `--merge`, a provided list or object replaces that whole field. On a schema error, fix the named fields. On `version_conflict`, reread the context and reconcile changed facts or instructions before using its new token. The output confirms the saved version; no verification read is needed.
+Read the receipt's save state and warnings. With `--merge`, a provided list or object replaces that whole field. On a schema error, fix the named fields.

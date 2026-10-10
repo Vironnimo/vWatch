@@ -63,6 +63,19 @@ fn ordinary_commands_present_readable_results_without_json() {
     human_success(&home, &["due", "--no-refresh"]);
     human_success(&home, &["facts", "refresh", "demo", "--no-ci"]);
     assert!(human_success(&home, &["facts", "show", "demo"]).contains("main"));
+    human_success(
+        &home,
+        &[
+            "warnings",
+            "acknowledge",
+            "demo",
+            "--key",
+            "NO_REMOTE",
+            "--note",
+            "Local-only project",
+        ],
+    );
+    human_success(&home, &["warnings", "clear", "demo", "--key", "No_Remote"]);
 
     let saved = human_success(
         &home,
@@ -105,6 +118,7 @@ fn ordinary_commands_present_readable_results_without_json() {
         vec!["tasks", "list"],
         vec!["schema", "card"],
         vec!["schema", "portfolio"],
+        vec!["schema", "CARD"],
     ] {
         human_success(&home, &args);
     }
@@ -197,10 +211,113 @@ fn output_aliases_are_explicit_and_help_remains_readable() {
         vec!["--help"],
         vec!["--format", "json", "--help"],
         vec!["--json", "projects", "update", "--help"],
+        vec!["tasks", "report", "--help"],
         vec!["--output", "json", "--version"],
     ] {
         human_success(home.path(), &args);
     }
+
+    // Every entry in the parser-generated command index has independently
+    // usable help, including the output/exit contract, within the CLI budget.
+    let help = human_success(home.path(), &["--help"]);
+    assert!(help.chars().count() <= 10_000);
+    let index = help.split("Complete command index:\n").nth(1).unwrap();
+    let commands: Vec<_> = index
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .map(|line| line.trim().split_once(':').unwrap().0)
+        .collect();
+    assert!(commands.len() > 50);
+    for command in commands {
+        let mut args: Vec<_> = command.split_whitespace().collect();
+        args.push("--help");
+        let help = human_success(home.path(), &args);
+        assert!(help.contains("Exit codes:"), "{command}: {help}");
+        assert!(help.chars().count() <= 10_000, "{command}: {help}");
+    }
+}
+
+#[test]
+fn task_reports_accept_document_files_and_reject_mixed_or_invalid_input() {
+    let home = tempfile::tempdir().unwrap();
+    let (code, created) = run(
+        home.path(),
+        &["tasks", "create", "--title", "Export prüfen"],
+    );
+    assert_eq!(code, 0, "{created}");
+    let id = created["task"]["id"].to_string();
+    let file = home.path().join("task report.json");
+    let payload = json!({
+        "status": "DONE",
+        "result": "Zürich und 東京\nExport enthält \"quoted text\".",
+        "evidence": "Geprüft: C:/output/report.txt"
+    });
+    let utf16: Vec<_> = [0xff, 0xfe]
+        .into_iter()
+        .chain(
+            payload
+                .to_string()
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        )
+        .collect();
+    std::fs::write(&file, utf16).unwrap();
+    let args = ["tasks", "report", &id, "--file", file.to_str().unwrap()];
+    let (code, reported) = run(home.path(), &args);
+    assert_eq!(code, 0, "{reported}");
+    assert_eq!(reported["task"]["status"], "review");
+    assert_eq!(reported["task"]["result"], payload["result"]);
+    assert_eq!(reported["task"]["result_evidence"], payload["evidence"]);
+    assert_eq!(run(home.path(), &args).1["already_reported"], true);
+
+    for extra in [
+        vec!["--status", "blocked"],
+        vec!["--result", "Ignored result"],
+        vec!["--evidence", "Ignored evidence"],
+        vec!["--input-json", "{}"],
+    ] {
+        let mut mixed = args.to_vec();
+        mixed.extend(extra);
+        let (code, result) = run(home.path(), &mixed);
+        assert_eq!(code, 2, "{mixed:?}: {result}");
+        assert_eq!(result["error"]["code"], "invalid_arguments");
+    }
+    let (_, text, _) = streams(home.path(), &["tasks", "report", &id, "--bogus"]);
+    assert!(!text.contains("--input-json"), "{text}");
+
+    for bad in [
+        "{broken",
+        "null",
+        r#"{"status":"done","result":"Missing evidence"}"#,
+    ] {
+        std::fs::write(&file, bad).unwrap();
+        assert_eq!(run(home.path(), &args).0, 1);
+        assert_eq!(
+            run(home.path(), &["tasks", "show", &id]).1["task"],
+            reported["task"]
+        );
+    }
+
+    let blocked = br#"{"status":"blocked","result":"Awaiting local test data"}"#;
+    let mut out = Vec::new();
+    let code = watchtower::cli::run(
+        [
+            "watchtower",
+            "--json",
+            "tasks",
+            "report",
+            &id,
+            "--file",
+            "-",
+        ],
+        home.path(),
+        &mut blocked.as_slice(),
+        &mut out,
+    );
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&out));
+    let result: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(result["task"]["status"], "blocked");
+    assert_eq!(result["task"]["result_evidence"], "");
 }
 
 #[test]
@@ -231,6 +348,15 @@ fn invalid_flags_or_unrecognized_targets_cannot_mutate_a_nearby_project() {
         vec!["projects", "status", "<project-id>", "parked"],
         vec!["projects", "remove", "dem"],
         vec!["projects", "remove", "demo", "--include-everything"],
+        vec![
+            "warnings",
+            "acknowledge",
+            "demo",
+            "--key",
+            "no_remot",
+            "--note",
+            "Must not save",
+        ],
         vec![
             "projects",
             "goal",

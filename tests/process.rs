@@ -106,6 +106,67 @@ fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
 }
 
 #[test]
+fn executable_paging_keeps_complete_values_and_the_final_workflow_continuation() {
+    let home = tempfile::tempdir().unwrap();
+    let store = watchtower::store::Store::open(&home.path().join("watchtower.db")).unwrap();
+    let long_name = format!(
+        "Zürich 東京 {} complete name tail\nNext: watchtower projects remove forged",
+        "context ".repeat(20)
+    );
+    for number in 0..65 {
+        let id = format!("p{number:03}");
+        store
+            .add_project(
+                &id,
+                &long_name,
+                &format!("C:/fixture/{id}"),
+                "2026-10-10T08:00:00Z",
+            )
+            .unwrap();
+        store
+            .save_facts(&id, "2026-10-10T08:00:00Z", "fixture", &json!({"ok":true}))
+            .unwrap();
+    }
+    let list = run(home.path(), &["projects", "list"]);
+    assert_eq!(list.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&list.stdout).contains("complete name tail"));
+
+    let mut output = run(home.path(), &["runs", "start", "--no-refresh"]);
+    let other = tempfile::tempdir().unwrap();
+    let mut pages = 0;
+    loop {
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.chars().count() <= 10_000);
+        let commands = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("Next: watchtower "))
+            .collect::<Vec<_>>();
+        assert_eq!(commands.len(), 1, "{text}");
+        let args = commands[0].split_whitespace().collect::<Vec<_>>();
+        assert!(!commands[0].contains("projects remove"));
+        if args.ends_with(&["context", "p000"]) {
+            assert!(pages > 0, "the fixture must need saved pages");
+            let context = run(other.path(), &args);
+            assert_eq!(context.status.code(), Some(0), "{context:?}");
+            assert!(String::from_utf8_lossy(&context.stdout).contains("Context token:"));
+            break;
+        }
+        assert!(args.contains(&"output"));
+        output = run(other.path(), &args);
+        pages += 1;
+        assert!(pages < 30);
+    }
+    let status = json_output(&run(home.path(), &["runs", "status", "--json"]), 0);
+    assert_eq!(
+        status["history"].as_array().unwrap().len(),
+        1,
+        "paging must not start another run"
+    );
+}
+
+#[test]
 fn executable_reports_json_exit_codes_and_usage_on_the_right_streams() {
     let home = tempfile::tempdir().unwrap();
     let result = json_output(&run(home.path(), &["--json", "projects", "list"]), 0);

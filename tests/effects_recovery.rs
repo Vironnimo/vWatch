@@ -6,7 +6,7 @@ use serde_json::json;
 #[test]
 fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions() {
     let tmp = tempfile::tempdir().unwrap();
-    let (svc, _) = service(tmp.path());
+    let (svc, clock) = service(tmp.path());
     let repo = demo_repo(tmp.path());
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     svc.set_goal("demo", "Offline bleiben", Some("2026-12-01"))
@@ -31,8 +31,12 @@ fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions(
     let feedback = svc.feedback(None).unwrap();
     let removed = svc.remove_project("demo").unwrap();
     assert_eq!(removed["changed"], true);
+    assert_eq!(removed["project"]["removed_at"], svc.now());
     assert_eq!(removed["undo"], "watchtower projects restore demo");
-    assert_eq!(svc.remove_project("demo").unwrap()["already_removed"], true);
+    clock.advance(chrono::Duration::minutes(1));
+    let removed_again = svc.remove_project("demo").unwrap();
+    assert_eq!(removed_again["already_removed"], true);
+    assert_eq!(removed_again["project"], removed["project"]);
     assert!(svc.list_projects().unwrap().as_array().unwrap().is_empty());
     assert_eq!(svc.trash_projects().unwrap()["projects"][0]["id"], "demo");
     assert_eq!(svc.card("demo").unwrap_err().code, "project_removed");
@@ -44,9 +48,12 @@ fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions(
     );
     let restored = svc.restore_project("demo").unwrap();
     assert_eq!(restored["restored"], true);
+    assert!(restored["project"]["removed_at"].is_null());
     assert_eq!(restored["project"]["goal"], "Offline bleiben");
     assert_eq!(restored["project"]["status_note"], "Nächsten Monat");
-    assert_eq!(svc.restore_project("demo").unwrap()["already_active"], true);
+    let restored_again = svc.restore_project("demo").unwrap();
+    assert_eq!(restored_again["already_active"], true);
+    assert_eq!(restored_again["project"], restored["project"]);
     assert_eq!(svc.store().card_history("demo").unwrap(), history);
     assert_eq!(svc.feedback(None).unwrap(), feedback);
     assert_eq!(svc.tasks(None).unwrap(), tasks);

@@ -58,6 +58,11 @@ fn fixture(home: &Path, repo: &Path, command: &str) -> HashMap<String, String> {
     std::fs::write(&card_file, card.to_string()).unwrap();
     let brief_file = home.join("brief input.json");
     std::fs::write(&brief_file, json!({"greeting":"Guten Morgen"}).to_string()).unwrap();
+    let report_file = home.join("task report.json");
+    std::fs::write(
+        &report_file,
+        json!({"status":"done", "result":"Export opens successfully", "evidence":"Export file checked"}).to_string(),
+    ).unwrap();
     let context = if command.contains("portfolio ") {
         service.portfolio_context().unwrap()
     } else {
@@ -83,6 +88,7 @@ fn fixture(home: &Path, repo: &Path, command: &str) -> HashMap<String, String> {
         ),
         ("card-file", card_file.to_string_lossy().into_owned()),
         ("brief-file", brief_file.to_string_lossy().into_owned()),
+        ("report-file", report_file.to_string_lossy().into_owned()),
         ("display-name", "Renamed project".to_owned()),
         ("existing-folder", repo.to_string_lossy().into_owned()),
         ("YYYY-MM-DD", "2030-10-07".to_owned()),

@@ -193,6 +193,43 @@ fn task_validation_and_stale_updates_preserve_owner_decisions() {
         svc.set_task_status(id + 100, "assigned").unwrap_err().code,
         "unknown_task"
     );
+    for invalid in [
+        json!([]),
+        json!({"status": "blocked", "result": "Fehlt", "evdience": "Datei"}),
+        json!({"status": "blocked", "result": "Fehlt", "evidence": null}),
+        json!({"status": null, "result": "Fehlt"}),
+        json!({"status": "blocked", "result": 2}),
+        json!({"status": "done", "result": "Fertig"}),
+        json!({"status": "blocked", "result": " "}),
+    ] {
+        assert_eq!(
+            svc.report_task_document(id, invalid).unwrap_err().code,
+            "invalid_task"
+        );
+        assert_eq!(svc.tasks(None).unwrap()["tasks"][0], task);
+    }
+    let missing = svc.report_task_document(id + 100, json!({})).unwrap_err();
+    assert_eq!(missing.code, "unknown_task");
+    assert!(missing.hint.as_deref().unwrap().contains(&format!("{id}:")));
+    assert!(missing.hint.as_deref().unwrap().contains("Auftrag"));
+    assert!(missing.hint.as_deref().unwrap().contains("assigned"));
+    assert_eq!(svc.task(id).unwrap()["task"], task);
+    let blocked = svc
+        .report_task_document(
+            id,
+            json!({"status": "BLOCKED", "result": "Zürich fehlt.\n東京 fehlt ebenfalls."}),
+        )
+        .unwrap();
+    assert_eq!(blocked["task"]["status"], "blocked");
+    assert_eq!(blocked["task"]["result_evidence"], "");
+    let report = json!({"status": "DONE", "result": "Zürich und 東京 ergänzt.", "evidence": "Tests grün.\nExport geprüft."});
+    let reported = svc.report_task_document(id, report.clone()).unwrap();
+    assert_eq!(reported["task"]["status"], "review");
+    assert_eq!(reported["task"]["result_evidence"], report["evidence"]);
+    assert_eq!(
+        svc.report_task_document(id, report).unwrap()["already_reported"],
+        true
+    );
     svc.set_task_status(id, "cancelled").unwrap();
     let store = Store::open(&tmp.path().join("watchtower.db")).unwrap();
     assert!(!store

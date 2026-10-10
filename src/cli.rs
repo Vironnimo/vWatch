@@ -24,7 +24,7 @@ use crate::{cli_output, system};
     after_help = "Commands show readable text. Use --json when a program parses the output. Exit codes: 0 success, 1 failed or incomplete, 2 invalid call."
 )]
 struct Cli {
-    /// Print one complete JSON object for programs
+    /// Print one complete JSON object for programs. Omit for readable text.
     #[arg(long, global = true)]
     json: bool,
     /// Output format: text or json. Omit for readable text.
@@ -42,11 +42,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Where Watchtower keeps its data and how many projects it watches
+    /// Read paths and project counts; export the bundled operating Skill
     Status,
     /// Read the complete morning overview; --visit records a visit only when requested by the owner
     #[command(alias = "state")]
     Overview {
+        /// Record an owner-requested visit. Omit to leave visits unchanged.
         #[arg(long)]
         visit: bool,
         /// Measure all projects before showing the overview. Omit to use stored facts.
@@ -66,14 +67,13 @@ enum Cmd {
     },
     /// Refresh facts and list the projects that need a new card, plus whether the portfolio brief is due
     Due {
-        /// Rewrite unchanged cards older than this many days
-        #[arg(long, default_value_t = DEFAULT_MAX_AGE_DAYS, value_parser = clap::value_parser!(i64).range(0..))]
+        #[arg(long, default_value_t = DEFAULT_MAX_AGE_DAYS, value_parser = clap::value_parser!(i64).range(0..), help = format!("Mark unchanged cards due after this many days; does not rewrite them. Omit for {} days.", DEFAULT_MAX_AGE_DAYS))]
         max_age_days: i64,
-        /// Use the stored facts instead of measuring again
+        /// Use stored facts. Omit to measure all projects first.
         #[arg(long)]
         no_refresh: bool,
     },
-    /// Everything an agent needs before writing a project card
+    /// Read project evidence and the context token required to save its card
     Context { id: String },
     /// Read or write a project card
     Card {
@@ -87,13 +87,13 @@ enum Cmd {
     },
     /// The owner's ratings of suggestions and ideas and replies to questions
     Feedback {
-        /// Only reactions about this project
+        /// Filter reads by project ID. Omit for all reactions; not valid with changes.
         #[arg(long)]
         project: Option<String>,
         #[command(subcommand)]
         action: Option<FeedbackCmd>,
     },
-    /// Ideas the owner parked for agents to assess in the portfolio brief
+    /// Read or manage the owner's parked ideas; proposals are in cards and portfolio
     #[command(alias = "idea")]
     Ideas {
         #[command(subcommand)]
@@ -112,7 +112,10 @@ enum Cmd {
         action: TasksCmd,
     },
     /// Document fields and constraints (use --json for the complete JSON schema)
-    Schema { kind: SchemaKind },
+    Schema {
+        #[arg(ignore_case = true)]
+        kind: SchemaKind,
+    },
     /// Read measured warnings or record the owner's deliberate acknowledgement
     Warnings {
         #[command(subcommand)]
@@ -131,7 +134,7 @@ enum Cmd {
     /// Continue an immutable saved text output without repeating its command
     Output {
         token: String,
-        /// Zero-based character offset from the previous page's Next command
+        /// Zero-based character offset from the previous Next command. Omit to restart the saved output.
         #[arg(long, default_value_t = 0)]
         start: usize,
     },
@@ -142,7 +145,7 @@ enum Cmd {
     },
     /// Local command usage; contains command and flag names, never their values
     Usage {
-        /// Include calls on or after this UTC date, YYYY-MM-DD
+        /// Include calls on or after this UTC date, YYYY-MM-DD. Omit for all retained usage.
         #[arg(long)]
         since: Option<String>,
     },
@@ -175,6 +178,7 @@ enum FeedbackCmd {
     /// Read the owner's ratings and replies
     #[command(alias = "ls")]
     List {
+        /// Project ID to filter reactions. Omit for all projects and portfolio reactions.
         #[arg(long)]
         project: Option<String>,
     },
@@ -182,6 +186,7 @@ enum FeedbackCmd {
     #[command(aliases = ["update", "rate"])]
     Set {
         id: String,
+        /// Owner reaction: up (Gut), later (Später), down (Quatsch), answered or done.
         #[arg(long, value_parser = ["up", "later", "down", "answered", "done"], ignore_case = true)]
         value: String,
         /// The owner's answer or reason. Omit to keep the existing note.
@@ -210,15 +215,18 @@ enum WarningsCmd {
     #[command(alias = "ack")]
     Acknowledge {
         id: String,
-        #[arg(long, value_parser = ["no_remote", "ci_none", "worktrees"])]
+        /// Measured warning key from warnings list for this project.
+        #[arg(long, value_parser = ["no_remote", "ci_none", "worktrees"], ignore_case = true)]
         key: String,
+        /// The owner's reason for accepting this measured condition.
         #[arg(long)]
         note: String,
     },
     /// Withdraw an acknowledgement when the owner asks
     Clear {
         id: String,
-        #[arg(long, value_parser = ["no_remote", "ci_none", "worktrees"])]
+        /// Measured warning key from warnings list for this project.
+        #[arg(long, value_parser = ["no_remote", "ci_none", "worktrees"], ignore_case = true)]
         key: String,
     },
 }
@@ -231,6 +239,7 @@ enum ChangesCmd {
     /// Mark the displayed snapshot read on the owner's explicit request
     #[command(alias = "acknowledge")]
     Read {
+        /// Exact snapshot token from changes show or overview.
         #[arg(long)]
         token: String,
     },
@@ -244,9 +253,11 @@ enum SettingsCmd {
     /// Set display preferences only when the owner asks; preserves omitted values
     #[command(alias = "set")]
     Update {
+        /// Initial view: handover (Heute), board (Projekte), ideas or handbook. Omit to keep it.
         #[arg(long, value_parser = ["handover", "board", "ideas", "handbook"], ignore_case = true)]
         style: Option<String>,
-        /// Collapse these module IDs (comma-separated); headers stay visible. Empty expands all.
+        /// Comma-separated section IDs to collapse; empty expands all. Omit to keep them.
+        /// IDs: focus, projects, waiting, safety, recent, across, ideas, pulse, kpis, cards, tasks, changes, night, space, parking, week.
         #[arg(long)]
         hidden_modules: Option<String>,
     },
@@ -273,6 +284,7 @@ enum IdeasCmd {
 enum RunsCmd {
     /// Start a tracked daily run, refreshing facts first
     Start {
+        /// Use stored facts. Omit to measure all projects before starting the run.
         #[arg(long)]
         no_refresh: bool,
     },
@@ -281,8 +293,10 @@ enum RunsCmd {
     /// Record a project failure (omit --project for the portfolio brief)
     Fail {
         id: i64,
+        /// Failed project ID. Omit to record a portfolio failure.
         #[arg(long)]
         project: Option<String>,
+        /// What prevented completion and the next step needed to resolve it.
         #[arg(long)]
         error: String,
     },
@@ -295,6 +309,7 @@ enum TasksCmd {
     /// Assigned work, reported results and completed tasks
     #[command(alias = "ls")]
     List {
+        /// Project ID to filter assignments. Omit for all tasks.
         #[arg(long)]
         project: Option<String>,
     },
@@ -304,51 +319,64 @@ enum TasksCmd {
     /// Assign work only when the owner asks; reports still require owner confirmation
     #[command(aliases = ["add", "assign"])]
     Create {
-        /// Project IDs; repeat the flag or separate IDs by commas
+        /// Project IDs; repeat or separate by commas. Omit for work without a linked project.
         #[arg(long, value_delimiter = ',')]
         project: Vec<String>,
+        /// Short task title. Omit only when --file supplies the task document.
         #[arg(long, required_unless_present = "file")]
         title: Option<String>,
+        /// Why the task matters. Omit for no reason text.
         #[arg(long, default_value = "")]
         why: String,
+        /// Files or observations supporting the task. Omit for no evidence text.
         #[arg(long, default_value = "")]
         evidence: String,
+        /// Observable completion criterion. Omit for no criterion.
         #[arg(long, default_value = "")]
         done_when: String,
-        /// The existing suggestion or focus item ID. Omit for independent work.
+        /// ID of the item being assigned. Omit for independent work.
         #[arg(long)]
         source_id: Option<String>,
-        /// Complete task document for longer text; accepts UTF-8 or UTF-16 with BOM
+        /// JSON task file (projects, title, why, evidence, done_when, source_id); '-' reads stdin. Omit to use inline fields.
         #[arg(long, conflicts_with_all = ["project", "title", "why", "evidence", "done_when", "source_id"])]
         file: Option<String>,
     },
     /// Confirm a reviewed report only on the owner's explicit instruction
     Confirm {
         id: i64,
+        /// Current task revision from tasks list, show or a saved task result.
         #[arg(long)]
         revision: i64,
     },
     /// Reopen a task only on the owner's explicit instruction
     Reopen {
         id: i64,
+        /// Current task revision from tasks list, show or a saved task result.
         #[arg(long)]
         revision: i64,
     },
     /// Cancel a task only on the owner's explicit instruction
     Cancel {
         id: i64,
+        /// Current task revision from tasks list, show or a saved task result.
         #[arg(long)]
         revision: i64,
     },
     /// Report an outcome; done awaits the owner's confirmation
     Report {
         id: i64,
-        #[arg(long, value_parser = ["done", "blocked"], ignore_case = true)]
-        status: String,
-        #[arg(long)]
-        result: String,
+        /// done requests owner review; blocked records unfinished work. Omit only with --file.
+        #[arg(long, value_parser = ["done", "blocked"], ignore_case = true, required_unless_present = "file")]
+        status: Option<String>,
+        /// Outcome, or blocker and next step. Omit only when --file supplies the report.
+        #[arg(long, required_unless_present = "file")]
+        result: Option<String>,
+        /// Checks or files supporting the result. Required for done; omit for blocked without evidence.
         #[arg(long, default_value = "")]
         evidence: String,
+        /// JSON report file with status, result and evidence (required for done); '-' reads stdin. Omit to use inline fields.
+        #[arg(long, conflicts_with_all = ["status", "result", "evidence"])]
+        file: Option<String>,
     },
 }
 
@@ -357,7 +385,7 @@ enum ProjectsCmd {
     /// All registered projects
     #[command(aliases = ["ls", "search", "find"])]
     List {
-        /// Match ID, name, folder or card text (case-insensitive substring)
+        /// Match ID, name, folder or card text (case-insensitive substring). Omit for all projects.
         #[arg(long, aliases = ["search", "filter"], short = 'q', conflicts_with = "text")]
         query: Option<String>,
         #[arg(hide = true)]
@@ -373,10 +401,10 @@ enum ProjectsCmd {
     Add {
         #[arg(required = true)]
         paths: Vec<String>,
-        /// Short id; defaults to the folder name
+        /// Stable ID for one folder. Omit to derive it from the folder name.
         #[arg(long)]
         id: Option<String>,
-        /// Display name; defaults to the folder name
+        /// Display name for one folder. Omit to use the folder name.
         #[arg(long)]
         name: Option<String>,
     },
@@ -389,12 +417,13 @@ enum ProjectsCmd {
     Restore { id: String },
     /// Change the display name
     Rename { id: String, name: String },
-    /// Change a project's display name or registered folder without losing its history
+    /// Change a project's name or folder; supply either option or both and keep its history
     Update {
         id: String,
+        /// Display name. Omit to keep the current name.
         #[arg(long)]
         name: Option<String>,
-        /// Existing folder after a rename or move; does not move the folder itself
+        /// Existing folder after a rename or move. Omit to keep the path; never moves files.
         #[arg(long)]
         path: Option<String>,
     },
@@ -402,7 +431,7 @@ enum ProjectsCmd {
     Goal {
         id: String,
         goal: String,
-        /// Due date as YYYY-MM-DD
+        /// Goal due date as YYYY-MM-DD. Omit to clear any previous due date.
         #[arg(long)]
         due: Option<String>,
     },
@@ -411,7 +440,7 @@ enum ProjectsCmd {
         id: String,
         #[arg(ignore_case = true)]
         status: Status,
-        /// Short reason, shown to people and agents
+        /// Owner's reason, shown to people and agents. Omit to keep the existing note.
         #[arg(long)]
         note: Option<String>,
     },
@@ -424,7 +453,7 @@ enum FactsCmd {
     /// Measure again now (all projects when no id is given)
     Refresh {
         ids: Vec<String>,
-        /// Skip the GitHub CI lookup
+        /// Skip the GitHub CI lookup. Omit to measure CI along with local git facts.
         #[arg(long)]
         no_ci: bool,
     },
@@ -446,6 +475,7 @@ enum CardCmd {
     #[command(aliases = ["get", "view"])]
     Show {
         id: String,
+        /// Saved version number from card history. Omit for the current card.
         #[arg(long)]
         version: Option<i64>,
     },
@@ -454,8 +484,10 @@ enum CardCmd {
     /// Restore a saved version after reconciling the current project context
     Restore {
         id: String,
+        /// Saved version number from card history to append as the current card.
         #[arg(long)]
         version: i64,
+        /// Token from the reconciled project context.
         #[arg(long)]
         context_token: String,
     },
@@ -474,6 +506,7 @@ enum PortfolioCmd {
     /// The current brief
     #[command(aliases = ["get", "view"])]
     Show {
+        /// Saved version number from portfolio history. Omit for the current brief.
         #[arg(long)]
         version: Option<i64>,
     },
@@ -481,8 +514,10 @@ enum PortfolioCmd {
     History,
     /// Restore a saved version after reconciling the current portfolio context
     Restore {
+        /// Saved version number from portfolio history to append as the current brief.
         #[arg(long)]
         version: i64,
+        /// Token from the reconciled portfolio context.
         #[arg(long)]
         context_token: String,
     },
@@ -490,29 +525,29 @@ enum PortfolioCmd {
 
 #[derive(Args)]
 struct InputArgs {
-    /// Document file; '-' reads stdin. Accepts UTF-8 or UTF-16 with a byte-order mark.
+    /// JSON file; '-' reads stdin. Accepts UTF-8 or BOM-marked UTF-16. Omit only with --input-json.
     #[arg(long, conflicts_with = "input_json")]
     file: Option<String>,
-    /// JSON document inline; use --file for text with quotes or line breaks
+    /// Inline JSON. Omit when using --file, which preserves quotes and line breaks.
     #[arg(long)]
     input_json: Option<String>,
 }
 
 #[derive(Args)]
 struct DocArgs {
-    /// JSON file with the document; '-' reads stdin
+    /// JSON file; '-' reads stdin. Accepts UTF-8 or BOM-marked UTF-16. Omit only with --input-json.
     #[arg(long, conflicts_with = "input_json")]
     file: Option<String>,
-    /// The document as a JSON string
+    /// Inline JSON. Omit when using --file, which preserves quotes and line breaks.
     #[arg(long)]
     input_json: Option<String>,
-    /// Send only changed top-level fields; the rest is kept from the previous version
+    /// Replace supplied top-level fields, keeping omitted fields; arrays are replaced whole. Omit for a complete document.
     #[arg(long)]
     merge: bool,
-    /// Check the document and show what would be saved, without saving it
+    /// Validate and preview without saving. Omit to save the document.
     #[arg(long)]
     dry_run: bool,
-    /// Token from the context used to write this document; required when saving
+    /// Token from the complete context used to write this document. Omit only with --dry-run.
     #[arg(long)]
     context_token: Option<String>,
 }
@@ -978,34 +1013,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         },
         Cmd::Tasks { action } => match action {
             TasksCmd::List { project } => svc.tasks(project.as_deref())?,
-            TasksCmd::Show { id } => {
-                let tasks = svc.tasks(None)?;
-                let task = tasks["tasks"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|task| task["id"] == id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        let choices: Vec<String> = tasks["tasks"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .take(8)
-                            .map(|t| format!("{} ({})", t["id"], t["title"].as_str().unwrap_or("")))
-                            .collect();
-                        WatchtowerError::new(
-                            "unknown_task",
-                            format!("Task {id} does not exist. No task was changed."),
-                        )
-                        .hint(if choices.is_empty() {
-                            "There are no tasks.".to_owned()
-                        } else {
-                            format!("Available task IDs: {}.", choices.join(", "))
-                        })
-                    })?;
-                json!({"task": task})
-            }
+            TasksCmd::Show { id } => svc.task(id)?,
             TasksCmd::Create {
                 project,
                 title,
@@ -1040,16 +1048,26 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
                 status,
                 result,
                 evidence,
-            } => svc.report_task(id, &status.to_lowercase(), &result, &evidence)?,
+                file,
+            } => {
+                let payload = if let Some(file) = file {
+                    read_input(Some(&file), None, stdin)?
+                } else {
+                    json!({"status": status, "result": result, "evidence": evidence})
+                };
+                svc.report_task_document(id, payload)?
+            }
         },
         Cmd::Warnings { action } => match action {
             WarningsCmd::List { id } => {
                 json!({"project": id, "warnings": svc.project_warnings(&id)?, "acknowledgements": svc.warning_acknowledgements(&id)?})
             }
             WarningsCmd::Acknowledge { id, key, note } => {
-                svc.set_warning_ack(&id, &key, Some(&note))?
+                svc.set_warning_ack(&id, &key.to_ascii_lowercase(), Some(&note))?
             }
-            WarningsCmd::Clear { id, key } => svc.set_warning_ack(&id, &key, None)?,
+            WarningsCmd::Clear { id, key } => {
+                svc.set_warning_ack(&id, &key.to_ascii_lowercase(), None)?
+            }
         },
         Cmd::Changes { action } => match action {
             ChangesCmd::Show => json!({"changes": svc.state(false)?["changes"]}),
@@ -1358,11 +1376,15 @@ fn command_index(command: &clap::Command) -> String {
                     | "acknowledge"
                     | "read"
                     | "visit"
+                    | "undo"
             ) || path == "projects status";
-            let marker = if changes {
-                "changes data"
-            } else {
-                "reads data"
+            let marker = match path {
+                "due" => "refreshes facts unless --no-refresh",
+                "overview" => "reads data; --refresh/--visit change data",
+                "context" | "facts show" => "reads data; measures missing facts",
+                "status" => "reads data; exports Skill",
+                _ if changes => "changes data",
+                _ => "reads data",
             };
             lines.push(format!("  {path}: {purpose} [{marker}]"));
         } else {
@@ -1377,7 +1399,14 @@ fn command_index(command: &clap::Command) -> String {
 }
 
 fn parse_cli(args: &[OsString]) -> std::result::Result<Cli, clap::Error> {
-    let command = Cli::command();
+    fn describe_output(command: &mut clap::Command) {
+        for child in command.get_subcommands_mut() {
+            *child = child.clone().after_help("Output: readable text with results or recovery; --json returns the complete object. Exit codes: 0 success, 1 failed or incomplete, 2 invalid call.");
+            describe_output(child);
+        }
+    }
+    let mut command = Cli::command();
+    describe_output(&mut command);
     let index = command_index(&command);
     let matches = command.after_help(index).try_get_matches_from(args)?;
     Cli::from_arg_matches(&matches)
@@ -1439,7 +1468,11 @@ fn usage_error(error: &clap::Error) -> WatchtowerError {
         recovery.push_str(&format!("\nAccepted flags here: {}.", flags.join(", ")));
     }
     if flags.iter().any(|flag| flag == "--file") {
-        recovery.push_str("\nDocument input uses --file PATH or --input-json JSON. --json only selects the output format; it does not take a document.");
+        recovery.push_str("\nDocument input uses --file PATH");
+        if flags.iter().any(|flag| flag == "--input-json") {
+            recovery.push_str(" or --input-json JSON");
+        }
+        recovery.push_str(". --json only selects the output format; it does not take a document.");
     }
     WatchtowerError::new(
         "invalid_arguments",

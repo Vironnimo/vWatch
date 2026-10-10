@@ -348,9 +348,8 @@ impl Kind {
         }
     }
 
-    /// The lists whose items carry ids: (list, prefix of generated ids, item kind).
     /// Fields the schema has but a stored document lacks because it predates them, as paths such as
-    /// `handbook` or `suggestions[].done_when`. Lists are judged by their first item.
+    /// `handbook` or `suggestions[].done_when`. Every list item contributes missing fields.
     pub fn missing_fields(self, doc: &Value) -> Vec<String> {
         fn walk(fields: &[Field], doc: &Value, path: &str, out: &mut Vec<String>) {
             for field in fields {
@@ -366,8 +365,8 @@ impl Kind {
                             walk(inner, v, &here, out)
                         }
                         Ty::List(Ty::Obj(inner), _) => {
-                            if let Some(first) = v.as_array().and_then(|a| a.first()) {
-                                walk(inner, first, &format!("{here}[]"), out);
+                            for item in v.as_array().into_iter().flatten() {
+                                walk(inner, item, &format!("{here}[]"), out);
                             }
                         }
                         _ => {}
@@ -377,9 +376,12 @@ impl Kind {
         }
         let mut out = Vec::new();
         walk(self.fields(), doc, "", &mut out);
+        let mut seen = HashSet::new();
+        out.retain(|field| seen.insert(field.clone()));
         out
     }
 
+    /// The lists whose items carry ids: (list, prefix of generated ids, item kind).
     pub fn items(self) -> &'static [(&'static str, &'static str, &'static str)] {
         match self {
             Kind::Card => &[
@@ -429,15 +431,30 @@ pub fn validate(
     }
     let mut clean = clean.expect("a valid object yields a value");
     let mut seen = HashSet::new();
+    for (list, _, _) in kind.items() {
+        for (index, item) in clean[*list].as_array().into_iter().flatten().enumerate() {
+            if let Some(id) = item["id"].as_str() {
+                if !seen.insert(id.to_owned()) {
+                    ctx.problems.push(format!("{list}[{index}].id: Duplicate id '{id}'. Keep each existing id once; omit id for a new item."));
+                }
+            }
+        }
+    }
+    if !ctx.problems.is_empty() {
+        return Err(ctx.problems);
+    }
     for (list, prefix, _) in kind.items() {
         if let Some(Value::Array(items)) = clean.get_mut(*list) {
             for item in items {
-                let id = item.get("id").and_then(Value::as_str).map(str::to_owned);
-                let id = match id {
-                    Some(id) if !seen.contains(&id) => id,
-                    _ => new_id(prefix),
+                if item["id"].is_string() {
+                    continue;
+                }
+                let id = loop {
+                    let id = new_id(prefix);
+                    if seen.insert(id.clone()) {
+                        break id;
+                    }
                 };
-                seen.insert(id.clone());
                 item["id"] = Value::String(id);
             }
         }
@@ -478,7 +495,7 @@ fn check_obj(fields: &[Field], value: &Value, path: &str, ctx: &mut Ctx) -> Opti
         return fail(
             ctx,
             if path.is_empty() { "(document)" } else { path },
-            "Input should be an object".into(),
+            "Use a JSON object".into(),
         );
     };
     for key in map.keys() {
@@ -493,13 +510,11 @@ fn check_obj(fields: &[Field], value: &Value, path: &str, ctx: &mut Ctx) -> Opti
         if path.is_empty() {
             ctx.enforce_words = !ctx.kept.iter().any(|k| k == field.name);
         }
-        let given = map
-            .get(field.name)
-            .filter(|v| !v.is_null() || matches!(field.ty, Ty::Nullable(_)));
+        let given = map.get(field.name);
         let result = match given {
             Some(v) => check(&field.ty, v, &here, ctx),
             None => match field.default {
-                Required => fail(ctx, &here, "Field required".into()),
+                Required => fail(ctx, &here, "This field is required".into()),
                 Empty => Some(json!([])),
                 Null => Some(Value::Null),
                 Text(s) => Some(json!(s)),
@@ -520,13 +535,13 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
             if value.is_null() { Some(Value::Null) } else { check(inner, value, path, ctx) }
         }
         Ty::Str { min, max, words } => match value.as_str() {
-            None => fail(ctx, path, "Input should be a string".into()),
-            Some(s) if s.chars().count() < *min => fail(ctx, path, format!("String should have at least {min} character")),
-            Some(s) if s.chars().count() > *max => fail(ctx, path, format!("String should have at most {max} characters")),
+            None => fail(ctx, path, "Use a text value".into()),
+            Some(s) if s.chars().count() < *min => fail(ctx, path, format!("Text has {} characters; minimum is {min}", s.chars().count())),
+            Some(s) if s.chars().count() > *max => fail(ctx, path, format!("Text has {} characters; limit is {max}", s.chars().count())),
             Some(s) if words.is_some_and(|w| word_count(s) > w) => {
                 let (limit, n) = (words.unwrap_or_default(), word_count(s));
                 if ctx.enforce_words {
-                    fail(ctx, path, format!("Text should have at most {limit} words, has {n}"))
+                    fail(ctx, path, format!("Text has {n} words; limit is {limit}"))
                 } else {
                     ctx.over.push(format!("{path} ({n} of {limit} words)"));
                     Some(json!(s))
@@ -536,17 +551,17 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
         },
         Ty::Date => match value.as_str() {
             Some(s) if s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() => Some(json!(s)),
-            _ => fail(ctx, path, "Input should be a date as YYYY-MM-DD".into()),
+            _ => fail(ctx, path, "Use a valid date as YYYY-MM-DD".into()),
         },
         Ty::Id => match value.as_str() {
             Some(s) if valid_item_id(s) => Some(json!(s)),
-            _ => fail(ctx, path, "Input should be an id of 3-64 characters: lowercase letters, digits, ':', '_' or '-'".into()),
+            _ => fail(ctx, path, "Use an id of 3-64 characters: lowercase letters, digits, ':', '_' or '-'; start with a letter or digit".into()),
         },
         Ty::Enum(options) => match value.as_str() {
             Some(s) if options.contains(&s) => Some(json!(s)),
             _ => {
                 let quoted: Vec<String> = options.iter().map(|o| format!("'{o}'")).collect();
-                fail(ctx, path, format!("Input should be one of {}", quoted.join(", ")))
+                fail(ctx, path, format!("Use one of {}", quoted.join(", ")))
             }
         },
         Ty::Int { min, max } => {
@@ -556,16 +571,16 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
                     .map(|f| f as i64)
             });
             match n {
-                None => fail(ctx, path, "Input should be a whole number".into()),
-                Some(n) if n < *min || n > *max => fail(ctx, path, format!("Input should be between {min} and {max}")),
+                None => fail(ctx, path, "Use a whole number".into()),
+                Some(n) if n < *min || n > *max => fail(ctx, path, format!("Value {n} is outside the range {min} to {max}")),
                 Some(n) => Some(json!(n)),
             }
         }
         Ty::List(item, max) => {
-            let Some(items) = value.as_array() else { return fail(ctx, path, "Input should be a list".into()) };
+            let Some(items) = value.as_array() else { return fail(ctx, path, "Use a list".into()) };
             if let Some(max) = max {
                 if items.len() > *max {
-                    return fail(ctx, path, format!("List should have at most {max} items"));
+                    return fail(ctx, path, format!("List has {} items; limit is {max}", items.len()));
                 }
             }
             let before = ctx.problems.len();

@@ -416,7 +416,8 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     _ => "Task record, result and history.",
                 },
             );
-            tree(&mut out, &data["task"], 0);
+            fields(&mut out, &data["task"], &["id", "status", "revision"], 0);
+            tree_except(&mut out, &data["task"], &["id", "status", "revision"], 0);
         }
         "warnings.list" | "warnings.acknowledge" | "warnings.clear" => {
             line(
@@ -820,14 +821,6 @@ fn collection(out: &mut String, scope: &str, order: &str, value: &Value) {
     );
     tree(out, value, 0);
 }
-fn cell(value: &Value, max: usize) -> String {
-    let value = text(value);
-    if value.chars().count() > max {
-        format!("{}...", value.chars().take(max - 3).collect::<String>())
-    } else {
-        value
-    }
-}
 fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[&str]) {
     line(
         out,
@@ -844,13 +837,7 @@ fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[
     cells.extend(rows.iter().map(|row| {
         columns
             .iter()
-            .map(|key| {
-                if matches!(*key, "id" | "suggested_id" | "path" | "token") {
-                    text(&row[*key])
-                } else {
-                    cell(&row[*key], 72)
-                }
-            })
+            .map(|key| text(&row[*key]))
             .collect::<Vec<_>>()
     }));
     let widths: Vec<_> = (0..columns.len())
@@ -860,6 +847,9 @@ fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[
                 .map(|row| row[i].chars().count())
                 .max()
                 .unwrap_or(0)
+                // Keep every value, but do not pad all other rows to the length
+                // of one unusually long title, ID or path. Paging bounds output.
+                .min(72)
         })
         .collect();
     for (row_index, values) in cells.iter().enumerate() {
@@ -870,7 +860,10 @@ fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[
                 if i + 1 == values.len() {
                     value.clone()
                 } else {
-                    format!("{value}{}", " ".repeat(widths[i] - value.chars().count()))
+                    format!(
+                        "{value}{}",
+                        " ".repeat(widths[i].saturating_sub(value.chars().count()))
+                    )
                 }
             })
             .collect::<Vec<_>>()
@@ -895,12 +888,17 @@ fn refresh_item(out: &mut String, item: &Value, depth: usize) {
         depth + 1,
         &format!("{}: facts {state}.", text(&item["id"])),
     );
-    fields(
-        out,
-        item,
-        &["error", "warning", "warnings", "hint"],
-        depth + 2,
-    );
+    for key in ["error", "warning", "warnings", "hint"] {
+        if let Some(value) = item.get(key).filter(|value| match value {
+            Value::Null => false,
+            Value::String(text) => !text.is_empty(),
+            Value::Array(items) => !items.is_empty(),
+            Value::Object(fields) => !fields.is_empty(),
+            _ => true,
+        }) {
+            field(out, &label(key), value, depth + 2);
+        }
+    }
 }
 fn due(out: &mut String, data: &Value) {
     let projects = list(&data["projects"]);
@@ -1233,6 +1231,7 @@ fn label(key: &str) -> String {
     let value = match key {
         "id" => "ID",
         "item_id" => "Item ID",
+        "note" => "Saved note",
         "ci" => "CI",
         "url" => "URL",
         "context_token" => "Context token",

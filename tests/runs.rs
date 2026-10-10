@@ -195,6 +195,12 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
         failed["latest"]["portfolio"]["version"],
         written_brief["version"]
     );
+    let repair = failed["repair_task"].as_str().unwrap();
+    assert!(repair.contains(&format!("runs finish {id}")));
+    assert!(repair.contains("2026-09-30T08:00:00Z"));
+    assert!(repair.contains("Die Untersuchung wurde abgebrochen"));
+    assert!(repair.contains("Die Zusammenfassung konnte nicht fertig werden"));
+    assert!(!repair.contains("runs status"));
     assert!(failed["last_successful"].is_null());
 
     svc.put_card("demo", card(), false, false).unwrap();

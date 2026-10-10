@@ -148,7 +148,17 @@ fn events(data_dir: &Path) -> Result<(Vec<Event>, usize, bool)> {
     for event in retained {
         calls.insert(event.call.clone(), event);
     }
-    let mut calls: Vec<_> = calls.into_values().collect();
+    // A metadata read logs its start before reading this file. That read is
+    // still in progress, not a lost mutation requiring recovery. Keep it in the
+    // log, but leave it out of its own report until completion is recorded.
+    let mut calls: Vec<_> = calls
+        .into_values()
+        .filter(|event| {
+            !(event.process == std::process::id()
+                && event.exit_code.is_none()
+                && matches!(event.command.as_str(), "activity" | "usage"))
+        })
+        .collect();
     calls.sort_by(|a, b| a.at.cmp(&b.at).then(a.call.cmp(&b.call)));
     Ok((calls, invalid, truncated))
 }

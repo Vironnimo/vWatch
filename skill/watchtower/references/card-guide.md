@@ -1,15 +1,15 @@
 # Writing Watchtower cards
 
-This guide covers studying a due project and writing every field of its card. The user needs to understand the state, risk and next step within ten seconds. Write in German, address the user as "du", and keep each finding specific to evidence you read.
+This guide covers investigating a project and writing every card field so the user understands its state, risk and next step within ten seconds.
 
 ## Study the project, then reflect before saving
 
-1. Read the complete `watchtower context <project-id>` result: project path and intent, facts, previous card, changes, feedback, tasks and warning acknowledgements. Keep the context token for the save. For `changed` or `stale`, start with the previous card and investigate what changed.
-2. Read the project's history and documents that explain its purpose, decisions and unfinished work: README, project instructions, roadmap, TODO, plans and review reports where present. Use `git log --format="%cs %s"`, then `git show --stat <commit>` for unclear changes. For large histories, group related commits instead of reading each one.
-3. Inspect uncommitted work with `git diff --stat` and `git ls-files --others --exclude-standard`; read relevant changed files and accompanying notes. Inspect extra worktrees when their facts show work. Git-ignored project notes can establish intent; private personal content stays out of the card.
+1. Read the complete project context: intent, facts, previous card, changes, feedback, tasks and warning acknowledgements. Use the due reason to identify what needs reassessment; retain supported knowledge from the previous card.
+2. Establish the project's purpose and current work from its README, project instructions and relevant history or plans. For a known project, focus on changes and unresolved claims rather than rereading every document. Use `git log --format="%cs %s"` and `git show --stat <commit>` where they answer those questions; group large histories into themes.
+3. Inspect both unstaged and staged work with `git diff --stat` and `git diff --cached --stat`, plus untracked files with `git ls-files --others --exclude-standard`. Read relevant changes and notes; inspect extra worktrees when their facts show work. Git-ignored project notes can establish intent; private personal content stays out of the card.
 4. Read the source layout enough to establish what the app does today. For red CI, inspect `facts.ci.workflows` and, when needed, `gh run view <run-id>` using the ID at the end of the run URL. Read failed logs only when the cause remains unclear. Distinguish a weeks-old failure from recent news.
 5. For a changed or missing handbook, read the project's documented start/test/release commands, data locations, installation and shortcuts. Inspect the installed version without starting the app or changing its files. Never execute the handbook's commands during this observation run.
-6. Check task results against evidence before describing progress. Assigned work is unfinished; `review` means reported but unconfirmed; `done` is confirmed. Respect deliberate warning acknowledgements and recorded decisions. Report material worsening instead of repeating an unwanted proposal.
+6. Check task-result evidence before describing progress; a reported result awaiting the user's confirmation is not confirmed completion. Interpret risks against recorded decisions and warning acknowledgements.
 7. Pause on this project before moving to the next: what could make its actual use more useful, clearer or simpler? Evaluate opportunities from what you just learned, following "Suggestions" below. Save useful proposals and cross-project hints; carry a concise selection outcome into the final synthesis even when the card stays unchanged.
 
 Measured facts already appear in the window. Use them to interpret a finding; do not fill card text with numbers already visible there. Useful signals include `collisions` (overlapping changes), `release.commits_since` (work after the reachable release tag) and `night.reverts` (reverted commits since yesterday evening). Facts cover git-visible work, not ignored data. A failed facts measurement does not mean a clean repository. A configured remote does not prove a backup exists; no remote does not rule out other backups. Distinguish committed, tested, installed and actually used: each needs its own evidence. Attribute recorded test results to their date rather than implying you ran them. Timestamps containing a time are UTC; dates such as `last_work` are local.
@@ -25,7 +25,7 @@ The obvious repair of an open end is not an additional suggestion. The `reentry`
 
 ## Fields and limits
 
-The required top-level fields are `one_liner`, `phase`, `headline` and `reentry`. Fill other fields when evidence exists; empty lists and nulls are better than invented findings. `watchtower schema card` describes the accepted shape and limits when a detail is unclear.
+The required top-level fields are `one_liner`, `phase`, `headline` and `reentry`. Fill other fields when evidence exists; use empty lists for no findings and null only for nullable fields. Omitted optional fields receive defaults on a first save; in a merge they retain the previous value. `watchtower schema card` describes the accepted shape and limits when a detail is unclear.
 
 A word is a space-separated piece containing a letter or digit. A standalone dash does not count. Every text has at most 600 characters. The limits below are words unless stated otherwise. Paths, commands, `source` and `evidence` have no word limit. One-sentence fields allow 30 words. Suggested list lengths describe reading priorities, not a reason to fabricate entries.
 
@@ -58,8 +58,6 @@ Each suggestion has `id` when retained, `type` (`next`, `feature`, `cleanup`, `p
 
 The user can turn a suggestion or `reentry` into an assigned task. Write `done_when` so another agent can tell whether it succeeded: "Monatsraten stimmen mit dem Kalender überein; dokumentierter Planungstest besteht." Include an exact test command only when the repository actually defines it. Assignments keep their original text through card rewrites.
 
-Read feedback before choosing suggestions. Never reintroduce a rejected idea through rewording. Preserve a still-relevant item's ID, respect snooze dates and remove completed proposals. The user's recorded choices take priority over generic advice.
-
 Develop possibilities throughout the investigation and evaluate them before saving, rather than merely checking whether yesterday's suggestions remain true. Consider the user's intended outcome, awkward or repeated work, underused capabilities, and features or steps that could be simplified or removed. New work can enable new uses; an unchanged repository can still reveal a previously missed opportunity. These are lenses for judgment, not categories to fill.
 
 For a promising direction, establish the observed need, the proposed change and its concrete benefit. Evidence must support the need or available capability; the solution need not already appear in a TODO or plan. Inspect just enough relevant code or documentation to check that it is not already implemented. Distinguish your proposal from existing behavior and name any uncertainty. Generic testing, pushing commits, merging worktrees or fixing an already listed open end is not product ideation.
@@ -91,7 +89,7 @@ For `changed`, `ci_changed`, `answered` or `stale`, update the affected fields a
 Use a UTF-8 file for the card payload. For a card that already exists, replace `<project-id>`, `<context-token>` and `<card-file>` with the project ID, token from its current context and your changed-field payload path:
 
 ```powershell
-watchtower card put <project-id> --context-token <context-token> --file <card-file> --merge
+watchtower card put <project-id> --context-token <context-token> --file "<card-file>" --merge
 ```
 
-For a project's first card, omit `--merge` and provide the complete card. The output confirms whether it saved, the version, changed fields, item IDs and warnings. A list in a merge replaces the whole list. A context conflict saves nothing: read the changed context and reconcile before submitting again. A schema error saves nothing: fix the named fields and retry. Never record credentials or unsupported conclusions to satisfy a missing field.
+For a first card, omit `--merge`. Read the receipt's save state, changed fields, item IDs, omissions and warnings. A schema error saves nothing: fix the named fields. Resolve missing fields with supported content or their empty defaults, not invented conclusions.

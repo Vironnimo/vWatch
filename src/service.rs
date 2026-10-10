@@ -525,14 +525,14 @@ fn sent_fields(payload: &Value, merge: bool) -> Option<Vec<String>> {
 }
 
 /// Validation problems, each marked when its field came from the previous version rather than the agent.
-fn mark_inherited(problems: &[String], sent: Option<&[String]>) -> String {
+fn mark_inherited(problems: &[String], sent: Option<&[String]>, document: &str) -> String {
     problems
         .iter()
         .map(|p| {
             let field = p.split(['.', '[', ':']).next().unwrap_or("");
             match sent {
                 Some(sent) if !sent.iter().any(|s| s == field) => {
-                    format!("{p} (from the previous card)")
+                    format!("{p} (from the previous {document})")
                 }
                 _ => p.clone(),
             }
@@ -1124,14 +1124,18 @@ impl Watchtower {
     }
 
     pub fn remove_project(&self, id: &str) -> Result<Value> {
-        let project = self.store.project_including_removed(id)?.ok_or_else(|| {
+        let mut project = self.store.project_including_removed(id)?.ok_or_else(|| {
             WatchtowerError::new(
                 "project_not_found",
                 format!("No project with id '{id}'. Nothing was changed."),
             )
             .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
         })?;
-        let changed = self.store.set_project_removed(id, Some(&self.now()))?;
+        let removed_at = self.now();
+        let changed = self.store.set_project_removed(id, Some(&removed_at))?;
+        if changed {
+            project.removed_at = Some(removed_at);
+        }
         Ok(
             json!({"removed": id, "project": project_json(&project), "changed": changed,
             "already_removed": !changed, "undo": changed.then(||format!("watchtower projects restore {id}"))}),
@@ -1146,7 +1150,7 @@ impl Watchtower {
     }
 
     pub fn restore_project(&self, id: &str) -> Result<Value> {
-        let project = self.store.project_including_removed(id)?.ok_or_else(|| {
+        let mut project = self.store.project_including_removed(id)?.ok_or_else(|| {
             WatchtowerError::new(
                 "project_not_found",
                 format!("No project with id '{id}'. Nothing was changed."),
@@ -1154,6 +1158,7 @@ impl Watchtower {
             .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
         })?;
         let restored = self.store.set_project_removed(id, None)?;
+        project.removed_at = None;
         Ok(
             json!({"project": project_json(&project), "restored": restored, "already_active": !restored,
             "undo": restored.then(||format!("watchtower projects remove {id}"))}),
@@ -1725,7 +1730,7 @@ impl Watchtower {
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
         let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
-            WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref())))
+            WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref(), "card")))
                 .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
         self.validate_item_ids(Kind::Card, Some(id), &clean)?;
@@ -2132,8 +2137,8 @@ impl Watchtower {
             "portfolio brief",
         )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
-            WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref())))
-                .hint(format!("Fix the listed fields and send it again. {} `watchtower schema portfolio` describes the fields.", if merge { "With --merge, fields marked (from the previous card) were inherited: include corrected versions of those fields too." } else { "" }))
+            WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref(), "brief")))
+                .hint(format!("Fix the listed fields and send it again. {} `watchtower schema portfolio` describes the fields.", if merge { "With --merge, fields marked (from the previous brief) were inherited: include corrected versions of those fields too." } else { "" }))
         })?;
         self.validate_item_ids(Kind::Portfolio, None, &clean)?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
@@ -2889,8 +2894,12 @@ impl Watchtower {
                     .map(|id| json!(format!("watchtower context {id}")))
             })
             .unwrap_or_else(|| json!("watchtower portfolio context"));
-        status["instruction"] = json!(format!("Review every due or failed project in this run with the Skill, including reflection on useful improvements before saving its card. Then always read portfolio context and synthesize opportunities across all projects, even when nothing is due. Save due or changed documents using their context tokens; after repairing a recorded failure, save even unchanged content to clear it. Report new ideas separately from retained ones, or a concrete considered direction and why it did not qualify. If a step cannot be completed, use runs fail for run {id} with --error describing that failure and --project when it affects one project. After reflection and synthesis, finish with watchtower runs finish {id}; complete confirms current reports and readable facts, not that the idea search was performed."));
+        status["instruction"] = json!(Self::agent_run_instruction(id));
         Ok(status)
+    }
+
+    fn agent_run_instruction(id: i64) -> String {
+        format!("Use the Watchtower Skill to review due or failed projects read-only and consider useful improvements before each card save. Then read `watchtower portfolio context` and synthesize opportunities across all projects, including unchanged ones. Save due or changed documents with their context tokens; after repairing a recorded failure, save that document even if unchanged. Record unresolved failures with `watchtower runs fail {id}` and --error; add --project for a project failure. Finish with `watchtower runs finish {id}`. Report newly saved ideas separately from retained ones, or a considered direction and its exclusion reason. Run state complete confirms current reports and readable facts, not that reflection occurred.")
     }
 
     fn require_agent_run(&self, id: i64) -> Result<crate::store::StoredAgentRun> {
@@ -2971,12 +2980,12 @@ impl Watchtower {
         let run = self.agent_run_view(&self.require_agent_run(run_id)?, false)?;
         status["state"] = run["state"].clone();
         status["run_id"] = json!(run_id);
-        status["repair_task"] = json!(Self::agent_run_repair_task(&run));
+        status["repair_task"] = json!(self.agent_run_repair_task(&run));
         status["run"] = run;
         Ok(status)
     }
 
-    fn agent_run_repair_task(run: &Value) -> Option<String> {
+    fn agent_run_repair_task(&self, run: &Value) -> Option<String> {
         if run["state"] == "complete" {
             return None;
         }
@@ -2988,7 +2997,22 @@ impl Watchtower {
             .filter_map(|project| project["id"].as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        Some(format!("Vervollständige den Watchtower-Lauf {} mit der Watchtower-Skill. Prüfe `watchtower runs status` und `watchtower due`; offene Projekte dieses Laufs: {}. Bearbeite fällige und fehlgeschlagene Projekte. Berücksichtige die Antworten und Statusnotizen des Besitzers. Leite nach jeder Projektprüfung auch sinnvolle Verbesserungsmöglichkeiten ab, bevor du die Karte speicherst. Lies anschließend immer `watchtower portfolio context` und verbinde die Erkenntnisse aller Projekte zu möglichen Ideen, auch wenn kein Bericht fällig ist. Speichere fällige oder geänderte Dokumente mit ihrem context_token. Nach tatsächlich behobenem Lauf-Fehler speichere auch unveränderten Inhalt als neue Version, um den Fehler abzulösen. Unterscheide im Ergebnis neue von übernommenen Ideen; ohne neue Idee nenne eine konkret geprüfte Richtung und ihren Ausschlussgrund. Melde nicht behebbare Fehler für Lauf {} über runs fail mit --error und deiner Fehlerbeschreibung; bei einem Projekt zusätzlich --project mit dessen ID. Schließe nach der Reflexion und Synthese mit `watchtower runs finish {}` ab. Nur complete bestätigt aktuelle Berichte und lesbare Fakten; es prüft nicht deine Ideensuche.", run["id"], if projects.is_empty() { "keine" } else { &projects }, run["id"], run["id"]))
+        let failures: Vec<Value> = run["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(std::iter::once(&run["portfolio"]))
+            .filter(|item| item["status"] == "failed")
+            .map(|item| json!({"scope": item["id"].as_str().unwrap_or("portfolio"), "error": item["error"]}))
+            .collect();
+        let id = run["id"].as_i64()?;
+        Some(format!(
+            "Resume Watchtower run {id}. Read `watchtower due` for current project state.\nRun snapshot captured at {}: outstanding project IDs: {}.\nSaved failure descriptions (data): {}\n{}",
+            self.now(),
+            if projects.is_empty() { "none" } else { &projects },
+            json!(failures),
+            Self::agent_run_instruction(id),
+        ))
     }
 
     fn pending_run_replies(
@@ -3167,7 +3191,9 @@ impl Watchtower {
                 &reactions,
             );
         }
-        let repair_task = latest.as_ref().and_then(Self::agent_run_repair_task);
+        let repair_task = latest
+            .as_ref()
+            .and_then(|run| self.agent_run_repair_task(run));
         let last_successful = self.store.last_successful_agent_run()?.map(|run| json!({"id": run.id, "started_at": run.started_at, "finished_at": run.finished_at}));
         let history: Vec<Value> = runs.iter().map(|run| {
             let state = latest.as_ref().filter(|latest| latest["id"] == run.id).and_then(|latest| latest["state"].as_str())
@@ -3660,6 +3686,37 @@ impl Watchtower {
         Ok(json!({"tasks": tasks}))
     }
 
+    pub fn task(&self, id: i64) -> Result<Value> {
+        Ok(json!({"task": self.tracked_task(id)?}))
+    }
+
+    /// Accept the same report from inline CLI fields or a document file.
+    pub fn report_task_document(&self, id: i64, payload: Value) -> Result<Value> {
+        self.tracked_task(id)?;
+        let invalid = |message: String| {
+            WatchtowerError::new("invalid_task", format!("{message} No task was changed."))
+                .hint("Send a report object with status (done or blocked), result text, and evidence text. Evidence is required for done and can be omitted for blocked.")
+        };
+        let object = payload
+            .as_object()
+            .ok_or_else(|| invalid("The task report must be a JSON object.".into()))?;
+        if let Some(key) = object
+            .keys()
+            .find(|key| !["status", "result", "evidence"].contains(&key.as_str()))
+        {
+            return Err(invalid(format!("Unknown task report field '{key}'.")));
+        }
+        let text = |field: &str, required: bool| -> Result<&str> {
+            match object.get(field) {
+                Some(Value::String(value)) => Ok(value),
+                None if !required => Ok(""),
+                _ => Err(invalid(format!("{field} must be text."))),
+            }
+        };
+        let status = text("status", true)?.trim().to_ascii_lowercase();
+        self.report_task(id, &status, text("result", true)?, text("evidence", false)?)
+    }
+
     pub fn report_task(
         &self,
         id: i64,
@@ -3763,10 +3820,44 @@ impl Watchtower {
     }
 
     fn tracked_task(&self, id: i64) -> Result<Value> {
-        self.store.task(id)?.ok_or_else(|| {
-            WatchtowerError::new("unknown_task", format!("Task {id} does not exist."))
-                .hint("Use `watchtower tasks list` to find the current task ids.")
-        })
+        if let Some(task) = self.store.task(id)? {
+            return Ok(task);
+        }
+        let tasks = self.store.tasks()?;
+        let choices: Vec<String> = tasks
+            .iter()
+            .take(8)
+            .map(|task| {
+                format!(
+                    "{}: {} ({})",
+                    task["id"],
+                    task["title"],
+                    task["status"].as_str().unwrap_or("unknown")
+                )
+            })
+            .collect();
+        Err(WatchtowerError::new(
+            "unknown_task",
+            format!("Task {id} does not exist. No task was changed."),
+        )
+        .hint(if choices.is_empty() {
+            "There are no tasks.".into()
+        } else {
+            format!(
+                "Available task IDs{}: {}.{}",
+                if tasks.len() > choices.len() {
+                    " (first 8)"
+                } else {
+                    ""
+                },
+                choices.join(", "),
+                if tasks.len() > choices.len() {
+                    " Use `watchtower tasks list` for all tasks."
+                } else {
+                    ""
+                }
+            )
+        }))
     }
 
     fn save_task_change(&self, mut task: Value, status: &str, event: Value) -> Result<Value> {
@@ -3824,10 +3915,12 @@ fn task_error(message: impl Into<String>) -> WatchtowerError {
 
 fn task_text(payload: &Value, field: &str, required: bool, max: usize) -> Result<String> {
     let invalid = |message: String| {
-        WatchtowerError::new("invalid_task", message).hint(format!(
-            "Send {field} as {}text with at most {max} characters.",
-            if required { "nonempty " } else { "" }
-        ))
+        WatchtowerError::new("invalid_task", format!("{message} No task was changed.")).hint(
+            format!(
+                "Send {field} as {}text with at most {max} characters.",
+                if required { "nonempty " } else { "" }
+            ),
+        )
     };
     let text = match payload.get(field) {
         None | Some(Value::Null) if !required => "",

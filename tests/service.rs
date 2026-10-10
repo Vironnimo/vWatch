@@ -360,7 +360,10 @@ fn invalid_cards_are_refused_with_field_paths() {
         .unwrap_err();
     assert_eq!(err.code, "invalid_card");
     assert!(
-        err.message.contains("phase:") && err.message.contains("reentry.next_step: Field required"),
+        err.message.contains("phase:")
+            && err
+                .message
+                .contains("reentry.next_step: This field is required"),
         "{}",
         err.message
     );
@@ -380,7 +383,7 @@ fn invalid_cards_are_refused_with_field_paths() {
         .unwrap_err();
     assert!(
         err.message
-            .contains("headline: Text should have at most 10 words, has 11"),
+            .contains("headline: Text has 11 words; limit is 10"),
         "{}",
         err.message
     );
@@ -409,6 +412,37 @@ fn invalid_cards_are_refused_with_field_paths() {
             "ignored unknown field: vision.size"
         ])
     );
+    // Explicit invalid payload values never turn into deletions or fresh item identities.
+    let kept_card = svc.card("demo").unwrap();
+    let existing_id = kept_card["card"]["suggestions"][0]["id"].clone();
+    for (payload, field) in [
+        (json!({"suggestions": null}), "suggestions:"),
+        (json!({"handbook": null}), "handbook:"),
+        (json!({"stack": null}), "stack:"),
+        (
+            json!({"suggestions": [
+                {"id": existing_id, "type": "feature", "title": "Erster Vorschlag", "why": "Erster Grund"},
+                {"id": existing_id, "type": "feature", "title": "Zweiter Vorschlag", "why": "Zweiter Grund"}
+            ]}),
+            "suggestions[1].id:",
+        ),
+        (
+            json!({"waiting_on_you": [{"id": existing_id, "title": "Frage"}]}),
+            "waiting_on_you[0].id:",
+        ),
+    ] {
+        for preview in [true, false] {
+            let error = svc
+                .put_card("demo", payload.clone(), true, preview)
+                .unwrap_err();
+            assert_eq!(error.code, "invalid_card");
+            assert!(error.message.contains(field), "{error}");
+            assert_eq!(svc.card("demo").unwrap(), kept_card);
+        }
+    }
+    // Nullable slots retain their documented empty value.
+    svc.put_card("demo", json!({"vision": {"statement": null}}), true, true)
+        .unwrap();
     let stored = svc.store().latest_card("demo").unwrap().unwrap();
     let old = card_with(json!({"health_notes": ["wort ".repeat(31)]}));
     svc.store()
@@ -447,7 +481,7 @@ fn invalid_cards_are_refused_with_field_paths() {
         .unwrap_err();
     assert!(
         err.message
-            .contains("health_notes[0]: Text should have at most 30 words, has 31"),
+            .contains("health_notes[0]: Text has 31 words; limit is 30"),
         "{}",
         err.message
     );
@@ -469,7 +503,7 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
         .put_portfolio(four, false, false)
         .unwrap_err()
         .message
-        .contains("focus: List should have at most 3 items"));
+        .contains("focus: List has 4 items; limit is 3"));
     assert!(err.hint.unwrap().contains("demo"));
 
     brief["focus"][0]["project"] = json!("demo");
