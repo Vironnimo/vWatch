@@ -40,6 +40,60 @@ async fn state(app: State<'_, AppState>, visit: bool) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn statistics(
+    app: State<'_, AppState>,
+    project: Option<String>,
+    from: Option<String>,
+    until: Option<String>,
+) -> Reply {
+    work(&app, move |s| {
+        s.statistics(project.as_deref(), from.as_deref(), until.as_deref())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn history(
+    app: State<'_, AppState>,
+    project: Option<String>,
+    entity: Option<String>,
+    id: Option<String>,
+    before: Option<i64>,
+) -> Reply {
+    work(&app, move |s| {
+        s.history(project.as_deref(), entity.as_deref(), id.as_deref(), before)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn history_event(app: State<'_, AppState>, id: i64) -> Reply {
+    work(&app, move |s| s.history_event(id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn document_versions(app: State<'_, AppState>, project: Option<String>) -> Reply {
+    work(&app, move |s| match project {
+        Some(id) => s.card_history(&id),
+        None => s.portfolio_history(),
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn compare_documents(
+    app: State<'_, AppState>,
+    project: Option<String>,
+    from: i64,
+    to: i64,
+) -> Reply {
+    work(&app, move |s| {
+        s.compare_documents(project.as_deref(), from, to)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn refresh(app: State<'_, AppState>) -> Reply {
     work(&app, |s| {
         s.refresh_facts(None, true)?;
@@ -143,6 +197,11 @@ async fn set_status(
 #[tauri::command(rename_all = "snake_case")]
 async fn add_idea(app: State<'_, AppState>, text: String) -> Reply {
     work(&app, move |s| s.add_idea(&text)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn update_idea(app: State<'_, AppState>, id: i64, text: String, revision: i64) -> Reply {
+    work(&app, move |s| s.update_idea(id, &text, revision)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -318,6 +377,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             state,
+            statistics,
+            history,
+            history_event,
+            document_versions,
+            compare_documents,
             refresh,
             set_feedback,
             create_task,
@@ -330,6 +394,7 @@ pub fn run() {
             set_pref,
             set_status,
             add_idea,
+            update_idea,
             remove_idea,
             restore_idea,
             set_goal,

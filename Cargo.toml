@@ -38,6 +38,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 sha1 = "0.10"
+tokei = { version = "15.0.0", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

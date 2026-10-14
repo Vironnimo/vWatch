@@ -9,7 +9,11 @@ Watchtower holds two kinds of data:
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
-Four always-reachable areas organize the window: **Heute** brings together decisions, blocked work, results awaiting your confirmation, next steps and unread reports; **Projekte** keeps project voices, current state, tasks and expandable history and facts; **Ideen** collects suggestions and your own ideas; **Handbuch** helps you start and use each project. Routine Git work does not determine the attention order. Unread content and an outdated agent report are different signals.
+Five always-reachable areas organize the window: **Heute** brings together decisions, blocked work, results awaiting your confirmation, next steps and unread reports; **Projekte** keeps project voices, current state, tasks and expandable history and facts; **Ideen** collects suggestions and your own ideas; **Handbuch** helps you start and use each project; **Statistik** compares saved measurements and content changes. Routine Git work does not determine the attention order. Unread content and an outdated agent report are different signals.
+
+Statistics retain every facts refresh in SQLite, including failed measurements. They show source lines, language shares, files, commits, changed lines, frequently changed files, local work and confirmed task completions over a chosen period. Source counts describe the working tree, including uncommitted files, with documentation/configuration separate and common generated/dependency files excluded heuristically. Unknown or incomplete measurements never become zeroes; folder, branch or counting-method changes break size comparisons. The Git activity reconstruction has its own coverage and remains distinct from observed state.
+
+Cards remain editable JSON documents through the guarded CLI. Each saved version and content change is recorded in the same database transaction, so the live UI and history agree. "Änderungsverlauf" shows previous and new values for reports, project intent, ideas, proposals, tasks, feedback and warning decisions; any two card or portfolio versions can be compared. The migration retains existing document versions and the last available facts; earlier overwritten measurements cannot be recovered. Unchanged large statistics payloads share storage while every observation retains its timestamp. Reading history never acknowledges unread reports.
 
 "Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes stay in project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Project and activity markers share the explicit read snapshot. Even the first visit does not create a read baseline: use "Aktuellen Stand als gelesen markieren" after reading. Refreshing facts or reopening the window never acknowledges reports.
 
@@ -25,7 +29,7 @@ Deliberate choices such as local-only work or a needed worktree can be acknowled
 
 Tasks and ideas show the action, reason and completion criterion without agent estimates of duration or effort. Existing estimates are hidden throughout the window, and new cards and briefs no longer request or store them. Owner-set due dates and measured activity remain available.
 
-The ideas collection combines project suggestions, app ideas, cross-project possibilities and your own ideas. Filters separate "Neu", "Gut gefunden", "Später", "Beauftragt", "Abgeschlossen", "Abgelehnt" and "Alle". A positive rating never creates an assignment. Rated and assigned proposals remain findable after a later report omits them; removing your own idea still moves it to restorable trash. Deferred ideas return to "Neu" when their date arrives.
+The ideas collection combines project suggestions, app ideas, cross-project possibilities and your own ideas. Filters separate "Neu", "Gut gefunden", "Später", "Beauftragt", "Abgeschlossen", "Abgelehnt" and "Alle". A positive rating never creates an assignment. Every proposal remains findable after a later report omits it, including unrated proposals. Your own ideas can be edited in place with guarded undo and preserved history; an edit requires a new agent assessment. Removing an idea still moves it to restorable trash. Deferred ideas return to "Neu" when their date arrives.
 
 Ideas sort newest first by the first saved appearance of their stable ID, including in project drawers. Rewriting or reintroducing an older idea does not make it new. Each project review includes reflection on useful improvements, followed by a synthesis across all projects, even when reports are current. Existing suggestions do not block new ones. Agents save worthwhile proposals, respect rejected or deferred ideas, and report what was newly added or why a considered direction did not qualify.
 
@@ -84,7 +88,7 @@ To rename a watched project or reconnect its moved folder, use its stable ID wit
 ```bash
 cargo test
 cargo clippy --all-targets
-node --test tests/ui.cjs tests/ui-drawer.cjs tests/ui-handoff.cjs tests/ui-ideas.cjs tests/ui-overview.cjs
+node --test tests/ui*.cjs
 cargo build --release
 cargo test --no-default-features
 cargo run --bin Watchtower -- due --no-refresh

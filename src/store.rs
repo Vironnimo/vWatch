@@ -8,6 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod history;
 mod undo;
 use undo::OwnerScope;
 pub use undo::OwnerUndo;
@@ -133,6 +134,7 @@ pub struct Idea {
     pub id: i64,
     pub text: String,
     pub added_at: String,
+    pub revision: i64,
 }
 
 pub struct StoredPortfolio {
@@ -238,6 +240,7 @@ impl Store {
             ("projects", "goal_due", "TEXT"),
             ("projects", "removed_at", "TEXT"),
             ("ideas", "removed_at", "TEXT"),
+            ("ideas", "revision", "INTEGER NOT NULL DEFAULT 1"),
             (
                 "projects",
                 "identity_revision",
@@ -255,6 +258,7 @@ impl Store {
                 tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
             }
         }
+        history::migrate(&tx)?;
         tx.commit()?;
         Ok(Store { db: Mutex::new(db) })
     }
@@ -733,9 +737,9 @@ impl Store {
     }
 
     pub fn idea(&self, id: i64) -> Result<Option<Value>> {
-        self.with(|db| db.query_row("SELECT id,text,added_at,removed_at FROM ideas WHERE id=?1", [id], |r| Ok(serde_json::json!({
+        self.with(|db| db.query_row("SELECT id,text,added_at,removed_at,revision FROM ideas WHERE id=?1", [id], |r| Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?, "text": r.get::<_, String>(1)?,
-            "added_at": r.get::<_, String>(2)?, "removed_at": r.get::<_, Option<String>>(3)?
+            "added_at": r.get::<_, String>(2)?, "removed_at": r.get::<_, Option<String>>(3)?, "revision":r.get::<_,i64>(4)?
         }))).optional())
     }
 
@@ -753,12 +757,13 @@ impl Store {
     /// All parked ideas, oldest first.
     pub fn ideas(&self) -> Result<Vec<Idea>> {
         self.with(|db| {
-            db.prepare("SELECT id, text, added_at FROM ideas WHERE removed_at IS NULL ORDER BY id")?
+            db.prepare("SELECT id, text, added_at,revision FROM ideas WHERE removed_at IS NULL ORDER BY id")?
                 .query_map([], |r| {
                     Ok(Idea {
                         id: r.get(0)?,
                         text: r.get(1)?,
                         added_at: r.get(2)?,
+                        revision: r.get(3)?,
                     })
                 })?
                 .collect()
@@ -1016,6 +1021,16 @@ fn item_conflicts(
         .optional()?
     {
         add(Kind::Portfolio, None, json(data));
+    }
+    let mut stmt = db.prepare("SELECT id,NULLIF(scope,'@portfolio'),kind FROM proposals")?;
+    for row in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+        ))
+    })? {
+        owners.push(row?);
     }
     let mut stmt = db.prepare("SELECT item_id,project_id,item FROM feedback")?;
     for row in stmt.query_map([], |r| {

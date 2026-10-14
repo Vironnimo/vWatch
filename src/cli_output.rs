@@ -4,6 +4,140 @@ use serde_json::{json, Value};
 pub(super) fn human(command: &str, data: &Value) -> String {
     let mut out = String::new();
     match command {
+        "facts.history" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} saved measurements, oldest first.",
+                    list(&data["samples"]).len()
+                ),
+            );
+            line(&mut out, 0, &format!("Note: {}", text(&data["note"])));
+            field(&mut out, "Measurements", &data["samples"], 0);
+        }
+        "statistics" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "Stored statistics from {} through {}.",
+                    text(&data["from"]),
+                    text(&data["until"])
+                ),
+            );
+            line(&mut out, 0, &format!("Note: {}", text(&data["note"])));
+            field(&mut out, "Summary", &data["summary"], 0);
+            for p in list(&data["projects"]) {
+                line(
+                    &mut out,
+                    0,
+                    &format!("Project {}: {}", text(&p["id"]), text(&p["name"])),
+                );
+                let c = &p["current"];
+                field(
+                    &mut out,
+                    "Last observation",
+                    &json!({"at":c["at"],"branch":c["branch"],"ok":c["ok"],
+                    "source_code":if c["ok"]==true && c["code"]["ok"]==true {c["code"]["source_code"].clone()}else{Value::Null},
+                    "dirty_files":c["dirty"]["files"],"ahead":c["ahead"],"behind":c["behind"],"ci":c["ci"]["state"]}),
+                    1,
+                );
+                field(&mut out, "Baseline at", &p["baseline"]["at"], 1);
+                fields(
+                    &mut out,
+                    p,
+                    &["change", "comparison_note", "confirmed_completions"],
+                    1,
+                );
+                field(
+                    &mut out,
+                    "Reconstructed Git activity",
+                    &json!({"complete":p["activity"]["complete"],
+                    "coverage":p["activity"]["coverage"],"totals":p["activity"]["totals"]}),
+                    1,
+                );
+                line(
+                    &mut out,
+                    1,
+                    &format!(
+                        "{} observations in the period. facts history with this project ID reads full measurements; statistics --json also includes daily activity and language details.",
+                        list(&p["samples"]).len()
+                    ),
+                );
+            }
+        }
+        "history.list" => {
+            table(
+                &mut out,
+                list(&data["events"]),
+                "saved content events",
+                "newest first",
+                &[
+                    "id",
+                    "at",
+                    "entity",
+                    "entity_id",
+                    "operation",
+                    "title",
+                    "fields",
+                ],
+            );
+            line(&mut out, 0, &format!("Note: {}", text(&data["note"])));
+            if !data["next_before"].is_null() {
+                let mut next = format!(
+                    "watchtower history list --before {}",
+                    text(&data["next_before"])
+                );
+                for (field, flag) in [
+                    ("project", "project"),
+                    ("entity", "entity"),
+                    ("entity_id", "id"),
+                ] {
+                    if let Some(value) = data[field].as_str() {
+                        next.push_str(&format!(" --{flag} '{}'", value.replace('\'', "''")));
+                    }
+                }
+                line(&mut out, 0, &format!("Next: {next}"));
+            }
+        }
+        "history.show" => {
+            line(
+                &mut out,
+                0,
+                "Saved content event with full before/after values.",
+            );
+            tree(&mut out, &data["event"], 0);
+        }
+        "card.compare" | "portfolio.compare" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} changed fields between versions {} and {}.",
+                    list(&data["changes"]).len(),
+                    text(&data["from"]),
+                    text(&data["to"])
+                ),
+            );
+            fields(
+                &mut out,
+                data,
+                &["project", "before_at", "after_at", "changes"],
+                0,
+            );
+        }
+        "proposals" => {
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} retained agent proposals, newest first appearance first.",
+                    list(&data["proposals"]).len()
+                ),
+            );
+            field(&mut out, "Proposals", &data["proposals"], 0);
+        }
         "projects.add" if data["added"].is_array() => {
             let errors = if data["errors"].is_array() {
                 &data["errors"]
@@ -357,12 +491,18 @@ pub(super) fn human(command: &str, data: &Value) -> String {
             "oldest ID first",
             &data["ideas"],
         ),
-        "ideas.add" | "ideas.restore" => {
+        "ideas.add" | "ideas.restore" | "ideas.update" => {
             line(
                 &mut out,
                 0,
                 if data["idea"]["already_exists"] == true || data["already_active"] == true {
                     "Idea already present."
+                } else if command == "ideas.update" {
+                    if data["changed"] == false {
+                        "Idea unchanged."
+                    } else {
+                        "Idea updated; its ID and history are preserved."
+                    }
                 } else if command == "ideas.add" {
                     "Idea saved."
                 } else {

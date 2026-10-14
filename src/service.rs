@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde_json::{json, Map, Value};
 
+mod statistics;
 mod undo;
 use undo::with_receipt;
 
@@ -468,7 +469,7 @@ fn not_typed(how: &str) -> bool {
 }
 
 fn idea_json(i: &Idea) -> Value {
-    json!({"id": i.id, "text": i.text, "added_at": i.added_at})
+    json!({"id": i.id, "text": i.text, "added_at": i.added_at,"revision":i.revision})
 }
 
 fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
@@ -1657,14 +1658,22 @@ impl Watchtower {
             .filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str()))
             .map(feedback_context)
             .collect();
+        let mut facts_context = stored.data;
+        if let Some(object) = facts_context.as_object_mut() {
+            object.remove("activity");
+        }
+        if let Some(code) = facts_context["code"].as_object_mut() {
+            code.remove("largest_files");
+        }
         let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() { " Use --merge only when sending changed top-level fields; send each changed list in full." } else { " Send a complete card." });
         Ok(json!({
             "today": self.today().to_string(),
             "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
-            "facts": extend(json!({"collected_at": stored.collected_at}), stored.data),
+            "facts": extend(json!({"collected_at": stored.collected_at}), facts_context),
             "new_fields": card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)),
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": Kind::Card.current_view(&c.data)})),
             "since_previous_card": since,
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["scope"]==id && p["in_report"]==false).collect::<Vec<_>>(),
             "feedback": feedback,
             "feedback_summary": feedback_summary(&reactions),
             "tasks": self.tasks(Some(id))?["tasks"],
@@ -2091,6 +2100,7 @@ impl Watchtower {
             "today": self.today().to_string(),
             "review_week": {"week": week, "from": from.to_string(), "to": to.to_string(), "due": !reviewed},
             "owner_ideas": self.store.ideas()?.iter().map(|i| extend(idea_json(i), json!({"checked": !unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["in_report"]==false && (p["scope"]=="@portfolio" || rows.iter().any(|r|r["id"]==p["scope"]))).collect::<Vec<_>>(),
             "projects": rows,
             "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": Kind::Portfolio.current_view(&p.data)})),
             "owner_last_opened": self.store.pref("last_visit")?,
@@ -2237,6 +2247,29 @@ impl Watchtower {
             json!({"id": id, "text": text, "created": created, "already_exists": !created,
             "undo": created.then(||format!("watchtower ideas remove {id}"))}),
         )
+    }
+
+    pub fn update_idea(&self, id: i64, text: &str, revision: i64) -> Result<Value> {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > IDEA_MAX {
+            return Err(WatchtowerError::new(
+                "invalid_idea",
+                format!("An idea needs 1 to {IDEA_MAX} characters. Nothing was changed."),
+            ));
+        }
+        let receipt = self
+            .store
+            .update_idea_text(id, text, revision, &self.now())?
+            .ok_or_else(|| {
+                WatchtowerError::new(
+                    "idea_changed",
+                    "The idea changed or is unavailable. Nothing was changed.",
+                )
+                .hint(
+                    "Read watchtower ideas list, reconcile the text and use its current revision.",
+                )
+            })?;
+        Ok(with_receipt(json!({"idea":self.store.idea(id)?}), receipt))
     }
 
     pub fn remove_idea(&self, id: i64) -> Result<Value> {
@@ -2509,6 +2542,23 @@ impl Watchtower {
                 return Ok(Some((project, snapshot)));
             }
         }
+        if let Some(proposal) = self
+            .store
+            .proposals()?
+            .into_iter()
+            .find(|p| p["id"] == item_id)
+        {
+            let project = proposal["scope"]
+                .as_str()
+                .filter(|s| *s != "@portfolio")
+                .map(str::to_owned);
+            if let Some(id) = &project {
+                if self.store.project(id)?.is_none() {
+                    return Ok(None);
+                }
+            }
+            return Ok(Some((project, proposal["item"].clone())));
+        }
         Ok(None)
     }
 
@@ -2678,12 +2728,12 @@ impl Watchtower {
         match key {
             "style"
                 if !value.as_str().is_some_and(|style| {
-                    ["handover", "board", "handbook", "ideas"].contains(&style)
+                    ["handover", "board", "handbook", "ideas", "statistics"].contains(&style)
                 }) =>
             {
                 Err(
                     WatchtowerError::new("invalid_pref", "Invalid style. Nothing was changed.")
-                        .hint("Use handover, board, handbook or ideas."),
+                        .hint("Use handover, board, handbook, ideas or statistics."),
                 )
             }
             "hidden_modules"
@@ -2717,6 +2767,11 @@ impl Watchtower {
 
     /// The ids of parked ideas the latest brief has not assessed yet.
     fn unchecked_ideas(&self, brief: Option<&Value>) -> Result<Vec<i64>> {
+        let basis = self
+            .store
+            .latest_portfolio()?
+            .and_then(|p| p.basis)
+            .unwrap_or(Value::Null);
         let checked: Vec<i64> = brief
             .and_then(|b| b["idea_checks"].as_array())
             .into_iter()
@@ -2727,8 +2782,12 @@ impl Watchtower {
             .store
             .ideas()?
             .into_iter()
+            .filter(|i| {
+                !checked.contains(&i.id)
+                    || (i.revision > 1
+                        && basis["@ideas"][i.id.to_string()].as_i64() != Some(i.revision))
+            })
             .map(|i| i.id)
-            .filter(|id| !checked.contains(id))
             .collect())
     }
 
@@ -2772,6 +2831,15 @@ impl Watchtower {
     /// What the brief builds on, including removals and owner changes without a new card.
     fn portfolio_basis(&self) -> Result<Value> {
         let mut basis = Map::new();
+        basis.insert(
+            "@ideas".into(),
+            json!(self
+                .store
+                .ideas()?
+                .into_iter()
+                .map(|i| (i.id.to_string(), json!(i.revision)))
+                .collect::<Map<String, Value>>()),
+        );
         let tasks = self.store.tasks()?;
         if !tasks.is_empty() {
             // The brief also assesses standalone work and tasks whose project was removed.
@@ -3560,6 +3628,7 @@ impl Watchtower {
             task["source_snapshot"] = snapshot.unwrap_or(Value::Null);
             task["source_first_seen"] = date;
         }
+        let unchecked = self.unchecked_ideas(portfolio.as_ref().map(|p| &p.data))?;
         let feedback: Map<String, Value> = reactions
             .into_iter()
             .map(|f| {
@@ -3580,10 +3649,11 @@ impl Watchtower {
             "changes": changes,
             "projects": projects,
             "portfolio": portfolio.as_ref().map(|p| p.data.clone()),
-            "portfolio_updated_at": portfolio.map(|p| p.created_at),
+            "portfolio_updated_at": portfolio.as_ref().map(|p| &p.created_at),
             "new_app_first_seen": new_app_first_seen,
             "synergy_first_seen": synergy_first_seen,
-            "ideas": self.store.ideas()?.iter().map(idea_json).collect::<Vec<_>>(),
+            "ideas": self.store.ideas()?.iter().map(|i|extend(idea_json(i),json!({"checked":!unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
+            "proposals": self.store.proposals()?,
             "tasks": tasks,
             "review_week": self.review_week().0,
             "run_status": self.run_status()?,

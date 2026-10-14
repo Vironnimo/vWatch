@@ -13,6 +13,8 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
+mod statistics;
+
 pub const WEEKS: usize = 26;
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
@@ -912,7 +914,7 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
         .into_iter()
         .flatten()
         .max();
-    json!({
+    let mut measured = json!({
         "ok": true, "is_git": true, "head": head, "branch": branch,
         "commits": commits,
         "remotes": remotes.iter().map(|(n, u)| json!({"name": n, "url": u})).collect::<Vec<_>>(),
@@ -927,7 +929,18 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
         "ci": if with_ci { ci(repo, &remotes, branch.as_deref()) } else { json!({"state": "skipped"}) },
         "docs_mtime": docs_mtime(repo).map(iso),
         "last_work": last_work,
-    })
+        "code": statistics::code(repo),
+        "activity": statistics::activity(repo, today, head.as_deref()),
+    });
+    if head != trimmed(git(repo, &["rev-parse", "HEAD"]))
+        || branch != trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]))
+    {
+        measured["ok"] = json!(false);
+        measured["error"] = json!("repository_changed_during_measurement");
+        measured["code"]["ok"] = json!(false);
+        measured["code"]["partial"] = json!(true);
+    }
+    measured
 }
 
 /// Commit subjects after `rev`, newest first, as "YYYY-MM-DD subject"; None when rev is unknown.

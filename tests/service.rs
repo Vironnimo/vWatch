@@ -1195,6 +1195,7 @@ fn project_update_validation_is_atomic_and_old_databases_stay_current() {
         .unwrap();
     drop(svc);
     let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    common::remove_history_schema(&db);
     db.execute_batch("ALTER TABLE projects DROP COLUMN identity_revision;")
         .unwrap();
     drop(db);

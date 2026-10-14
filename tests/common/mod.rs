@@ -94,3 +94,14 @@ pub fn card_with(overrides: Value) -> Value {
     }
     c
 }
+
+/// Legacy fixtures predate the durable-history tables and their triggers.
+pub fn remove_history_schema(db: &rusqlite::Connection) {
+    let names=db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name LIKE 'history_%' OR name LIKE 'samples_%' OR name LIKE 'immutable_%')").unwrap()
+        .query_map([],|r|r.get::<_,String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    for name in names {
+        db.execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))
+            .unwrap();
+    }
+    db.execute_batch("DROP TABLE IF EXISTS fact_samples; DROP TABLE IF EXISTS fact_payloads; DROP TABLE IF EXISTS proposals; DROP TABLE IF EXISTS content_history; DROP TABLE IF EXISTS history_migrations;").unwrap();
+}

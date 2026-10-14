@@ -5,6 +5,7 @@ Use this reference for owner actions outside the daily recipes, history recovery
 Contents:
 - Output, continuation and recovery
 - Document writes and history
+- Statistics and content history
 - Projects
 - Owner decisions
 - Assigned work
@@ -60,6 +61,20 @@ watchtower card restore <project-id> --version <version> --context-token <contex
 
 For a brief, use `watchtower portfolio restore --version <version> --context-token <context-token>`. Restoring an older version appends a version and preserves history; restoring the current version changes nothing. Restored evidence stays historical, so the document can remain due. Restore only content consistent with current user instructions; otherwise write a reconciled document instead.
 
+## Statistics and content history
+
+`statistics` reads saved observations for all watched projects, including parked and archived projects. Use `--project <project-id>` for one project, including a removed project. `--from YYYY-MM-DD` and `--until YYYY-MM-DD` select inclusive calendar dates; the default is the last 30 days through today. Reading statistics never refreshes facts or acknowledges content. Use `facts refresh` only when a new measurement is needed.
+
+The result includes current and baseline measurements with their actual timestamps, language shares, source-line changes, observed time series, Git activity and owner-confirmed task completions. Source-line comparison requires two complete observations with the same folder, branch and counting method and no failed observation between them. A missing measurement is unknown, not zero. The baseline is the last observation before the period if complete, otherwise its first complete observation; this is not an invented midnight measurement. Saved Git reconstruction windows cover older dates after the rolling collection window moves on; newer observations replace overlapping dates for the selected branch/folder, and coverage gaps remain unknown. Code size and commit count describe activity, not quality or productivity.
+
+`facts history <project-id>` returns every retained fact observation, including failed measurements, with its timestamp, origin and full data. Existing installations retain their last available measurement when history starts; older overwritten observations cannot be recovered. Git commit activity can be reconstructed from available history and is labeled separately from observed working-tree state.
+
+`history list` reads the newest 30 content changes. Optional filters are `--project <project-id>`, `--entity <kind>` and `--id <entity-id>`. Kinds are `card`, `portfolio`, `project`, `idea`, `proposal`, `task`, `feedback` and `warning`. Follow the printed `Next:` for older entries; `history show <event-id>` reads the complete before/after values and changed fields. Migration baselines preserve known content without inventing prior edits, authors or dates. Window navigation and read preferences are not content edits.
+
+Compare any two saved document versions with `card compare <project-id> --from <version> --to <version>` or `portfolio compare --from <version> --to <version>`. Both only read; they do not restore a document or mark it read. The versions come from the corresponding `history` command.
+
+`proposals` lists retained suggestions, synergies and app ideas; `--project <project-id>` filters project suggestions. A proposal remains available when later reports omit it, even without a rating or assignment. `in_report` describes presence in the current report, not completion or rejection. `first_seen` preserves its original appearance. Project and portfolio contexts include omitted `retained_proposals`; reconcile these and their owner reactions before creating a duplicate. Keep the existing ID when updating the same proposal in its original scope and kind.
+
 ## Projects
 
 `projects list` shows stable IDs, names, status and card presence. `--query <text>` filters case-insensitively by ID, name, path or card text. `projects show <project-id>` includes its folder, measurement dates, card, facts, warnings and history. Names and paths can change; IDs persist.
@@ -92,7 +107,7 @@ watchtower feedback set <item-id> --value later --until <YYYY-MM-DD>
 
 Use `--note` for the user's answer or reason. Omission keeps the prior note. For `later`, an omitted `--until` preserves the existing date or sets 14 days. Legacy `later` reactions without a snooze date defer an item for 14 days after their timestamp. `feedback clear <item-id>` withdraws a reaction. `feedback restore <item-id> --file <snapshot-file>` restores the reaction snapshot from a previous result; JSON null means no reaction. Prefer an emitted `Undo:` command for accidental edits.
 
-`ideas list` shows the user's own ideas. `ideas add <text>` records the user's idea for the next brief to assess. `ideas remove <idea-id>` moves it to `ideas trash`; `ideas restore <idea-id>` restores the same idea ID. The brief's `idea_checks[].idea` refers to this numeric ID. To rate an active owner idea with `up`, `later` or `down`, or use it as a task source, use `idea:<idea-id>`. This prefix is reserved for owner ideas; never use it as a card or brief item ID. The agent's assessment does not set the owner's rating or assign work.
+`ideas list` shows the user's own ideas and their revisions. `ideas add <text>` records the user's idea for the next brief to assess. To edit it at the user's request, use `ideas update <idea-id> <text> --revision <revision>` with its current revision. This preserves its ID and earlier text, returns guarded undo and requires a new assessment in the brief. A revision conflict requires reading and reconciling the latest text. `ideas remove <idea-id>` moves it to `ideas trash`; `ideas restore <idea-id>` restores the same idea ID. The brief's `idea_checks[].idea` refers to this numeric ID. To rate an active owner idea with `up`, `later` or `down`, or use it as a task source, use `idea:<idea-id>`. This prefix is reserved for owner ideas; never use it as a card or brief item ID. The agent's assessment does not set the owner's rating or assign work.
 
 `warnings list <project-id>` shows measured warnings and acknowledgements. Only on the user's request, record a deliberate condition with `warnings acknowledge <project-id> --key <key> --note <reason>`. The complete keys are `no_remote`, `ci_none` and `worktrees`. `warnings clear <project-id> --key <key>` withdraws it. The measured fact stays visible, and material worsening invalidates the acknowledgement.
 
@@ -126,7 +141,7 @@ On the user's explicit decision, use `tasks confirm <task-id> --revision <revisi
 
 `changes show` returns changes in project reports (progress, open ends, questions, decisions and incorporated replies) since the last acknowledgement, plus its snapshot token. Measured Git/CI changes stay in project facts; they neither create digest entries nor invalidate its token. `changes read --token <token>` marks that snapshot read on the user's request. The same snapshot controls unread project and activity markers, including other changed report text. Reading views, refreshing facts and visits never acknowledge reports, including the first visit; without an explicit baseline, read status is unknown. An open end removed from a card is not proof of completion.
 
-`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|ideas|handbook>` selects "Heute", "Projekte", "Ideen" or "Handbuch"; existing preference values remain valid. `--hidden-modules <comma-separated-ids>` collapses sections while keeping their headers available to reopen them. An empty value expands every section. Omitted options remain unchanged. Autostart and PATH are the user's choices in the window's settings, without CLI mutations.
+`settings show` includes installation paths, autostart/PATH state and display preferences. `settings update --style <handover|board|ideas|handbook|statistics>` selects "Heute", "Projekte", "Ideen", "Handbuch" or "Statistik"; existing preference values remain valid. `--hidden-modules <comma-separated-ids>` collapses sections while keeping their headers available to reopen them. An empty value expands every section. Omitted options remain unchanged. Autostart and PATH are the user's choices in the window's settings, without CLI mutations.
 
 ## Daily-run data
 
@@ -164,6 +179,8 @@ Portfolio due reasons are `missing`, `new_day`, `owner_idea`, `cards_changed` an
 
 The measurements cover:
 
+- `code`: Tokei source lines, comments, blanks, languages and largest files from tracked and non-ignored untracked working-tree files. Language percentages use source lines, with documentation and configuration separate. Common dependency/build/generated directories, generated headers, lockfiles, minified files and symlinks are excluded heuristically. Unsupported/binary files are reported separately. Scans exceeding 8 seconds, 100 MB, 50,000 paths or 4 MB per file are incomplete and do not establish a comparable total.
+- `activity`: daily commits, added/removed text lines and the 20 most frequently changed paths from up to 365 days of HEAD ancestry. Merge commits count but merge diffs and binary changes do not add lines; directory/filename exclusions apply. This reconstruction has its own coverage and is not a history of uncommitted work. Hotspot coverage is shown separately from the selected statistics period.
 - `head`, `branch`, `commits` (total, first/last, 7/30/90-day counts and 26 weekly counts oldest first), remotes and upstream. `ahead`, `behind` and `unpushed_since` are null without an upstream and otherwise compare locally known refs; Watchtower never fetches. A configured remote neither verifies a remote backup nor describes other backup methods.
 - `dirty`: file/line counts, change signature and oldest/newest uncommitted edit times. These times use edits after the last commit; if all files predate it, that commit's time is used.
 - `worktrees`: additional checkouts, branch/head, prune eligibility and dirty counts/signatures. Null dirty counts mean unreadable; the main checkout is excluded. `branches` includes merged count and unmerged names, heads and last dates.

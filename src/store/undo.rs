@@ -5,6 +5,7 @@ use serde_json::{json, Map};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) enum OwnerScope {
+    Idea { id: i64 },
     Project { id: String, fields: Vec<String> },
     Feedback { id: String },
     Warning { id: String, key: String },
@@ -14,6 +15,7 @@ pub(super) enum OwnerScope {
 impl OwnerScope {
     fn keys(&self) -> Vec<String> {
         match self {
+            Self::Idea { id } => vec![format!("idea:{id}:text")],
             Self::Project { id, fields } => fields
                 .iter()
                 .map(|field| format!("project:{id}:{field}"))
@@ -39,6 +41,7 @@ impl OwnerScope {
 
     fn target(&self) -> Value {
         match self {
+            Self::Idea { id } => json!({"idea":id}),
             Self::Project { id, fields } => json!({"project": id, "fields": fields}),
             Self::Feedback { id } => json!({"item_id": id}),
             Self::Warning { id, key } => json!({"project": id, "warning": key}),
@@ -48,6 +51,7 @@ impl OwnerScope {
 
     fn snapshot(&self, db: &Connection) -> Result<Value> {
         match self {
+            Self::Idea { id } => db.query_row("SELECT text FROM ideas WHERE id=?1 AND removed_at IS NULL",[id],|row|Ok(json!({"value":{"text":row.get::<_,String>(0)?}}))).optional().map(|v|v.unwrap_or(Value::Null)),
             Self::Project { id, fields } => {
                 let project = db.query_row("SELECT * FROM projects WHERE id=?1 AND removed_at IS NULL", [id], project).optional()?;
                 let Some(project) = project else { return Ok(Value::Null); };
@@ -132,6 +136,37 @@ fn receipt(
 }
 
 impl Store {
+    pub fn update_idea_text(
+        &self,
+        id: i64,
+        text: &str,
+        revision: i64,
+        at: &str,
+    ) -> Result<Option<Value>> {
+        let mut accepted = true;
+        let receipt = self.owner_change(OwnerScope::Idea { id }, at, |db| {
+            let current = db
+                .query_row(
+                    "SELECT text,revision FROM ideas WHERE id=?1 AND removed_at IS NULL",
+                    [id],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            if current
+                .as_ref()
+                .is_none_or(|(old, rev)| *rev != revision && old != text)
+            {
+                accepted = false;
+                return Ok(());
+            }
+            db.execute(
+                "UPDATE ideas SET text=?2,revision=revision+1 WHERE id=?1 AND text<>?2",
+                params![id, text],
+            )?;
+            Ok(())
+        })?;
+        Ok(accepted.then_some(receipt))
+    }
     /// The edit, before/after snapshots and version counters commit together.
     pub(super) fn owner_change(
         &self,
@@ -232,6 +267,9 @@ impl OwnerScope {
     ) -> Result<()> {
         let value = &before["value"];
         match self {
+            Self::Idea { id } => {
+                db.execute("UPDATE ideas SET text=?2,revision=revision+1 WHERE id=?1 AND removed_at IS NULL",params![id,value["text"].as_str()])?;
+            }
             Self::Project { id, fields } => {
                 for field in fields {
                     // Scopes are generated internally, but keep SQL identifiers bounded.

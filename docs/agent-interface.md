@@ -51,6 +51,12 @@ The table covers every registered Tauri command in `src/app.rs`. "Covered" means
 | `set_status` | `projects status` | Covered |
 | `set_goal` | `projects goal` | Covered |
 | `add_idea` | `ideas add` | Covered |
+| `update_idea` | `ideas update <id> <text> --revision <revision>` | Covered; guarded edit and undo preserve earlier text |
+| `statistics` | `statistics --project <id> --from <date> --until <date>` | Covered; stored measurements, optional filters |
+| `history` | `history list` | Covered; bounded content journal with optional filters |
+| `history_event` | `history show <id>` | Covered; complete old/new content |
+| `document_versions` | `card history <id>`, `portfolio history` | Covered |
+| `compare_documents` | `card compare <id> --from <version> --to <version>`, `portfolio compare` | Covered; read-only comparison |
 | `remove_idea` | `ideas remove` | Covered; CLI also exposes trash and restore |
 | `restore_idea` | `ideas restore` | Covered; the window's removal undo uses the same service |
 | `rename_project` | `projects rename` or name-only `projects update` | Covered |
@@ -67,7 +73,7 @@ The table covers every registered Tauri command in `src/app.rs`. "Covered" means
 | `data_version` | Each CLI read returns current service state | Excluded UI reload counter; no agent polling loop is required |
 | `ready` | None | Excluded window show/focus lifecycle signal |
 
-Twenty-three of the twenty-nine endpoints have CLI equivalents; six are explicit presentation or OS-setting exclusions. There is no uncovered persisted owner-state operation in this inventory.
+Twenty-nine of the thirty-five endpoints have CLI equivalents; six are explicit presentation or OS-setting exclusions. There is no uncovered persisted owner-state operation in this inventory.
 
 The screen/event-handler pass covers behavior outside those endpoints:
 
@@ -83,7 +89,7 @@ The screen/event-handler pass covers behavior outside those endpoints:
 
 The CLI also exposes agent-only operations: measured refreshes, guarded card/brief writes, schema reads, run tracking, task reports, document history, trash restoration, saved output, jobs, usage and recovery activity.
 
-The navigation selects purposes rather than competing dashboard designs: "Heute" (`handover`), "Projekte" (`board`), "Ideen" (`ideas`) and "Handbuch" (`handbook`). Existing style values remain valid; `ideas` is additive. The morning page prioritizes owner decisions, blocked tasks and results for confirmation, followed by focus and unread reports. Project voices stay visible in the projects area and drawer. Routine local Git work no longer drives attention priority; concrete Git states and unknown measurements replace backup claims. Commit curves and agent progress percentages remain available only in project details, with percentages labeled as agent assessments. The drawer groups work, start/handbook material and history/facts; owner status and goals open for editing on request, and search selects and highlights the matching section.
+The navigation selects purposes rather than competing dashboard designs: "Heute" (`handover`), "Projekte" (`board`), "Ideen" (`ideas`), "Handbuch" (`handbook`) and "Statistik" (`statistics`). Existing style values remain valid. The morning page prioritizes owner decisions, blocked tasks and results for confirmation, followed by focus and unread reports. Project voices stay visible in the projects area and drawer. Routine local Git work no longer drives attention priority; concrete Git states and unknown measurements replace backup claims. Commit curves and agent progress percentages remain available only in project details, with percentages labeled as agent assessments. The drawer groups work, start/handbook material and history/facts; owner status and goals open for editing on request, and search selects and highlights the matching section.
 
 The legacy preference name `hidden_modules` and CLI flag `--hidden-modules` now mean collapsed sections: their headers remain visible and can reopen them directly. Existing saved values require no migration. The window's recent-event list sorts by event date descending, then card update timestamp descending for same-day ties, preserving authored order within one card. The timestamp orders reports; it does not invent event times.
 
@@ -92,6 +98,12 @@ This behavior is covered by 30 passing UI checks, including legacy collapsed val
 The digest follow-up removes raw fact churn from both entries and acknowledgement tokens. Validation: 134 Rust tests, strict Clippy, formatting and 30 UI checks passed. On the same isolated owner-data copy, the real CLI changed four Git-only entries to zero while preserving the read baseline; the window's facts refresh also preserved the digest token. In the installed test window, three labeled report fixtures (progress, open end and question) appeared and were explicitly marked read. The normal window was reopened; production read baseline, display preferences and feedback remained unchanged. Installed binaries and the four Skill files match their sources, including Nabu's existing private Skill scope.
 
 ## Call sequences
+
+Statistics and durable history add a fifth view, `statistics` ("Statistik"), without changing the morning-page priority or read acknowledgement rules. `statistics` reads a selected date range in one call; `history list` returns at most 30 summaries and a continuation; `history show` retrieves one event's full before/after content. `facts history <id>` exposes complete immutable observations. `proposals` exposes independent retained agent proposals. Report omissions do not delete proposals; contexts include omitted retained proposals so agents can reconcile them without an extra mandatory discovery call. Own-idea edits use `ideas list` for the revision, then `ideas update`; they invalidate an earlier assessment and return guarded undo.
+
+Facts history records each refresh atomically with the current facts, including errors, while sharing unchanged code/activity payloads. Code scans use Tokei with explicit exclusions and bounds; incomplete results stay unknown. Comparisons require consistent branch, folder and counting method and break across measurement gaps. Saved Git reconstruction windows remain usable after the rolling collection window advances; uncovered dates remain unknown. Migration preserves existing report versions and available facts without manufacturing earlier measurements or edit times. The content journal records reports, project identity/intent, own ideas, proposals, task changes, feedback and warning decisions; presentation preferences are outside this journal. Historical data remains local and can contain any document content agents submit, so the existing no-credentials boundary still applies.
+
+Contract coverage is in `tests/statistics.rs` (migration/reopen, atomic rollback, failed observations, deduplicated payloads, historical coverage gaps, retained proposals, revisions/undo and real-console success/failure/continuation) and `tests/ui-statistics.cjs` (unknown values, chart gaps, safe history rendering, retained unrated ideas, edit drafts and stale asynchronous results). These deterministic checks do not claim a fresh-model evaluation. Validation: both full Rust configurations passed 153 tests; the final history/statistics contracts were rerun after the migration-baseline fix. Strict Clippy and 78 UI checks passed. The native statistics overview was inspected against an isolated copy of the eight-project database. Production projects, ideas, feedback, task state, warning decisions and preferences matched their pre-test snapshots. Nabu's existing private Skill received only the new capability documentation, preserving its unrelated adaptations.
 
 Counts below are protocol design targets confirmed by command/contract tests, not measurements of fresh-model behavior. They exclude reading repository evidence and Skill references. A page or unfinished job adds its necessary continuation; it does not repeat the underlying operation.
 

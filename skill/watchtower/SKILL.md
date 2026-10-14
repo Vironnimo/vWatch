@@ -59,7 +59,9 @@ Write card and brief content in German, address the user as "du", and support fi
 | "Projekt bearbeiten", "umbenennen", "verschoben" | `projects update <project-id> --name ... --path ...` |
 | "parken", "erledigt", "archivieren", "Ziel" | `projects status`, `projects goal` |
 | "gut", "später", "Quatsch", "antworten", "abgehakt" | `feedback set`; values `up`, `later`, `down`, `answered`, `done` |
-| "Ideen" | Project `suggestions`, brief `synergies` and `new_apps`; `ideas list/add/remove` only for the user's own parked ideas |
+| "Ideen" | `proposals` retains project suggestions, synergies and app ideas; `ideas list/add/update/remove` manages the user's own ideas |
+| "Statistik" | `statistics --project <project-id>`; omit the project for the portfolio, use `--from` and `--until` for dates |
+| "Änderungsverlauf" | `history list`, `history show <event-id>`; `card compare` / `portfolio compare` compare saved versions; see `references/cli.md` |
 | "Auftrag", "zugewiesen", "Ergebnis prüfen" | `tasks list`, `tasks create`, `tasks report`, `tasks confirm` |
 | "Warnung bewusst akzeptieren", "Änderungen gelesen" | `warnings acknowledge`, `changes read` |
 

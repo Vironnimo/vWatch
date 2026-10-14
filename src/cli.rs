@@ -151,8 +151,52 @@ enum Cmd {
     },
     /// Recent command outcomes for recovery after a lost response
     Activity,
+    /// Read stored project statistics and comparisons; does not refresh facts
+    Statistics {
+        /// Project ID. Omit to compare all registered projects.
+        #[arg(long)]
+        project: Option<String>,
+        /// First date, YYYY-MM-DD. Omit for the last 30 days ending at --until.
+        #[arg(long)]
+        from: Option<String>,
+        /// Last date, YYYY-MM-DD. Omit for today.
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Read the durable content journal, including removals and undo writes
+    History {
+        #[command(subcommand)]
+        action: HistoryCmd,
+    },
+    /// Read independently retained agent proposals, including those absent from current reports
+    Proposals {
+        /// Project ID. Omit for project proposals and portfolio ideas together.
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Undo one recorded owner change if its result has not changed again
     Undo { token: String },
+}
+
+#[derive(Subcommand)]
+enum HistoryCmd {
+    /// Read up to 30 saved events, newest first, with their IDs and changed fields
+    List {
+        /// Project ID, including a removed project. Omit for all content.
+        #[arg(long)]
+        project: Option<String>,
+        /// Kind: card, portfolio, project, idea, proposal, task, feedback or warning. Omit for all kinds.
+        #[arg(long)]
+        entity: Option<String>,
+        /// Exact entity ID from a history event. Omit for all entries of the selected kind.
+        #[arg(long)]
+        id: Option<String>,
+        /// Event ID from next_before. Omit for the newest page.
+        #[arg(long)]
+        before: Option<i64>,
+    },
+    /// Read one event's full before/after content and changed fields
+    Show { id: i64 },
 }
 
 #[derive(Subcommand)]
@@ -253,8 +297,8 @@ enum SettingsCmd {
     /// Set display preferences only when the owner asks; preserves omitted values
     #[command(alias = "set")]
     Update {
-        /// Initial view: handover (Heute), board (Projekte), ideas or handbook. Omit to keep it.
-        #[arg(long, value_parser = ["handover", "board", "ideas", "handbook"], ignore_case = true)]
+        /// Initial view: handover (Heute), board (Projekte), ideas, handbook or statistics. Omit to keep it.
+        #[arg(long, value_parser = ["handover", "board", "ideas", "handbook", "statistics"], ignore_case = true)]
         style: Option<String>,
         /// Comma-separated section IDs to collapse; empty expands all. Omit to keep them.
         /// IDs: focus, projects, waiting, safety, recent, across, ideas, pulse, kpis, cards, tasks, changes, night, space, parking, week.
@@ -265,6 +309,14 @@ enum SettingsCmd {
 
 #[derive(Subcommand)]
 enum IdeasCmd {
+    /// Edit a parked idea, preserving its ID, history and previous text for undo
+    Update {
+        id: i64,
+        text: String,
+        /// Current revision from ideas list; protects newer edits.
+        #[arg(long)]
+        revision: i64,
+    },
     /// All parked ideas
     #[command(alias = "ls")]
     List,
@@ -450,6 +502,8 @@ enum ProjectsCmd {
 
 #[derive(Subcommand)]
 enum FactsCmd {
+    /// All saved measurements for one project, including errors; does not refresh
+    History { id: String },
     /// Measure again now (all projects when no id is given)
     Refresh {
         ids: Vec<String>,
@@ -464,6 +518,16 @@ enum FactsCmd {
 
 #[derive(Subcommand)]
 enum CardCmd {
+    /// Compare two saved card versions without changing the current card
+    Compare {
+        id: String,
+        /// Earlier saved version number from card history.
+        #[arg(long)]
+        from: i64,
+        /// Later saved version number from card history.
+        #[arg(long)]
+        to: i64,
+    },
     /// Save a new card version
     #[command(aliases = ["set", "update"])]
     Put {
@@ -495,6 +559,15 @@ enum CardCmd {
 
 #[derive(Subcommand)]
 enum PortfolioCmd {
+    /// Compare two saved brief versions without changing the current brief
+    Compare {
+        /// Earlier saved version number from portfolio history.
+        #[arg(long)]
+        from: i64,
+        /// Later saved version number from portfolio history.
+        #[arg(long)]
+        to: i64,
+    },
     /// All projects side by side, the previous brief and all ratings
     Context,
     /// Save a new brief
@@ -579,6 +652,12 @@ impl Cmd {
             },
             Cmd::Usage { .. } => "usage",
             Cmd::Activity => "activity",
+            Cmd::Statistics { .. } => "statistics",
+            Cmd::History { action } => match action {
+                HistoryCmd::List { .. } => "history.list",
+                HistoryCmd::Show { .. } => "history.show",
+            },
+            Cmd::Proposals { .. } => "proposals",
             Cmd::Undo { .. } => "undo",
             Cmd::Projects { action } => match action {
                 ProjectsCmd::List { .. } => "projects.list",
@@ -595,18 +674,21 @@ impl Cmd {
                 ProjectsCmd::Discover { .. } => "projects.discover",
             },
             Cmd::Facts { action } => match action {
+                FactsCmd::History { .. } => "facts.history",
                 FactsCmd::Refresh { .. } => "facts.refresh",
                 FactsCmd::Show { .. } => "facts.show",
             },
             Cmd::Due { .. } => "due",
             Cmd::Context { .. } => "context",
             Cmd::Card { action } => match action {
+                CardCmd::Compare { .. } => "card.compare",
                 CardCmd::Put { .. } => "card.put",
                 CardCmd::Show { .. } => "card.show",
                 CardCmd::History { .. } => "card.history",
                 CardCmd::Restore { .. } => "card.restore",
             },
             Cmd::Portfolio { action } => match action {
+                PortfolioCmd::Compare { .. } => "portfolio.compare",
                 PortfolioCmd::Context => "portfolio.context",
                 PortfolioCmd::Put { .. } => "portfolio.put",
                 PortfolioCmd::Show { .. } => "portfolio.show",
@@ -620,6 +702,7 @@ impl Cmd {
                 Some(FeedbackCmd::Restore { .. }) => "feedback.restore",
             },
             Cmd::Ideas { action } => match action {
+                IdeasCmd::Update { .. } => "ideas.update",
                 IdeasCmd::List => "ideas.list",
                 IdeasCmd::Add { .. } => "ideas.add",
                 IdeasCmd::Remove { .. } => "ideas.remove",
@@ -821,6 +904,21 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             state
         }
         Cmd::Undo { token } => svc.undo(&token)?,
+        Cmd::Statistics {
+            project,
+            from,
+            until,
+        } => svc.statistics(project.as_deref(), from.as_deref(), until.as_deref())?,
+        Cmd::Proposals { project } => svc.proposals(project.as_deref())?,
+        Cmd::History { action } => match action {
+            HistoryCmd::List {
+                project,
+                entity,
+                id,
+                before,
+            } => svc.history(project.as_deref(), entity.as_deref(), id.as_deref(), before)?,
+            HistoryCmd::Show { id } => svc.history_event(id)?,
+        },
         Cmd::Status => {
             // A freshly installed exe hands out its own Skill before the window ever starts.
             let skill = system::export_skill().ok();
@@ -914,6 +1012,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             ProjectsCmd::Discover { root } => svc.discover(&root)?,
         },
         Cmd::Facts { action } => match action {
+            FactsCmd::History { id } => svc.facts_history(&id)?,
             FactsCmd::Refresh { ids, no_ci } => {
                 json!({"refreshed": svc.refresh_facts(Some(&ids), !no_ci)?})
             }
@@ -925,6 +1024,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         } => svc.due(max_age_days, !no_refresh)?,
         Cmd::Context { id } => svc.context(&id)?,
         Cmd::Card { action } => match action {
+            CardCmd::Compare { id, from, to } => svc.compare_documents(Some(&id), from, to)?,
             CardCmd::Put { id, doc } => svc.put_card_guarded(
                 &id,
                 read_document(&doc, stdin)?,
@@ -944,6 +1044,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             } => svc.restore_card(&id, version, Some(&context_token))?,
         },
         Cmd::Portfolio { action } => match action {
+            PortfolioCmd::Compare { from, to } => svc.compare_documents(None, from, to)?,
             PortfolioCmd::Context => svc.portfolio_context()?,
             PortfolioCmd::Put { doc } => svc.put_portfolio_guarded(
                 read_document(&doc, stdin)?,
@@ -999,6 +1100,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             }
         },
         Cmd::Ideas { action } => match action {
+            IdeasCmd::Update { id, text, revision } => svc.update_idea(id, &text, revision)?,
             IdeasCmd::List => json!({"ideas": svc.ideas()?}),
             IdeasCmd::Add { text } => json!({"idea": svc.add_idea(&text)?}),
             IdeasCmd::Remove { id } => svc.remove_idea(id)?,
@@ -1081,7 +1183,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             {
                 if style.is_none() && hidden_modules.is_none() {
                     return Err(WatchtowerError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
-                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas or --style handbook, or pass --hidden-modules with comma-separated module IDs."));
+                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas, --style handbook or --style statistics, or pass --hidden-modules with comma-separated module IDs."));
                 }
                 let mut updates = Vec::new();
                 if let Some(style) = style {

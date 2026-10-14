@@ -296,6 +296,7 @@ fn legacy_snoozes_keep_the_original_deadline_after_migration_and_note_edits() {
         .unwrap();
     drop(svc);
     let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    common::remove_history_schema(&db);
     db.execute_batch("ALTER TABLE feedback DROP COLUMN snoozed_until;")
         .unwrap();
     drop(db);

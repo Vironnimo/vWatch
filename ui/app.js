@@ -28,6 +28,7 @@
   let answering = null;   // question whose answer field is open
   const drafts = {};      // unsent note and answer text per item, kept across re-renders
   let ideaDraft = '';
+  const ownerIdeaDrafts = new Map();
   let ideaFilter = 'new';
   let ideaHighlight = null;
   const ideaEditing = new Map(); // retain an open response even if an agent rewrites its source
@@ -50,6 +51,9 @@
   const TASKS = {};       // "Auftrag kopieren" buttons: key → the task they copy, refilled on every render
   let lastVersion = null;
   let shown = false;
+  let statsProject = null, statsFrom = '', statsUntil = '', statsTab = 'numbers';
+  let statsData = null, statsHistory = null, statsVersions = null, statsDetail = null;
+  let statsBusy = false, statsRequest = 0;
 
   // ---------- helpers ----------
   const $ = sel => document.querySelector(sel);
@@ -82,7 +86,7 @@
   };
   function inputFocus() {
     const el = document.activeElement;
-    if (!el || el.tagName !== 'INPUT') return null;
+    if (!el || !['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return null;
     const selector = el.id ? `#${CSS.escape(el.id)}` : el.dataset.draft ? `[data-draft="${CSS.escape(el.dataset.draft)}"]` : el.dataset.warningNote ? `[data-warning-note="${CSS.escape(el.dataset.warningNote)}"]` : null;
     return selector ? { selector, start: el.selectionStart, end: el.selectionEnd } : null;
   }
@@ -636,8 +640,13 @@
       for (const s of pf[field] || []) add({ s, project: null, projects: s.projects || [], kind, firstSeen: (times || {})[s.id] });
     }
     for (const own of S.ideas || []) {
-      const assessment = (pf.idea_checks || []).find(c => c.idea === own.id);
+      const assessment = own.checked === false ? null : (pf.idea_checks || []).find(c => c.idea === own.id);
       add({ s: { id: `idea:${own.id}`, title: own.text }, own, assessment, project: null, projects: assessment?.fits || [], kind: 'owner_idea', firstSeen: own.added_at });
+    }
+    for (const proposal of S.proposals || []) {
+      const project = proposal.scope === '@portfolio' ? null : proposal.scope;
+      if (project && !visible().some(p => p.id === project)) continue;
+      add({ s: proposal.item, project, projects: project ? [project] : proposal.item.projects || [], kind: proposal.kind, firstSeen: proposal.first_seen, retained: !proposal.in_report });
     }
     for (const [id, f] of Object.entries(S.feedback || {})) {
       const item = f.item;
@@ -714,6 +723,8 @@
   }
   function ownerIdeaCard(entry) {
     const { s, own, assessment: c } = entry, id = s.id, task = ideaTask(id);
+    const editing = ownerIdeaDrafts.get(own.id);
+    if (editing) return `<form class="idea owner-idea-edit" data-owner-idea-form="${own.id}"><label for="owner-idea-text-${own.id}">Deine Idee bearbeiten</label><textarea id="owner-idea-text-${own.id}" data-owner-idea-text="${own.id}" maxlength="600">${esc(editing.text)}</textarea><div class="foot"><button class="btn" type="submit"${editing.busy ? ' disabled' : ''}>${editing.busy ? 'Wird gespeichert …' : 'Speichern'}</button><button class="linkish" type="button" data-owner-idea-cancel="${own.id}">Abbrechen</button></div></form>`;
     if (noteFor === id) return noteForm(id, s.title);
     const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
     const verdict = c ? `<div class="idea-assessment"><span class="faint">Agent-Einschätzung:</span> <span class="tag ${v[1]}">${esc(v[0])}</span><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}</div>` : '<div class="faint">Noch nicht eingeschätzt.</div>';
@@ -722,7 +733,7 @@
     const missingProjects = entry.projects.filter(project => !byId(project));
     const action = finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(id, { projects: task ? task.projects : entry.projects, title: s.title, why: c?.why || '' });
     const details = task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
-    return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
+    return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish" type="button" data-owner-idea-edit="${own.id}">bearbeiten</button><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
   }
   function blockParking() {
     const items = ideaCollection().filter(e => e.own && (e.s.id === noteFor || !hiddenByRating(e.s.id))).map(ownerIdeaCard).join('');
@@ -926,6 +937,7 @@
     work += `<div ${anchor('tasks')}>${blockTasks(p.id)}</div>`;
     handbook += `<div class="stack" ${anchor('path')}><button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>`;
     const replies = pastReplies(p);
+    history += `<button class="btn" type="button" data-project-statistics="${esc(p.id)}">Statistik und vollständigen Verlauf öffnen</button>`;
     history += section('past-replies', 'Deine früheren Antworten', replies.length ? `<ul class="bullets">${replies.map(([id, f]) => `<li ${anchor(`answer:${id}`)}><b>${esc(f.item.title || f.title)}</b><p>${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Von dir als erledigt markiert.'}${f.at ? ` <span class="faint">· ${fmtDate(f.at)}</span>` : ''}</p></li>`).join('')}</ul>` : '')
       + warningControls(p) + section('facts', 'Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min` : null)
       + (f.is_git ? `<details class="commit-history" data-drawer-detail="commits"><summary>Commit-Aktivität ansehen</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
@@ -1166,6 +1178,171 @@
     openDrawerTarget(result.id, result.tab, result.anchor);
   }
 
+  // ---------- statistics and durable content history ----------
+  const HISTORY_KIND = { card: 'Projektbericht', portfolio: 'Gesamtbericht', project: 'Projekt', idea: 'Deine Idee', proposal: 'Agentenidee', task: 'Auftrag', feedback: 'Deine Reaktion', warning: 'Bewusste Entscheidung' };
+  const HISTORY_FIELD = { headline: 'Aktueller Stand', reentry: 'Nächster Schritt', suggestions: 'Vorschläge', waiting_on_you: 'Fragen an dich', open_ends: 'Offene Enden', handbook: 'Handbuch', phase: 'Phase', text: 'Text', name: 'Name', path: 'Ordner', status: 'Status', status_note: 'Statusnotiz', goal: 'Ziel', goal_due: 'Zieldatum', removed_at: 'Entfernt am', value: 'Bewertung', note: 'Notiz', data: 'Inhalt', in_report: 'Im aktuellen Bericht', new_apps: 'Neue Apps', synergies: 'Querverbindungen', focus: 'Fokus', milestones: 'Meilensteine', recent_changes: 'Letzte Änderungen' };
+  const measured = n => typeof n === 'number' ? num(n) : 'unbekannt';
+  const signed = n => typeof n === 'number' ? `${n > 0 ? '+' : ''}${num(n)}` : '—';
+  const observationDate = at => at ? new Date(at).toLocaleString('de-DE') : 'Zeitpunkt unbekannt';
+  let statsFilterDraft = {}, statsCompareDraft = {};
+  function invalidateStatistics(preserveDetail = false) {
+    statsRequest++; statsBusy = false; statsData = null; statsHistory = null; statsVersions = null;
+    if (!preserveDetail) { statsDetail = null; statsFilterDraft = {}; statsCompareDraft = {}; }
+  }
+  async function fetchStatistics() {
+    const request = ++statsRequest; statsBusy = true;
+    try {
+      if (statsTab === 'numbers') {
+        const result = await call('statistics', { project: statsProject, from: statsFrom || null, until: statsUntil || null });
+        if (request !== statsRequest) return;
+        statsData = result;
+      } else {
+        const [history, versions] = await Promise.all([
+          call('history', { project: statsProject, entity: null, id: null, before: null }),
+          call('document_versions', { project: statsProject }),
+        ]);
+        if (request !== statsRequest) return;
+        statsHistory = history; statsVersions = versions;
+      }
+    } catch (e) {
+      if (request !== statsRequest) return;
+      if (statsTab === 'numbers') statsData = { error: errText(e) }; else statsHistory = { error: errText(e) };
+    }
+    if (request !== statsRequest) return;
+    statsBusy = false; if (S.prefs.style === 'statistics') render();
+  }
+  function metricCurve(samples, value, label, ink) {
+    if (!samples.length) return `<p class="faint">Noch keine Messungen im Zeitraum.</p>`;
+    const values = samples.map(value), numbers = values.filter(n => typeof n === 'number');
+    if (!numbers.length) return `<p class="faint">${esc(label)}: noch keine vollständige Messung.</p>`;
+    const times = samples.map(s => Date.parse(s.at)), lo = times.reduce((a, b) => Math.min(a, b), Infinity), span = Math.max(1, times.reduce((a, b) => Math.max(a, b), -Infinity) - lo), max = numbers.reduce((a, b) => Math.max(a, b), 1);
+    let lines = '', dots = '', previous = null;
+    samples.forEach((s, i) => {
+      const n = values[i]; if (typeof n !== 'number') { previous = null; return; }
+      const x = 12 + (times[i] - lo) / span * 476, y = 83 - n / max * 65;
+      const compatible = previous && previous.s.branch === s.branch && previous.s.path === s.path && previous.s.code?.method === s.code?.method;
+      if (compatible) lines += `<path d="M${previous.x},${previous.y} L${x},${y}"/>`;
+      dots += `<circle cx="${x}" cy="${y}" r="3"><title>${esc(observationDate(s.at))}: ${num(n)} ${esc(label)}</title></circle>`;
+      previous = { x, y, s };
+    });
+    return `<figure class="stat-curve"><figcaption>${esc(label)} <span class="faint">· maximal ${num(numbers.reduce((a, b) => Math.max(a, b), 0))}</span></figcaption><svg viewBox="0 0 500 110" role="img" aria-label="${esc(label)}: ${samples.length} Messpunkte. Fehlende Messwerte unterbrechen die Linie." style="color:${ink}"><path d="M12 85H488" class="stat-axis"/><g fill="none" stroke="currentColor" stroke-width="2">${lines}</g><g fill="currentColor">${dots}</g><text x="12" y="105">${esc(fmtDate(samples[0].at))}</text><text x="488" y="105" text-anchor="end">${esc(fmtDate(samples.at(-1).at))}</text></svg></figure>`;
+  }
+  function languageBars(languages, total) {
+    const rows = (languages || []).filter(l => l.category == null || l.category === 'source').slice().sort((a, b) => b.code - a.code);
+    const row = (l, i) => { const share = total > 0 ? 100 * l.code / total : 0;
+      return `<div class="language-row"><div><span>${esc(l.language)}</span><b>${num(l.code)} <span class="faint">· ${share > 0 && share < 0.1 ? '&lt; 0,1' : share.toLocaleString('de-DE', { maximumFractionDigits: 1 })} %</span></b></div><div class="language-track"><span style="width:${share}%;background:${PALETTE[i % PALETTE.length]}"></span></div></div>`; };
+    return rows.length ? `<div class="language-bars">${rows.slice(0, 6).map(row).join('')}</div>${rows.length > 6 ? `<details class="stat-details"><summary>${rows.length - 6} weitere Sprachen</summary><div class="language-bars">${rows.slice(6).map((l,i) => row(l,i+6)).join('')}</div></details>` : ''}` : '<p class="faint">Noch keine Quellcode-Sprachen erfasst.</p>';
+  }
+  function projectStatistics(p) {
+    const c = p.current, code = c?.code, valid = c?.ok === true && code?.ok === true, activity = p.activity || {}, counts = activity.totals;
+    const kpi = (label, value) => `<div class="stat-kpi"><span>${label}</span><strong>${value}</strong></div>`;
+    const other = (code?.languages || []).filter(l => l.category !== 'source');
+    const details = (p.samples || []).slice().reverse().map(s => `<tr><td>${esc(observationDate(s.at))}</td><td>${esc(s.branch || '—')}</td><td>${s.ok && s.code?.ok ? measured(s.code.source_code) : 'unbekannt'}</td><td>${measured(s.dirty?.files)}</td><td>${measured(s.ahead)}</td><td>${esc(CI[s.ci?.state]?.[0] || 'unbekannt')}</td></tr>`).join('');
+    return `<section class="mod stat-project"><div class="mod-head"><div><h2>${esc(p.name)}</h2><div class="sub">${c ? `Letzter Messstand: ${esc(observationDate(c.at))} · ${esc(c.branch || 'Branch unbekannt')}` : 'Noch kein Messstand bis zum gewählten Enddatum'}</div></div><button type="button" class="linkish" data-stats-project-history="${esc(p.id)}">Änderungsverlauf</button></div>
+      <div class="stat-kpis">${kpi('Codezeilen', valid ? measured(code.source_code) : 'unbekannt')}${kpi('Dateien', valid ? measured(code.files) : 'unbekannt')}${kpi('Commits im Zeitraum', measured(counts?.commits))}${kpi('Aktive Tage', measured(counts?.active_days))}${kpi('Bestätigte Abschlüsse', measured(p.confirmed_completions))}</div>
+      <p class="stat-comparison">${p.comparable ? `<b>${signed(p.change?.code)} Codezeilen${typeof p.change?.percent === 'number' ? ` (${signed(Math.round(p.change.percent * 10) / 10)} %)` : ''}</b> seit ${esc(observationDate(p.baseline?.at))}` : 'Noch kein belastbarer Größenvergleich: Es braucht zwei vollständige Messungen mit demselben Branch, Ordner und Zählverfahren.'}</p>
+      ${!valid ? '<p class="note">Die Codezählung fehlt oder ist unvollständig. Es wird kein vollständiger Messwert angenommen.</p>' : ''}
+      <div class="stat-columns"><div>${languageBars(valid ? code.languages : [], valid ? code.source_code : 0)}<p class="faint">Anteile nach Quellcodezeilen. Dokumentation und Konfiguration zählen separat.</p></div>${metricCurve(p.samples || [], s => s.ok && s.code?.ok ? s.code.source_code : null, 'Codezeilen', color(p.id))}</div>
+      <div class="stat-columns">${metricCurve(p.samples || [], s => s.ok ? s.dirty?.files : null, 'Dateien ohne Commit', '#e8870a')}${metricCurve(p.samples || [], s => s.ok ? s.ahead : null, 'Commits ohne Push', '#5b8def')}</div>
+      <div class="stat-kpis">${kpi('Zeilen hinzugefügt', measured(counts?.added))}${kpi('Zeilen entfernt', measured(counts?.removed))}${kpi('CI beim letzten Stand', esc(CI[c?.ci?.state]?.[0] || 'unbekannt'))}${kpi('Zusätzliche Worktrees', measured(c?.worktrees?.count))}</div>
+      <p class="faint">Aktivität aus Git rekonstruiert${activity.coverage_from ? `: verfügbar ${fmtDate(activity.coverage_from)} bis ${fmtDate(activity.coverage_through)}` : ': noch nicht verfügbar'}. ${activity.complete ? '' : 'Der gewählte Zeitraum ist nicht vollständig abgedeckt.'} Commits und Codeumfang beschreiben Aktivität und Größe, keinen Fertigstellungsgrad.</p>
+      <details class="stat-details" ${foldAttrs(`stats:activity:${p.id}`)}><summary>Tägliche Aktivität (${(activity.days || []).length} aktive Tage)</summary><div class="stat-table-wrap"><table class="stat-table"><thead><tr><th>Tag</th><th>Commits</th><th>Hinzugefügt</th><th>Entfernt</th></tr></thead><tbody>${(activity.days || []).slice().reverse().map(d => `<tr><td>${fmtDate(d.date)}</td><td>${num(d.commits)}</td><td>+${num(d.added)}</td><td>−${num(d.removed)}</td></tr>`).join('')}</tbody></table></div></details>
+      <details class="stat-details" ${foldAttrs(`stats:hotspots:${p.id}`)}><summary>Häufig bearbeitete Dateien</summary><p class="faint">Eigener Auswertungszeitraum: ${activity.hotspots_from ? `${fmtDate(activity.hotspots_from)} bis ${fmtDate(activity.hotspots_through)}` : 'unbekannt'}. Änderungen aus Git, ohne bekannte Build- und Abhängigkeitsordner.</p><div class="stat-table-wrap"><table class="stat-table"><thead><tr><th>Datei</th><th>Änderungen</th><th>Hinzugefügt</th><th>Entfernt</th></tr></thead><tbody>${(activity.hotspots || []).map(f => `<tr><td>${esc(f.path)}</td><td>${num(f.changes)}</td><td>${num(f.added)}</td><td>${num(f.removed)}</td></tr>`).join('')}</tbody></table></div></details>
+      <details class="stat-details" ${foldAttrs(`stats:counting:${p.id}`)}><summary>Zählweise und weitere Dateistatistiken</summary><p class="faint">Arbeitsverzeichnis einschließlich lokaler Änderungen; weitere Worktrees werden nicht zum Codeumfang addiert. Bekannte Abhängigkeiten, Build-Ausgaben, Lockdateien und erkannte generierte Dateien werden ausgeschlossen.</p><p class="faint">Zählverfahren: ${esc(code?.method || 'unbekannt')} · ${measured(code?.excluded_files)} ausgeschlossen · ${measured(code?.unsupported_files)} ohne unterstützte Textsprache · ${measured(code?.unread_files)} nicht vollständig gelesen.</p><div class="stat-table-wrap"><table class="stat-table"><thead><tr><th>Sprache / Format</th><th>Bereich</th><th>Code</th><th>Kommentare</th><th>Leerzeilen</th></tr></thead><tbody>${(code?.languages || []).map(l => `<tr><td>${esc(l.language)}</td><td>${({ source: 'Quellcode', documentation: 'Dokumentation', configuration: 'Konfiguration' })[l.category] || 'Sonstiges'}</td><td>${num(l.code)}</td><td>${num(l.comments)}</td><td>${num(l.blanks)}</td></tr>`).join('')}</tbody></table></div>${other.length ? '<p class="faint">Diese zusätzlichen Formate verändern die Sprachenanteile des Quellcodes nicht.</p>' : ''}<h3>Größte gezählte Dateien</h3><div class="stat-table-wrap"><table class="stat-table"><thead><tr><th>Datei</th><th>Sprache / Format</th><th>Zeilen ohne Kommentare</th></tr></thead><tbody>${(code?.largest_files || []).map(f => `<tr><td>${esc(f.path)}</td><td>${esc(f.language)}</td><td>${num(f.code)}</td></tr>`).join('')}</tbody></table></div></details>
+      <details class="stat-details" ${foldAttrs(`stats:observations:${p.id}`)}><summary>Alle ${p.samples?.length || 0} Messstände im Zeitraum</summary><div class="stat-table-wrap"><table class="stat-table"><thead><tr><th>Gemessen</th><th>Branch</th><th>Codezeilen</th><th>Dateien ohne Commit</th><th>Ohne Push</th><th>CI</th></tr></thead><tbody>${details}</tbody></table></div></details></section>`;
+  }
+  function readableHistory(value) {
+    if (value == null) return '—';
+    if (typeof value === 'string') { try { return JSON.stringify(JSON.parse(value), null, 2); } catch (_) { return value; } }
+    return typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+  }
+  function historyDetail() {
+    if (!statsDetail) return '';
+    if (statsDetail.error) return `<p class="note">${esc(statsDetail.error)}</p>`;
+    const changes = statsDetail.event?.changes || statsDetail.changes || [];
+    return `<section class="mod stat-diff"><div class="mod-head"><h2>${statsDetail.event ? 'Gespeicherte Änderung' : `Version ${statsDetail.from} → ${statsDetail.to}`}</h2><button class="linkish" data-stats-close-detail type="button">Schließen</button></div>${changes.length ? changes.map(c => `<div class="stat-diff-field"><h3>${esc(HISTORY_FIELD[c.field] || c.field)}</h3><div class="stat-columns"><div><b>Vorher</b><pre>${esc(readableHistory(c.before))}</pre></div><div><b>Nachher</b><pre>${esc(readableHistory(c.after))}</pre></div></div></div>`).join('') : '<p>Keine inhaltlichen Unterschiede.</p>'}</section>`;
+  }
+  function renderContentHistory() {
+    if (!statsHistory) return '<p class="muted">Lade gespeicherte Änderungen …</p>';
+    if (statsHistory.error) return `<p class="note">${esc(statsHistory.error)}</p>`;
+    const versions = statsVersions?.versions || [], opts = selected => versions.map(v => `<option value="${v.version}"${v.version === selected ? ' selected' : ''}>${v.version} · ${esc(observationDate(v.created_at))}</option>`).join('');
+    return `${versions.length > 1 ? `<section class="mod"><h2>${statsProject ? 'Projektberichte' : 'Gesamtberichte'} vergleichen</h2><form id="stats-compare" class="stats-controls"><label>Von Version<select id="stats-version-from">${opts(statsCompareDraft['stats-version-from'] ?? versions.at(-2).version)}</select></label><label>Zu Version<select id="stats-version-to">${opts(statsCompareDraft['stats-version-to'] ?? versions.at(-1).version)}</select></label><button class="btn" type="submit">Vergleichen</button></form></section>` : ''}${historyDetail()}<section class="mod"><h2>Gespeicherte Änderungen</h2><p class="faint">Neueste Speichervorgänge zuerst. Übernommene Altbestände sind gekennzeichnet; ihre früheren Änderungen und Verfasser sind teilweise unbekannt.</p><ol class="stat-journal">${(statsHistory.events || []).map(e => `<li><div><span class="faint">${esc(observationDate(e.at))} · ${esc(HISTORY_KIND[e.entity] || e.entity)}${e.project ? ` · ${esc(byId(e.project)?.name || e.project)}` : ''}${e.origin === 'retained' ? ' · Altbestand' : ''}</span><p><b>${esc(e.title || e.entity_id)}</b></p><span class="faint">${({ insert: 'Angelegt', update: 'Geändert', delete: 'Entfernt', saved: 'Version gespeichert', baseline: 'Vorhandener Stand übernommen' })[e.operation] || esc(e.operation)} · ${(e.fields || []).map(f => esc(HISTORY_FIELD[f] || f)).join(', ')}</span></div><button type="button" class="linkish" data-history-event="${e.id}">Änderung ansehen</button></li>`).join('') || '<li>Noch keine gespeicherten Änderungen.</li>'}</ol>${statsHistory.next_before ? `<button type="button" class="btn" data-history-more="${statsHistory.next_before}">Ältere Änderungen laden</button>` : ''}</section>`;
+  }
+  function renderStatistics() {
+    if (!(statsTab === 'numbers' ? statsData : statsHistory) && !statsBusy) fetchStatistics();
+    const controls = `<form id="stats-filter" class="stats-controls"><label>Projekt<select id="stats-project"><option value="">Alle Projekte</option>${S.projects.map(p => `<option value="${esc(p.id)}"${p.id === (statsFilterDraft.project ?? statsProject) ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>${statsTab === 'numbers' ? `<label>Von<input id="stats-from" type="date" value="${esc(statsFilterDraft.from ?? (statsFrom || statsData?.from || ''))}"></label><label>Bis<input id="stats-until" type="date" value="${esc(statsFilterDraft.until ?? (statsUntil || statsData?.until || S.today))}"></label>` : ''}<button type="submit" class="btn">Anzeigen</button></form>`;
+    let body;
+    if (statsTab === 'history') body = renderContentHistory();
+    else if (!statsData) body = '<p class="muted">Lade Messstände …</p>';
+    else if (statsData.error) body = `<p class="note">${esc(statsData.error)}</p>`;
+    else body = `<section class="mod stat-total"><h2>${statsProject ? 'Projektumfang' : 'Alle Projekte im Überblick'}</h2><p><strong>${measured(statsData.summary?.source_code)}</strong> Quellcodezeilen · ${num(statsData.summary?.measured_projects)} von ${num(statsData.summary?.projects)} Projekten vollständig gemessen</p><p class="faint">Jeweils letzter gespeicherter Stand bis ${esc(fmtDate(statsData.until))}. Unterschiedliche Messzeitpunkte bleiben bei jedem Projekt sichtbar.</p>${languageBars(statsData.summary?.languages, statsData.summary?.source_code)}</section>${(statsData.projects || []).map(projectStatistics).join('')}`;
+    return `<div class="statistics-page"><header class="ideas-heading"><h1>Statistik & Verlauf</h1><p>Wie sich deine Projekte entwickeln – mit gespeicherten Messständen und nachvollziehbaren Änderungen.</p></header><nav class="idea-filters" aria-label="Statistikansicht"><button class="idea-filter" type="button" data-stats-tab="numbers" aria-pressed="${statsTab === 'numbers'}">Zahlen & Entwicklung</button><button class="idea-filter" type="button" data-stats-tab="history" aria-pressed="${statsTab === 'history'}">Änderungsverlauf</button></nav>${controls}${statsTab === 'numbers' ? `<div class="stat-presets">${[[7, '7 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([days, title]) => `<button class="linkish" type="button" data-stats-range="${days}">${title}</button>`).join('')}</div>` : ''}${body}</div>`;
+  }
+  async function openStatistics(project, tab = 'numbers') {
+    statsProject = project; statsTab = tab; invalidateStatistics(); openId = null; $('#drawer-root').innerHTML = '';
+    S.prefs.style = 'statistics'; render();
+    try { await call('set_pref', { key: 'style', value: 'statistics' }); } catch (e) { toast(errText(e)); }
+  }
+  async function saveOwnerIdea(id) {
+    const draft = ownerIdeaDrafts.get(id); if (!draft || draft.busy) return;
+    draft.busy = true; render();
+    try {
+      const result = await call('update_idea', { id, text: draft.text, revision: draft.revision });
+      ownerIdeaDrafts.delete(id); await load(false);
+      const token = result.undo?.match(/^watchtower undo ([a-f0-9]{32})$/)?.[1];
+      toast('Idee gespeichert. Die frühere Fassung bleibt im Verlauf.', token ? async () => {
+        try { await call('undo', { token }); await load(false); } catch (e) { toast(errText(e)); }
+      } : undefined);
+    } catch (e) { toast('Idee nicht gespeichert: ' + errText(e)); }
+    finally { draft.busy = false; if (ownerIdeaDrafts.has(id)) render(); }
+  }
+  function keepStatisticsDraft(e) {
+    const key = { 'stats-project': 'project', 'stats-from': 'from', 'stats-until': 'until' }[e.target.id];
+    if (key) statsFilterDraft[key] = e.target.value;
+    if (e.target.id === 'stats-version-from' || e.target.id === 'stats-version-to') statsCompareDraft[e.target.id] = Number(e.target.value);
+  }
+  document.addEventListener('change', keepStatisticsDraft);
+  document.addEventListener('input', keepStatisticsDraft);
+  document.addEventListener('submit', e => {
+    if (e.target.dataset?.ownerIdeaForm) { e.preventDefault(); saveOwnerIdea(Number(e.target.dataset.ownerIdeaForm)); return; }
+    if (e.target.id === 'stats-filter') {
+      e.preventDefault(); statsProject = $('#stats-project').value || null;
+      if (statsTab === 'numbers') { statsFrom = $('#stats-from').value; statsUntil = $('#stats-until').value; }
+      invalidateStatistics(); render();
+    }
+    if (e.target.id === 'stats-compare') {
+      e.preventDefault(); const request = statsRequest;
+      call('compare_documents', { project: statsProject, from: Number($('#stats-version-from').value), to: Number($('#stats-version-to').value) })
+        .then(data => { if (request === statsRequest) { statsDetail = data; render(); } }).catch(e => toast(errText(e)));
+    }
+  });
+  document.addEventListener('click', async e => {
+    const t = e.target.closest('[data-project-statistics],[data-stats-project-history],[data-stats-tab],[data-history-event],[data-history-more],[data-stats-close-detail],[data-stats-range]');
+    if (!t) return;
+    if (t.dataset.projectStatistics) return openStatistics(t.dataset.projectStatistics);
+    if (t.dataset.statsProjectHistory) return openStatistics(t.dataset.statsProjectHistory, 'history');
+    if (t.dataset.statsRange) {
+      const end = new Date(`${S.today}T12:00:00Z`), start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - Number(t.dataset.statsRange) + 1);
+      statsFrom = start.toISOString().slice(0, 10); statsUntil = S.today;
+      invalidateStatistics(); render(); return;
+    }
+    if (t.dataset.statsTab) { statsTab = t.dataset.statsTab; statsDetail = null; render(); return; }
+    if (t.hasAttribute('data-stats-close-detail')) { statsDetail = null; render(); return; }
+    const request = statsRequest;
+    t.disabled = true;
+    try {
+      if (t.dataset.historyEvent) {
+        const result = await call('history_event', { id: Number(t.dataset.historyEvent) });
+        if (request === statsRequest) statsDetail = result;
+      } else if (t.dataset.historyMore) {
+        const result = await call('history', { project: statsProject, entity: null, id: null, before: Number(t.dataset.historyMore) });
+        if (request === statsRequest) statsHistory = { ...result, events: [...statsHistory.events, ...result.events] };
+      }
+      if (request === statsRequest) render();
+    } catch (e) { toast(errText(e)); } finally { t.disabled = false; }
+  });
+
   // ---------- page ----------
   function renderFoot() {
     const available = new Set(S.prefs.style === 'board' ? ['projects', 'tasks', 'recent', 'week', 'across', 'safety', 'night', 'space'] : S.prefs.style === 'handover' ? ['focus', 'changes'] : []);
@@ -1288,7 +1465,7 @@
     $('#refresh').hidden = !S.projects.length;
     $('.switch').hidden = false;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
-    const style = { board: renderBoard, ideas: renderIdeas, handbook: renderHandbook }[S.prefs.style] || renderHandover;
+    const style = { board: renderBoard, ideas: renderIdeas, handbook: renderHandbook, statistics: renderStatistics }[S.prefs.style] || renderHandover;
     $('#view').innerHTML = !S.projects.length && (!S.prefs.style || S.prefs.style === 'handover') ? renderEmpty() + blockAttention() : style();
     renderFoot();
     if (openId) openDrawer(openId, true);
@@ -1311,7 +1488,7 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
   async function load(visit) {
-    try { S = await call('state', { visit }); render(); }
+    try { S = await call('state', { visit }); if (S.prefs.style === 'statistics') invalidateStatistics(true); render(); }
     catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
     if (!shown) { shown = true; call('ready').catch(() => {}); }
   }
@@ -1321,7 +1498,7 @@
     refreshing = true;
     const b = $('#refresh');
     b.disabled = true; b.textContent = 'Misst …';
-    try { S = await call('refresh'); render(); } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
+    try { S = await call('refresh'); invalidateStatistics(); render(); } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
     b.disabled = false; b.textContent = 'Git-Fakten messen';
     refreshing = false;
   }
@@ -1696,6 +1873,10 @@
     if (t.closest('[data-idea-add]')) { addIdea(); return; }
     const ir = t.closest('[data-idea-remove]');
     if (ir) { removeIdea(Number(ir.dataset.ideaRemove)); return; }
+    const ie = t.closest('[data-owner-idea-edit]');
+    if (ie) { const own = S.ideas.find(i => i.id === Number(ie.dataset.ownerIdeaEdit)); if (own) { ownerIdeaDrafts.set(own.id, { text: own.text, revision: own.revision }); render(); } return; }
+    const ic = t.closest('[data-owner-idea-cancel]');
+    if (ic) { ownerIdeaDrafts.delete(Number(ic.dataset.ownerIdeaCancel)); render(); return; }
     const tk = t.closest('[data-task]');
     if (tk) { openTaskPreview(tk.dataset.task); return; }
     const sw = t.closest('.switch button');
@@ -1779,6 +1960,7 @@
   document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
   document.addEventListener('input', e => {
     if (e.target.id === 'idea-text') ideaDraft = e.target.value;
+    if (e.target.dataset?.ownerIdeaText) { const draft = ownerIdeaDrafts.get(Number(e.target.dataset.ownerIdeaText)); if (draft) draft.text = e.target.value; }
     if (e.target.id === 'snooze-date') snoozeDate = e.target.value;
     if (e.target.dataset && e.target.dataset.warningNote) warningDrafts[e.target.dataset.warningNote] = e.target.value;
     const editField = e.target.dataset && e.target.dataset.projectEditField;
@@ -1841,7 +2023,7 @@
   $('#refresh').addEventListener('click', refreshFacts);
 
   // Reload when anything wrote to the database, such as an agent saving a card.
-  const typing = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && a.type !== 'checkbox') || a.tagName === 'TEXTAREA'); };
+  const typing = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && a.type !== 'checkbox') || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
   async function watch() {
     let v;
     try { v = await call('data_version'); } catch (e) { return; }
@@ -1852,7 +2034,7 @@
   }
   setInterval(watch, 2500);
   setInterval(refreshFacts, 20 * 60 * 1000);
-  window.addEventListener('focus', () => { if (S) load(true); });
+  window.addEventListener('focus', () => { if (S && !typing()) load(true); });
 
   load(true).then(refreshFacts);
 })();
