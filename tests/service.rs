@@ -823,6 +823,27 @@ fn visits_remember_the_previous_one() {
 }
 
 #[test]
+fn the_data_version_moves_only_for_writes_of_other_connections() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    let before = svc.data_version().unwrap();
+    // Visits and the service's own writes are already part of what it returns.
+    svc.state(true).unwrap();
+    svc.set_pref("style", &json!("board")).unwrap();
+    assert_eq!(svc.data_version().unwrap(), before);
+
+    // An agent's CLI call writes through another connection.
+    let (agent, _) = service(tmp.path());
+    agent.add_idea("Von einem Agenten").unwrap();
+    let (state, version) = svc.versioned_state(false).unwrap();
+    assert_ne!(version, before);
+    assert_eq!(state["ideas"][0]["text"], "Von einem Agenten");
+    assert_eq!(svc.data_version().unwrap(), version);
+}
+
+#[test]
 fn status_and_registration_rules() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

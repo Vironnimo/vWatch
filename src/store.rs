@@ -294,6 +294,12 @@ impl Store {
         f(&db)
     }
 
+    /// A number that changes whenever another connection, such as the CLI in another
+    /// process, commits a write. Writes through this store leave it unchanged.
+    pub fn data_version(&self) -> Result<i64> {
+        self.with(|db| db.query_row("PRAGMA data_version", [], |r| r.get(0)))
+    }
+
     // projects
     pub fn projects(&self) -> Result<Vec<Project>> {
         self.with(|db| {
@@ -1345,11 +1351,6 @@ impl Store {
     }
 }
 
-/// Notices writes from any connection, including other processes such as the CLI.
-pub struct ChangeWatch {
-    db: Mutex<Connection>,
-}
-
 /// A consistent copy of the inputs used by the owner's unread-change digest.
 pub(crate) struct ChangesSnapshot {
     pub current: Value,
@@ -1512,19 +1513,5 @@ impl Store {
                 params![status, data.to_string(), id, revision],
             ).map(|count| count > 0)
         })
-    }
-}
-
-impl ChangeWatch {
-    pub fn open(path: &Path) -> Result<ChangeWatch> {
-        Ok(ChangeWatch {
-            db: Mutex::new(open(path)?),
-        })
-    }
-
-    /// A number that changes whenever another connection commits a write.
-    pub fn version(&self) -> Result<i64> {
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.query_row("PRAGMA data_version", [], |r| r.get(0))
     }
 }

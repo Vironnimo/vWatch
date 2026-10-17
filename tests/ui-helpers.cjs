@@ -67,7 +67,7 @@ async function app(invoke = () => ({}), extraExpose = '') {
       } } },
     },
   });
-  vm.runInContext(source.replace('load(true).then(refreshFacts);', expose + extraExpose), context);
+  vm.runInContext(source.replace('load(true).then(refreshWhenDue);', expose + extraExpose), context);
   await context.ui.load(false);
   return { ui: context.ui, state, node, calls, copied, document, dispatch: (type, event) => {
     for (const handler of events.get(type) || []) handler(event);

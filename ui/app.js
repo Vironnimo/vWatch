@@ -50,7 +50,8 @@
   let searchQ = '';
   let searchSel = 0;
   const TASKS = {};       // "Auftrag kopieren" buttons: key → the task they copy, refilled on every render
-  let lastVersion = null;
+  let lastVersion = null; // data_version of the state shown; the watch reloads when it moves on
+  let loadSeq = 0, shownSeq = 0, loading = 0; // a state never replaces one requested later
   let shown = false;
   let statsProject = null, statsFrom = '', statsUntil = '', statsTab = 'numbers';
   let statsData = null, statsHistory = null, statsVersions = null, statsDetail = null;
@@ -1628,24 +1629,50 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
-  async function load(visit) {
+  // `seen` is the data_version that prompted the load; a failed load keeps it so
+  // the watch does not retry the same change every few seconds.
+  async function load(visit, seen) {
+    const seq = ++loadSeq;
+    loading++;
     try {
-      S = await call('state', { visit });
-      if (S.prefs.style === 'handbook') S.prefs.style = 'board';
-      if (S.prefs.style === 'statistics') invalidateStatistics(true);
-      render();
-    } catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
+      const next = await call('state', { visit });
+      if (seq > shownSeq) {
+        shownSeq = seq; S = next; lastVersion = next.data_version ?? null;
+        if (S.prefs.style === 'handbook') S.prefs.style = 'board';
+        if (S.prefs.style === 'statistics') invalidateStatistics(true);
+        render();
+      }
+    } catch (e) {
+      if (seq > shownSeq) {
+        if (seen !== undefined) lastVersion = seen;
+        $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`;
+      }
+    } finally { loading--; }
     if (!shown) { shown = true; call('ready').catch(() => {}); }
   }
-  let refreshing = false;
+  const REFRESH_MS = 20 * 60 * 1000;
+  let refreshing = false, lastRefresh = 0;
   async function refreshFacts() {
     if (refreshing || !S || !S.projects.length) return;
-    refreshing = true;
+    refreshing = true; lastRefresh = Date.now();
     const b = $('#refresh');
     b.disabled = true; b.textContent = 'Misst …';
-    try { S = await call('refresh'); invalidateStatistics(); render(); } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
+    try {
+      const next = await call('refresh');
+      // read after measuring, so it is newer than any state requested meanwhile
+      shownSeq = ++loadSeq; S = next; lastVersion = next.data_version ?? null;
+      invalidateStatistics(); render();
+    } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
     b.disabled = false; b.textContent = 'Git-Fakten messen';
     refreshing = false;
+  }
+  // Facts every watched project measured within the refresh interval, by the window or an agent's run.
+  const factsFresh = () => S.projects.filter(p => p.status !== 'archived')
+    .every(p => p.facts_collected_at && Date.now() - Date.parse(p.facts_collected_at) < REFRESH_MS);
+  // Measures only while the window is visible, at most once per interval, and not when the facts are fresh.
+  function refreshWhenDue() {
+    if (!S || document.hidden || Date.now() - lastRefresh < REFRESH_MS || factsFresh()) return;
+    refreshFacts();
   }
   // Saves the owner's reaction to an item (a rating, an answer, "done"); `note` undefined keeps the stored one.
   async function react(id, value, note, msg, until) {
@@ -1729,8 +1756,9 @@
     if (!preview || preview.busy || !preview.uncertain) return;
     preview.busy = true; renderTaskPreview();
     try {
+      const seq = ++loadSeq;
       const state = await call('state', { visit: false });
-      S = state;
+      if (seq > shownSeq) { shownSeq = seq; S = state; lastVersion = state.data_version ?? null; }
       const saved = activeTaskFor(preview.task);
       preview.uncertain = false; preview.error = false;
       if (saved) {
@@ -2196,19 +2224,26 @@
   });
   $('#refresh').addEventListener('click', refreshFacts);
 
-  // Reload when anything wrote to the database, such as an agent saving a card.
+  // Reload when the database moved past the state shown: an agent saved a card, or
+  // a window write was not followed by its own load. Loads and refreshes in flight
+  // adopt their own version, so the watch waits for them instead of loading twice.
   const typing = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && a.type !== 'checkbox') || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
+  const idle = () => S && !refreshing && !loading && !typing();
+  let watching = false;
   async function watch() {
-    let v;
-    try { v = await call('data_version'); } catch (e) { return; }
-    if (typing()) return;
-    const changed = lastVersion !== null && v !== lastVersion;
-    lastVersion = v;
-    if (changed && S && !refreshing) await load(false);
+    if (watching || !idle()) return;
+    watching = true;
+    try {
+      const v = await call('data_version');
+      if (lastVersion === null) lastVersion = v;
+      else if (v !== lastVersion && idle()) await load(false, v);
+    } catch (e) { /* the next tick asks again */ }
+    finally { watching = false; }
   }
   setInterval(watch, 2500);
-  setInterval(refreshFacts, 20 * 60 * 1000);
+  setInterval(refreshWhenDue, 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWhenDue(); });
   window.addEventListener('focus', () => { if (S && !typing()) load(true); });
 
-  load(true).then(refreshFacts);
+  load(true).then(refreshWhenDue);
 })();

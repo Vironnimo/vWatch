@@ -3700,6 +3700,19 @@ impl Watchtower {
         Ok(json!({"ok": true, "changes": self.changes_digest()?}))
     }
 
+    /// Changes whenever another connection, such as an agent's CLI call, commits a
+    /// write. This service's own writes leave it unchanged.
+    pub fn data_version(&self) -> Result<i64> {
+        Ok(self.store.data_version()?)
+    }
+
+    /// The window state with the `data_version` it reflects. The version is read
+    /// first, so any write the state might miss changes it.
+    pub fn versioned_state(&self, visit: bool) -> Result<(Value, i64)> {
+        let version = self.data_version()?;
+        Ok((self.state(visit)?, version))
+    }
+
     /// Everything the window renders. Visits record re-entry context; only an
     /// explicit read acknowledgement changes unread report and event markers.
     pub fn state(&self, visit: bool) -> Result<Value> {

@@ -1,5 +1,6 @@
 //! The Watchtower window: a Tauri shell around `ui/` that reaches the service through commands.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,12 +9,32 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::service::{Watchtower, WatchtowerError};
-use crate::store::ChangeWatch;
 use crate::system;
 
 struct AppState {
     service: Arc<Watchtower>,
-    watch: ChangeWatch,
+    /// Counts the window's own write commands, which the database's data
+    /// version does not see.
+    writes: Arc<AtomicU64>,
+}
+
+/// Identifies what the window has seen: other connections' commits (agents'
+/// CLI calls) and the window's own write commands.
+fn version(data: i64, writes: u64) -> Value {
+    json!(format!("{data}.{writes}"))
+}
+
+/// The window state with the version it reflects. Both counters are read
+/// before the state, so a write the state misses always changes the version.
+fn versioned_state(
+    s: &Watchtower,
+    writes: &AtomicU64,
+    visit: bool,
+) -> Result<Value, WatchtowerError> {
+    let own = writes.load(Ordering::SeqCst);
+    let (mut state, data) = s.versioned_state(visit)?;
+    state["data_version"] = version(data, own);
+    Ok(state)
 }
 
 type Reply = Result<Value, Value>;
@@ -34,9 +55,21 @@ where
         .map_err(|e| e.to_json())
 }
 
+/// Run a write command. Afterwards the window's version changes even when the
+/// command failed, so the page reloads unless it already loaded a newer state.
+async fn write<F>(state: &State<'_, AppState>, f: F) -> Reply
+where
+    F: FnOnce(&Watchtower) -> Result<Value, WatchtowerError> + Send + 'static,
+{
+    let result = work(state, f).await;
+    state.writes.fetch_add(1, Ordering::SeqCst);
+    result
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn state(app: State<'_, AppState>, visit: bool) -> Reply {
-    work(&app, move |s| s.state(visit)).await
+    let writes = app.writes.clone();
+    work(&app, move |s| versioned_state(s, &writes, visit)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -95,9 +128,12 @@ async fn compare_documents(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn refresh(app: State<'_, AppState>) -> Reply {
-    work(&app, |s| {
-        s.refresh_facts(None, true)?;
-        s.state(false)
+    let writes = app.writes.clone();
+    work(&app, move |s| {
+        let measured = s.refresh_facts(None, true);
+        writes.fetch_add(1, Ordering::SeqCst);
+        measured?;
+        versioned_state(s, &writes, false)
     })
     .await
 }
@@ -110,7 +146,7 @@ async fn set_feedback(
     note: Option<String>,
     until: Option<String>,
 ) -> Reply {
-    work(&app, move |s| {
+    write(&app, move |s| {
         s.set_feedback_until(
             &item_id,
             value.as_deref(),
@@ -123,7 +159,7 @@ async fn set_feedback(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn create_task(app: State<'_, AppState>, payload: Value) -> Reply {
-    work(&app, move |s| s.create_task(payload)).await
+    write(&app, move |s| s.create_task(payload)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -132,7 +168,7 @@ async fn restore_feedback(
     item_id: String,
     snapshot: Option<Value>,
 ) -> Reply {
-    work(&app, move |s| {
+    write(&app, move |s| {
         s.restore_feedback(&item_id, snapshot.as_ref())
     })
     .await
@@ -140,7 +176,7 @@ async fn restore_feedback(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn undo(app: State<'_, AppState>, token: String) -> Reply {
-    work(&app, move |s| s.undo(&token)).await
+    write(&app, move |s| s.undo(&token)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -150,7 +186,7 @@ async fn set_task_status(
     status: String,
     revision: i64,
 ) -> Reply {
-    work(&app, move |s| {
+    write(&app, move |s| {
         s.set_task_status_guarded(id, &status, revision)
     })
     .await
@@ -163,7 +199,7 @@ async fn set_warning_ack(
     key: String,
     note: Option<String>,
 ) -> Reply {
-    work(&app, move |s| {
+    write(&app, move |s| {
         s.set_warning_ack(&project, &key, note.as_deref())
     })
     .await
@@ -171,7 +207,7 @@ async fn set_warning_ack(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn mark_changes_read(app: State<'_, AppState>, token: String) -> Reply {
-    work(&app, move |s| s.mark_changes_read(&token)).await
+    write(&app, move |s| s.mark_changes_read(&token)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -191,27 +227,27 @@ async fn set_status(
     status: String,
     note: Option<String>,
 ) -> Reply {
-    work(&app, move |s| s.set_status(&id, &status, note.as_deref())).await
+    write(&app, move |s| s.set_status(&id, &status, note.as_deref())).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn add_idea(app: State<'_, AppState>, text: String) -> Reply {
-    work(&app, move |s| s.add_idea(&text)).await
+    write(&app, move |s| s.add_idea(&text)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn update_idea(app: State<'_, AppState>, id: i64, text: String, revision: i64) -> Reply {
-    work(&app, move |s| s.update_idea(id, &text, revision)).await
+    write(&app, move |s| s.update_idea(id, &text, revision)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn remove_idea(app: State<'_, AppState>, id: i64) -> Reply {
-    work(&app, move |s| s.remove_idea(id)).await
+    write(&app, move |s| s.remove_idea(id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn restore_idea(app: State<'_, AppState>, id: i64) -> Reply {
-    work(&app, move |s| s.restore_idea(id)).await
+    write(&app, move |s| s.restore_idea(id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -221,12 +257,12 @@ async fn set_goal(
     goal: String,
     due: Option<String>,
 ) -> Reply {
-    work(&app, move |s| s.set_goal(&id, &goal, due.as_deref())).await
+    write(&app, move |s| s.set_goal(&id, &goal, due.as_deref())).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn rename_project(app: State<'_, AppState>, id: String, name: String) -> Reply {
-    work(&app, move |s| s.rename_project(&id, &name)).await
+    write(&app, move |s| s.rename_project(&id, &name)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -236,7 +272,7 @@ async fn update_project(
     name: Option<String>,
     path: Option<String>,
 ) -> Reply {
-    work(&app, move |s| {
+    write(&app, move |s| {
         s.update_project(&id, name.as_deref(), path.as_deref())
     })
     .await
@@ -244,12 +280,12 @@ async fn update_project(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn remove_project(app: State<'_, AppState>, id: String) -> Reply {
-    work(&app, move |s| s.remove_project(&id)).await
+    write(&app, move |s| s.remove_project(&id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn restore_project(app: State<'_, AppState>, id: String) -> Reply {
-    work(&app, move |s| s.restore_project(&id)).await
+    write(&app, move |s| s.restore_project(&id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -259,7 +295,7 @@ async fn discover(app: State<'_, AppState>, root: String) -> Reply {
 
 #[tauri::command(rename_all = "snake_case")]
 async fn add_projects(app: State<'_, AppState>, paths: Vec<String>) -> Reply {
-    work(&app, move |s| s.add_projects(&paths)).await
+    write(&app, move |s| s.add_projects(&paths)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -339,10 +375,17 @@ fn expand_path(path: &str) -> String {
     }
 }
 
-/// Changes whenever anything (the window's own work or an agent's CLI call) wrote to the database.
+/// Changes whenever an agent's CLI call committed a write or the window ran a
+/// write command; compare it with the `data_version` of the state shown.
+/// Visits, opening a project and display preferences leave it unchanged.
 #[tauri::command(rename_all = "snake_case")]
-fn data_version(app: State<'_, AppState>) -> Reply {
-    app.watch.version().map(|v| json!(v)).map_err(internal)
+async fn data_version(app: State<'_, AppState>) -> Reply {
+    let writes = app.writes.clone();
+    work(&app, move |s| {
+        let own = writes.load(Ordering::SeqCst);
+        Ok(version(s.data_version()?, own))
+    })
+    .await
 }
 
 /// The page calls this after its first render, so the window never shows a blank frame.
@@ -363,7 +406,6 @@ pub fn run() {
     let data = system::data_dir();
     let db = system::db_path(&data);
     let service = Watchtower::open(&db).expect("Watchtower cannot open its database");
-    let watch = ChangeWatch::open(&db).expect("Watchtower cannot open its database");
     let _ = system::export_skill();
 
     tauri::Builder::default()
@@ -373,7 +415,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             service: Arc::new(service),
-            watch,
+            writes: Arc::new(AtomicU64::new(0)),
         })
         .invoke_handler(tauri::generate_handler![
             state,
