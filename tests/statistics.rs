@@ -232,8 +232,14 @@ fn refreshes_keep_the_code_count_until_the_working_tree_changes() {
     // hotspots report their own 90-day window, not the activity window
     let facts = svc.store().facts("demo").unwrap().unwrap().data;
     let stats = svc.statistics(Some("demo"), None, None).unwrap();
-    assert_eq!(stats["projects"][0]["activity"]["hotspots_from"], facts["activity"]["hotspots_from"]);
-    assert_ne!(stats["projects"][0]["activity"]["hotspots_from"], facts["activity"]["from"]);
+    assert_eq!(
+        stats["projects"][0]["activity"]["hotspots_from"],
+        facts["activity"]["hotspots_from"]
+    );
+    assert_ne!(
+        stats["projects"][0]["activity"]["hotspots_from"],
+        facts["activity"]["from"]
+    );
 }
 
 #[test]
@@ -289,7 +295,7 @@ fn proposals_survive_report_omission_and_card_replays_do_not_duplicate_history()
         false,
     )
     .unwrap();
-    let proposals = svc.proposals(Some("demo")).unwrap();
+    let proposals = svc.proposals(Some("demo"), None).unwrap();
     assert_eq!(proposals["proposals"].as_array().unwrap().len(), 1);
     assert_eq!(proposals["proposals"][0]["in_report"], false);
     assert_eq!(
@@ -297,6 +303,19 @@ fn proposals_survive_report_omission_and_card_replays_do_not_duplicate_history()
         "2026-09-30T08:00:00Z"
     );
     svc.set_feedback(id, Some("up"), None).unwrap();
+    assert_eq!(
+        svc.proposals(Some("demo"), Some("idea")).unwrap()["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        svc.proposals(Some("demo"), Some("recommendation")).unwrap()["proposals"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         svc.feedback(None).unwrap()[0]["item"]["title"],
         proposal["title"]
@@ -313,8 +332,19 @@ fn proposals_survive_report_omission_and_card_replays_do_not_duplicate_history()
         .any(|f| f["field"] == "suggestions"));
     svc.put_card("demo", json!({"suggestions":[proposal]}), true, false)
         .unwrap();
+    let mut reclassified = proposal.clone();
+    reclassified["category"] = json!("recommendation");
+    svc.put_card("demo", json!({"suggestions":[reclassified]}), true, false)
+        .unwrap();
+    let recommendations = svc.proposals(Some("demo"), Some("recommendation")).unwrap();
+    assert_eq!(recommendations["proposals"][0]["id"], id);
     assert_eq!(
-        svc.proposals(Some("demo")).unwrap()["proposals"][0]["first_seen"],
+        recommendations["proposals"][0]["item"]["category"],
+        "recommendation"
+    );
+    assert_eq!(svc.feedback(None).unwrap()[0]["value"], "up");
+    assert_eq!(
+        svc.proposals(Some("demo"), None).unwrap()["proposals"][0]["first_seen"],
         "2026-09-30T08:00:00Z"
     );
     assert!(
@@ -393,7 +423,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     let (svc, _) = service(tmp.path());
     assert_eq!(svc.card_history("demo").unwrap()["current_version"], 2);
     assert_eq!(
-        svc.proposals(None).unwrap()["proposals"]
+        svc.proposals(None, None).unwrap()["proposals"]
             .as_array()
             .unwrap()
             .len(),
@@ -453,6 +483,14 @@ fn real_console_exposes_statistics_history_comparisons_and_guarded_idea_edits() 
         vec!["history", "show", "1"],
         vec!["card", "compare", "demo", "--from", "1", "--to", "2"],
         vec!["proposals"],
+        vec!["proposals", "--category", "idea"],
+        vec![
+            "proposals",
+            "--category",
+            "recommendation",
+            "--project",
+            "demo",
+        ],
         vec!["ideas", "update", "1", "Überarbeitet", "--revision", "1"],
     ] {
         let out = run(&args);
@@ -464,6 +502,14 @@ fn real_console_exposes_statistics_history_comparisons_and_guarded_idea_edits() 
         assert!(out.stderr.is_empty());
         assert!(!out.stdout.is_empty());
     }
+    let out = run(&["proposals", "--category", "idea", "--json"]);
+    let proposals: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(proposals["category"], "idea");
+    assert_eq!(proposals["proposals"][0]["item"]["category"], "idea");
+    assert!(!run(&["proposals", "--category", "invalid"])
+        .status
+        .success());
+    assert!(!run(&["proposals", "--project", "missing"]).status.success());
     let out = run(&["history", "list", "--json"]);
     let page: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(page["events"].as_array().unwrap().len(), 30);

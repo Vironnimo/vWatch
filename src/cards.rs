@@ -146,7 +146,11 @@ const QUESTION: &[Field] = &[
     f("source", TEXT, Text("")),
     f("options", Ty::List(&Ty::Obj(OPTION), Some(3)), Empty),
     // The 1-based number of the option the agent recommends, when one is clearly better.
-    f("recommended", Ty::Nullable(&Ty::Int { min: 1, max: 3 }), Null),
+    f(
+        "recommended",
+        Ty::Nullable(&Ty::Int { min: 1, max: 3 }),
+        Null,
+    ),
 ];
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&SENTENCE), Null),
@@ -193,6 +197,11 @@ const HANDBOOK: &[Field] = &[
 const SUGGESTION: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
     f(
+        "category",
+        Ty::Enum(&["idea", "recommendation"]),
+        Text("recommendation"),
+    ),
+    f(
         "type",
         Ty::Enum(&["next", "feature", "cleanup", "park"]),
         Required,
@@ -217,12 +226,20 @@ const CARD: &[Field] = &[
     f("milestones", Ty::List(&Ty::Obj(MILESTONE), None), Empty),
     f("features", Ty::List(&words(8), None), Empty),
     f("open_ends", Ty::List(&Ty::Obj(OPEN_END), None), Empty),
-    f("waiting_on_you", Ty::List(&Ty::Obj(QUESTION), Some(3)), Empty),
+    f(
+        "waiting_on_you",
+        Ty::List(&Ty::Obj(QUESTION), Some(3)),
+        Empty,
+    ),
     f("vision", Ty::Obj(VISION), Filled),
     f("reentry", Ty::Obj(REENTRY), Required),
     f("health_notes", Ty::List(&SENTENCE, None), Empty),
     f("decisions", Ty::List(&sentence(20), None), Empty),
-    f("suggestions", Ty::List(&Ty::Obj(SUGGESTION), Some(4)), Empty),
+    f(
+        "suggestions",
+        Ty::List(&Ty::Obj(SUGGESTION), Some(8)),
+        Empty,
+    ),
     f("cross_project_hints", Ty::List(&SENTENCE, None), Empty),
     f("handbook", Ty::Obj(HANDBOOK), Filled),
 ];
@@ -248,6 +265,11 @@ const PATTERN: &[Field] = &[
 ];
 const SYNERGY: &[Field] = &[
     f("id", Ty::Nullable(&Ty::Id), Null),
+    f(
+        "category",
+        Ty::Enum(&["idea", "recommendation"]),
+        Text("recommendation"),
+    ),
     f("title", words(8), Required),
     f("why", WHY, Required),
     f("projects", Ty::List(&SHORT, None), Empty),
@@ -314,6 +336,17 @@ const PORTFOLIO: &[Field] = &[
     f("week_review", Ty::Nullable(&Ty::Obj(WEEK_REVIEW)), Null),
 ];
 
+/// Explicit classification wins. Older feature proposals are ideas; other
+/// unclassified proposals remain recommendations until an agent reviews them.
+pub fn proposal_category(item: &Value, kind: &str) -> &'static str {
+    match item["category"].as_str() {
+        Some("idea") => "idea",
+        Some("recommendation") => "recommendation",
+        _ if matches!(kind, "new_app" | "owner_idea") || item["type"] == "feature" => "idea",
+        _ => "recommendation",
+    }
+}
+
 impl Kind {
     /// A current reading view, without obsolete agent estimates. Stored documents,
     /// unknown data and explicitly requested history remain untouched.
@@ -335,8 +368,19 @@ impl Kind {
                 .into_iter()
                 .flatten()
             {
+                let category = proposal_category(
+                    item,
+                    if *list == "new_apps" {
+                        "new_app"
+                    } else {
+                        "suggestion"
+                    },
+                );
                 if let Some(item) = item.as_object_mut() {
                     item.remove("effort");
+                    if matches!(*list, "suggestions" | "synergies") {
+                        item.insert("category".into(), json!(category));
+                    }
                 }
             }
         }
@@ -432,6 +476,33 @@ pub fn validate(
         return Err(ctx.problems);
     }
     let mut clean = clean.expect("a valid object yields a value");
+    // Preserve the meaning of old feature entries on partial document updates.
+    for list in ["suggestions", "synergies"] {
+        for (index, item) in clean
+            .get_mut(list)
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            if data[list][index].get("category").is_none() {
+                item["category"] = json!(proposal_category(&data[list][index], "suggestion"));
+            }
+        }
+    }
+    for category in ["idea", "recommendation"] {
+        let count = clean["suggestions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item["category"] == category)
+            .count();
+        if count > 4 {
+            ctx.problems.push(format!(
+                "suggestions: {count} entries in category '{category}'; limit is 4 per category"
+            ));
+        }
+    }
     let mut seen = HashSet::new();
     for (list, _, _) in kind.items() {
         for (index, item) in clean[*list].as_array().into_iter().flatten().enumerate() {
@@ -628,6 +699,16 @@ fn new_id(prefix: &str) -> String {
 pub fn json_schema(kind: Kind) -> Value {
     let mut schema = obj_schema(kind.fields());
     schema["title"] = json!(kind.title());
+    let list = if kind == Kind::Card {
+        "suggestions"
+    } else {
+        "synergies"
+    };
+    schema["properties"][list]["items"]["properties"]["category"]["description"] = json!("idea: new capabilities or simpler user workflows; recommendation: next steps, upkeep and repairs. Omitted feature suggestions infer idea; other omissions use recommendation.");
+    if kind == Kind::Card {
+        schema["properties"][list]["description"] =
+            json!("At most 4 ideas and 4 recommendations; either category can be empty.");
+    }
     schema
 }
 

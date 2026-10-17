@@ -12,7 +12,7 @@ test('legacy effort estimates stay invisible while recommendations and task acti
   a.state.portfolio = {
     focus: [{ id: 'f1', project: 'sample', title: 'Focus item', why: 'First priority', done_when: 'Focus delivered', effort: 'half-day' }],
     patterns: [{ id: 'p1', projects: ['sample'], title: 'Pattern item', why: 'Shared issue', effort: 'hour' }],
-    synergies: [{ id: 'y1', projects: ['sample'], title: 'Synergy item', why: 'Shared solution', effort: 'day' }],
+    synergies: [{ id: 'y1', category: 'idea', projects: ['sample'], title: 'Synergy item', why: 'Shared solution', effort: 'day' }],
     new_apps: [{ id: 'n1', title: 'New app item', pitch: 'Useful app', effort: 'week' }],
     idea_checks: [{ idea: 7, verdict: 'fold_in', fits: ['sample'], why: 'Fits the existing project', effort: 'L' }],
   };
@@ -121,7 +121,9 @@ test('ideas show the newest proposals globally and expand without losing ratings
   assert.match(a.ui.blockIdeas(), /data-snooze-save/);
   a.ui.openProject('sample');
   const projectPage = a.node('#project-page').innerHTML;
-  assert.ok(projectPage.indexOf('Later feature') < projectPage.indexOf('First priority'));
+  assert.ok(projectPage.indexOf('First priority') < projectPage.indexOf('Third suggestion'));
+  assert.match(projectPage, />Empfehlungen</);
+  assert.match(projectPage, />Ideen</);
   assert.ok(projectPage.indexOf('Third suggestion') < projectPage.indexOf('Unknown date idea'));
   assert.equal(a.calls.filter(c => c.command === 'set_feedback').length, 0);
 });

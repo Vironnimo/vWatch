@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea });`;
+const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea });`;
 const ids = entries => Array.from(entries, entry => entry.s.id);
 
 test('one idea collection orders all sources by first appearance and preserves remembered proposals', async () => {
@@ -11,12 +11,12 @@ test('one idea collection orders all sources by first appearance and preserves r
   a.state.projects[0].suggestion_first_seen = { s1: '2026-10-03T12:00:00Z' };
   a.state.portfolio = {
     new_apps: [{ id: 'app', title: 'New application', pitch: 'App pitch' }],
-    synergies: [{ id: 'link', title: 'Shared capability', projects: ['sample'], why: 'Reuse the same capability' }],
+    synergies: [{ id: 'link', category: 'idea', title: 'Shared capability', projects: ['sample'], why: 'Reuse the same capability' }],
   };
   a.state.new_app_first_seen = { app: '2026-10-05T12:00:00Z' };
   a.state.synergy_first_seen = { link: '2026-10-04T12:00:00Z' };
   a.state.ideas = [{ id: 8, text: 'My own idea', added_at: '2026-10-06T12:00:00Z' }];
-  a.state.feedback.saved = { value: 'up', title: 'Remembered proposal', project_id: 'sample', first_seen: '2026-10-01T12:00:00Z', item: { id: 'saved', kind: 'suggestion', title: 'Remembered proposal', why: 'Still useful' } };
+  a.state.feedback.saved = { value: 'up', title: 'Remembered proposal', project_id: 'sample', first_seen: '2026-10-01T12:00:00Z', item: { id: 'saved', kind: 'suggestion', category: 'idea', title: 'Remembered proposal', why: 'Still useful' } };
   a.state.feedback.focus = { value: 'done', item: { kind: 'focus', title: 'Not an idea' } };
   await a.ui.load(false);
   assert.deepEqual(ids(a.ui.ideaCollection()), ['idea:8', 'app', 'link', 's1', 'saved']);
@@ -25,7 +25,7 @@ test('one idea collection orders all sources by first appearance and preserves r
   for (const label of ['Deine Idee', 'Neue App', 'Querverbindung', 'Aus dem Projekt', 'aus früherem Bericht gemerkt']) assert.ok(html.includes(label));
   assert.doesNotMatch(html, /Not an idea/);
   assert.equal((html.match(/data-idea-id="saved"/g) || []).length, 1);
-  a.state.projects[0].card.suggestions.push({ id: 'saved', title: 'Rewritten old proposal' });
+  a.state.projects[0].card.suggestions.push({ id: 'saved', category: 'idea', title: 'Rewritten old proposal' });
   a.state.projects[0].suggestion_first_seen.saved = '2026-10-01T12:00:00Z';
   await a.ui.load(false);
   assert.deepEqual(ids(a.ui.ideaCollection()), ['idea:8', 'app', 'link', 's1', 'saved']);
@@ -36,7 +36,7 @@ test('one idea collection orders all sources by first appearance and preserves r
 test('ratings, dated returns and explicit task state have separate reachable filters', async () => {
   const a = await app(undefined, expose);
   a.state.prefs.style = 'ideas';
-  a.state.projects[0].card.suggestions = ['fresh', 'good', 'later', 'returned', 'rejected', 'working', 'finished', 'cancelled'].map(id => ({ id, title: `Title ${id}` }));
+  a.state.projects[0].card.suggestions = ['fresh', 'good', 'later', 'returned', 'rejected', 'working', 'finished', 'cancelled'].map(id => ({ id, category: 'idea', title: `Title ${id}` }));
   a.state.feedback = {
     good: { value: 'up' }, later: { value: 'later', snoozed_until: '2026-10-08' },
     returned: { value: 'later', snoozed_until: '2026-10-07' }, rejected: { value: 'down' },
@@ -68,7 +68,7 @@ test('an assigned idea survives source removal without collecting unrelated task
   a.state.prefs.style = 'ideas';
   a.state.projects[0].card.suggestions = [];
   a.state.tasks = [
-    { id: 3, source_id: 'old', status: 'blocked', title: 'Remember this idea', why: 'Actual assignment reason', evidence: 'Actual assignment evidence', done_when: 'Actual criterion', projects: ['sample'], source_snapshot: { kind: 'suggestion', id: 'old', title: 'Historical wording', why: 'Historical reason' } },
+    { id: 3, source_id: 'old', status: 'blocked', title: 'Remember this idea', why: 'Actual assignment reason', evidence: 'Actual assignment evidence', done_when: 'Actual criterion', projects: ['sample'], source_snapshot: { kind: 'suggestion', category: 'idea', id: 'old', title: 'Historical wording', why: 'Historical reason' } },
     { id: 4, source_id: 'focus', status: 'assigned', title: 'Focus task', projects: ['sample'], source_snapshot: { kind: 'focus', title: 'Focus task' } },
     { id: 5, source_id: 'other', status: 'assigned', title: 'Arbitrary task', projects: ['sample'] },
   ];
@@ -114,7 +114,7 @@ test('opened idea evidence and task results stay open across refresh and can clo
 test('filter changes and source rewrites preserve an open note and snooze input', async () => {
   const a = await app(undefined, expose);
   a.state.prefs.style = 'ideas';
-  a.state.feedback.s1 = { value: 'down', item: { kind: 'suggestion', id: 's1', title: 'Suggestion' }, project_id: 'sample' };
+  a.state.feedback.s1 = { value: 'down', item: { kind: 'suggestion', category: 'idea', id: 's1', title: 'Suggestion' }, project_id: 'sample' };
   await a.ui.load(false);
   a.ui.note('s1'); a.ui.draft('s1', 'A reason still being written');
   a.ui.setIdeaFilter('up');
@@ -152,7 +152,7 @@ test('changing the rating of a remembered proposal keeps its source before the n
   const a = await app(undefined, expose);
   a.state.prefs.style = 'ideas';
   a.state.projects[0].card.suggestions = [];
-  a.state.feedback.old = { value: 'later', snoozed_until: '2026-10-09', project_id: 'sample', first_seen: '2026-09-10T12:00:00Z', item: { kind: 'suggestion', id: 'old', title: 'Saved old proposal', why: 'Useful' } };
+  a.state.feedback.old = { value: 'later', snoozed_until: '2026-10-09', project_id: 'sample', first_seen: '2026-09-10T12:00:00Z', item: { kind: 'suggestion', category: 'idea', id: 'old', title: 'Saved old proposal', why: 'Useful' } };
   await a.ui.load(false);
   a.ui.setIdeaFilter('later');
   await a.ui.setFeedback({ dataset: { item: 'old' } }, 'up');
@@ -186,7 +186,7 @@ test('remembered ideas from removed projects require restoration before a new ha
     return {};
   }, expose);
   a.state.prefs.style = 'ideas';
-  a.state.feedback.remembered = { value: 'up', project_id: 'removed', item: { id: 'remembered', title: 'Remembered work', kind: 'suggestion' } };
+  a.state.feedback.remembered = { value: 'up', project_id: 'removed', item: { id: 'remembered', title: 'Remembered work', kind: 'suggestion', category: 'idea' } };
   await a.ui.load(false);
   a.ui.setIdeaFilter('up');
   let html = a.ui.renderIdeas();
@@ -237,7 +237,7 @@ test('newly saved own ideas become visible from any collection filter and failed
 test('the idea round rates only new ideas one at a time, carries an optional reason and can be skipped', async () => {
   const a = await app((command, args) => command === 'set_feedback' ? { note: args.note } : {}, expose);
   a.state.prefs.style = 'ideas';
-  a.state.projects[0].card.suggestions = ['one', 'two', 'three', 'four', 'rated'].map(id => ({ id, title: `Title ${id}`, why: `Why ${id}` }));
+  a.state.projects[0].card.suggestions = ['one', 'two', 'three', 'four', 'rated'].map(id => ({ id, category: 'idea', title: `Title ${id}`, why: `Why ${id}` }));
   a.state.projects[0].suggestion_first_seen = { one: '2026-10-07T09:00:00Z', two: '2026-10-06T09:00:00Z', three: '2026-10-05T09:00:00Z', four: '2026-10-04T09:00:00Z' };
   a.state.feedback.rated = { value: 'down' };
   await a.ui.load(false);
@@ -260,4 +260,64 @@ test('the idea round rates only new ideas one at a time, carries an optional rea
   await a.ui.ideaRoundStep('later');
   assert.match(a.node('#round-root').innerHTML, /Geschafft[^]*1 gut, 1 später, 1 Quatsch, 1 übersprungen/);
   assert.deepEqual(a.calls.filter(c => c.command === 'set_feedback').map(c => c.args.value), ['down', 'up', 'later']);
+});
+
+
+test('ideas and recommendations keep independent filters, rounds and search destinations', async () => {
+  const a = await app(undefined, expose);
+  a.state.prefs.style = 'ideas';
+  a.state.projects[0].card.suggestions.push(
+    { id: 'release', type: 'next', title: 'Release veröffentlichen', why: 'Bereit' },
+    { id: 'workflow', type: 'next', category: 'idea', title: 'Einfacherer Ablauf', why: 'Weniger Schritte' }
+  );
+  a.state.portfolio = { synergies: [{ id: 'cleanup', title: 'Gemeinsam aufräumen' }] };
+  a.state.proposals = [{ scope: 'sample', kind: 'suggestion', first_seen: '2026-10-01', in_report: false,
+    item: { id: 'retained', category: 'recommendation', title: 'Frühere Empfehlung' } }];
+  await a.ui.load(false);
+  assert.match(a.ui.renderIdeas(), /Suggestion/);
+  assert.match(a.ui.renderIdeas(), /Einfacherer Ablauf/);
+  assert.doesNotMatch(a.ui.renderIdeas(), /Release veröffentlichen|Gemeinsam aufräumen|Frühere Empfehlung/);
+  assert.match(a.ui.renderIdeas(), /Ideen <span>2 neu/);
+  assert.match(a.ui.renderIdeas(), /Empfehlungen <span>3 neu/);
+  a.ui.startIdeaRound();
+  assert.match(a.node('#round-root').innerHTML, /Ideen bewerten[^]*1 von 2/);
+  a.ui.setIdeaCategory('recommendation');
+  assert.equal(a.node('#round-root').innerHTML, '');
+  assert.match(a.ui.renderIdeas(), /Release veröffentlichen/);
+  assert.match(a.ui.renderIdeas(), /Gemeinsam aufräumen/);
+  assert.match(a.ui.renderIdeas(), /Frühere Empfehlung/);
+  assert.doesNotMatch(a.ui.renderIdeas(), /Eigene Idee festhalten|Einfacherer Ablauf/);
+  a.ui.startIdeaRound();
+  assert.match(a.node('#round-root').innerHTML, /Empfehlungen bewerten[^]*1 von 3/);
+  a.ui.setIdeaCategory('idea');
+  await a.ui.openIdeaResult('release');
+  assert.match(a.ui.renderIdeas(), /data-idea-category="recommendation" aria-pressed="true"/);
+  assert.match(a.ui.renderIdeas(), /data-idea-id="release"/);
+  a.ui.openProject('sample');
+  const page = a.node('#project-page').innerHTML;
+  assert.match(page, />Empfehlungen</);
+  assert.match(page, />Ideen</);
+  assert.ok(page.indexOf('Release veröffentlichen') < page.indexOf('Einfacherer Ablauf'));
+  assert.equal(a.calls.filter(c => c.command === 'set_feedback').length, 0);
+});
+
+test('reclassification keeps the rating, original date, assignment and open note', async () => {
+  const a = await app(undefined, expose);
+  a.state.prefs.style = 'ideas';
+  a.state.projects[0].suggestion_first_seen = { s1: '2026-09-01' };
+  a.state.feedback.s1 = { value: 'up' };
+  a.state.tasks = [{ id: 4, source_id: 's1', title: 'Suggestion', projects: ['sample'], status: 'assigned', revision: 1 }];
+  await a.ui.load(false);
+  a.ui.setIdeaFilter('assigned');
+  a.ui.note('s1');
+  a.state.projects[0].card.suggestions[0].category = 'recommendation';
+  await a.ui.load(false);
+  assert.match(a.ui.renderIdeas(), /Offene Eingabe[^]*data-note-save="s1"/);
+  a.ui.note(null);
+  a.ui.setIdeaCategory('recommendation');
+  assert.match(a.ui.renderIdeas(), /data-idea-id="s1"/);
+  assert.match(a.ui.renderIdeas(), /datetime="2026-09-01"/);
+  assert.match(a.ui.renderIdeas(), /data-task-copy="s1"|Auftrag ansehen/);
+  assert.match(a.ui.renderIdeas(), /data-v="up" aria-pressed="true"/);
+  assert.equal(a.calls.filter(c => c.command === 'set_feedback' || c.command === 'create_task').length, 0);
 });

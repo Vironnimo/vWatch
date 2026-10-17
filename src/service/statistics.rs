@@ -334,12 +334,19 @@ impl Watchtower {
         )
     }
 
-    pub fn proposals(&self, project: Option<&str>) -> Result<Value> {
+    pub fn proposals(&self, project: Option<&str>, category: Option<&str>) -> Result<Value> {
+        if category.is_some_and(|c| !["idea", "recommendation"].contains(&c)) {
+            return Err(WatchtowerError::new(
+                "invalid_category",
+                "Unknown proposal category. Nothing was changed.",
+            )
+            .hint("Use idea or recommendation, or omit --category for both."));
+        }
         if let Some(id) = project {
             self.historical_project(id)?;
         }
         Ok(
-            json!({"proposals":self.store.proposals()?.into_iter().filter(|p|project.is_none_or(|id|p["scope"]==id)).collect::<Vec<_>>()}),
+            json!({"category":category,"proposals":self.store.proposals()?.into_iter().map(super::without_effort).filter(|p|project.is_none_or(|id|p["scope"]==id) && category.is_none_or(|c|p["category"]==c)).collect::<Vec<_>>()}),
         )
     }
 

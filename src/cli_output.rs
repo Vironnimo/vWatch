@@ -196,6 +196,9 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     list(&data["proposals"]).len()
                 ),
             );
+            if let Some(category) = data["category"].as_str() {
+                line(&mut out, 0, &format!("Note: category {category} only; omit --category for both ideas and recommendations."));
+            }
             field(&mut out, "Proposals", &data["proposals"], 0);
         }
         "projects.add" if data["added"].is_array() => {

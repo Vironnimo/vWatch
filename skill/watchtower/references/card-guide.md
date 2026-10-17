@@ -19,9 +19,9 @@ Measured facts already appear in the window. Use them to interpret a finding; do
 - `open_ends`: unfinished work, including uncommitted/unpushed work, unfinished branches, plans and broken CI.
 - `health_notes`: other concrete risk or deterioration.
 - `waiting_on_you`: a decision only the user can settle.
-- `suggestions`: a distinct proposal grounded in a finding and the project's goals.
+- `suggestions`: distinct recommendations and product ideas, separated by `category`.
 
-Repository hygiene (commit, push, remove worktrees or branches, delete build output, repair CI) is an open end, never a suggestion. The obvious repair of an open end is not an additional suggestion. The `reentry` step does not reappear as a suggestion. `headline` and `reentry` can refer to the leading finding without duplicating it in other sections. Remove finished, disproved or rejected items; do not replace completed work with an unsupported generic testing task. Keep IDs for retained questions and suggestions; omit IDs for new ones.
+Repository hygiene (commit, push, remove worktrees or branches, delete build output, repair CI) belongs in `open_ends`. Its obvious repair and the `reentry` step need no duplicate suggestion. A distinct action that needs its own assessment can be a recommendation; it is not a product idea. `headline` and `reentry` can refer to the leading finding. Remove finished, disproved or rejected items; do not replace completed work with an unsupported generic testing task. Keep IDs for retained questions and suggestions, including reclassification; omit IDs for new ones.
 
 ## Fields and limits
 
@@ -46,7 +46,7 @@ A word is a space-separated piece containing a letter or digit. A standalone das
 | `reentry` | One useful next step: `next_step` (20 words), `why` (30 words), `done_when` (20 words). Completion must be observable. |
 | `health_notes` | Concrete risks or deterioration, each at most 30 words. Empty when none were found. |
 | `decisions` | Recorded deliberate choices with their source, each at most 20 words. Example: "Kein Remote: bewusst nur lokal (AGENTS.md)." These are the user's decisions, not your conclusions. |
-| `suggestions` | At most 4 distinct proposals; fields and selection below. |
+| `suggestions` | At most 8 distinct proposals; select up to 4 ideas and up to 4 recommendations independently. Empty categories are valid. Fields and selection below. |
 | `cross_project_hints` | Possible reuse or overlap with other projects, each at most 30 words. The brief uses these findings. |
 | `handbook` | Project commands, installation, structure and orientation; fields below. |
 
@@ -54,7 +54,9 @@ For `age_days` of uncommitted work, unpushed commits or red CI, use `days` of th
 
 ## Suggestions
 
-Each suggestion has `id` when retained, `type` (`next`, `feature`, `cleanup`, `park`), `title` (8 words), `why` (25 words), `evidence` and `done_when` (20 words). Name files, functions or commits in evidence; line numbers drift. Tie features to the project's vision or the user's notes. A parking proposal is useful when the scope is complete or remaining work depends on people, money or decisions.
+Each suggestion has `id` when retained, `category` (`idea` or `recommendation`), `type` (`next`, `feature`, `cleanup`, `park`), `title` (8 words), `why` (25 words), `evidence` and `done_when` (20 words). Set `category` by the benefit, independently of `type`: `idea` adds a useful capability or simplifies the user's workflow; `recommendation` advances existing work, fixes a concrete problem, maintains or secures it. An export preview is an idea; publishing an already finished release is a recommendation. Name files, functions or commits in evidence; line numbers drift. Tie ideas to the project's purpose or the user's notes.
+
+Review both categories even when recommendations already occupy the card. For an idea, establish who benefits, in what situation and what becomes possible or easier; a generic improvement title is insufficient. For a recommendation, establish why action is warranted now. Reclassify retained entries with their existing IDs. Until reviewed, entries without a category use `idea` for `type: feature` and `recommendation` otherwise. The context's `new_fields` requests explicit classification of older entries.
 
 The user can turn a suggestion or `reentry` into an assigned task. Write `done_when` so another agent can tell whether it succeeded: "Monatsraten stimmen mit dem Kalender überein; dokumentierter Planungstest besteht." Include an exact test command only when the repository actually defines it. Assignments keep their original text through card rewrites.
 

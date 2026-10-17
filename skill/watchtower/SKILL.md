@@ -59,7 +59,7 @@ Write card and brief content in German, address the user as "du", and support fi
 | "Projekt bearbeiten", "umbenennen", "verschoben" | `projects update <project-id> --name ... --path ...` |
 | "parken", "erledigt", "archivieren", "Ziel" | `projects status`, `projects goal` |
 | "gut", "später", "Quatsch", "antworten", "abgehakt" | `feedback set`; values `up`, `later`, `down`, `answered`, `done` |
-| "Ideen" | `proposals` retains project suggestions, synergies and app ideas; `ideas list/add/update/remove` manages the user's own ideas |
+| "Ideen", "Empfehlungen" | `proposals --category idea` / `proposals --category recommendation`; omit the filter for both; `ideas list/add/update/remove` manages the user's own ideas |
 | "Statistik" | `statistics --project <project-id>`; omit the project for the portfolio, use `--from` and `--until` for dates |
 | "Änderungsverlauf" | `history list`, `history show <event-id>`; `card compare` / `portfolio compare` compare saved versions; see `references/cli.md` |
 | "Auftrag", "zugewiesen", "Ergebnis prüfen" | `tasks list`, `tasks create`, `tasks report`, `tasks confirm` |
@@ -80,7 +80,7 @@ Replace `<placeholders>` with the values described beside each recipe. File path
    ```powershell
    watchtower context <project-id>
    ```
-   Read every context page, keep its token and study the repository as the guide describes. Reflect on its purpose, user friction, useful capabilities and what could become simpler or unnecessary, including opportunities absent from its TODOs. Done when you have an evidenced state assessment and a selection outcome: worthwhile proposals, or concrete considered directions and why they do not qualify. Keep that outcome and cross-project observations for step 4, even when the card needs no changes.
+   Read every context page, keep its token and study the repository as the guide describes. Evaluate two separate questions: what needs doing now, and what new capability or simpler workflow would benefit the user? Save next steps and upkeep as `category: recommendation`; save product improvements as `category: idea`. Commit, push, cleanup and repairs do not count as product ideas. Done when each direction has a selection outcome: worthwhile proposals, or a concrete considered direction and why it does not qualify. Keep those outcomes and cross-project observations for step 4, even when the card needs no changes.
 3. Write the card as a UTF-8 JSON file in your own temporary folder outside the watched repository. If no previous card exists, provide a complete card. If a card exists, write only the changed top-level fields and add `--merge` to this command. Save with the token from step 2:
    ```powershell
    watchtower card put <project-id> --context-token <context-token> --file "<card-file>"
@@ -103,7 +103,7 @@ Replace `<placeholders>` with the values described beside each recipe. File path
    ```powershell
    watchtower runs finish <run-id>
    ```
-   `complete` confirms current reports and readable facts, not the reflection. Finish after each reviewed project's selection outcome and the synthesis are complete. Report saved cards, focus, unresolved failures and new idea titles, distinguished from retained ideas. If none were added, name the strongest considered direction and its exclusion reason; "nothing changed" or "ideas already exist" is not a reason. Describe an incomplete run as incomplete.
+   `complete` confirms current reports and readable facts, not the reflection. Finish after each reviewed project's selection outcomes and the synthesis are complete. Report saved cards, focus and unresolved failures; list newly added ideas separately from recommendations and retained proposals. If either category gained nothing, name the strongest considered direction and its exclusion reason; "nothing changed" or "ideas already exist" is not a reason. Describe an incomplete run as incomplete.
 
 For parallel work, give each project worker its ID, due reason, this Skill and its own temporary folder. Each worker completes steps 2–3 and returns the save outcome, new versus retained proposals, the strongest considered direction with its selection reason, and useful cross-project observations. A bare "card current" is not a complete handoff: obtain the missing reflection before synthesizing. The coordinating agent completes step 4 after the workers finish, using their findings and all project summaries rather than just concatenating their suggestions.
 

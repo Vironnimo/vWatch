@@ -2,6 +2,49 @@ use serde_json::{json, Value};
 use watchtower::cards::{json_schema, validate, Kind};
 
 #[test]
+fn proposal_categories_preserve_legacy_meaning_and_reserve_room_for_both() {
+    let mut doc = json!({"one_liner":"Test", "phase":"active", "headline":"Bereit", "reentry":{"next_step":"Weiter"},
+    "suggestions":[
+        {"id":"sg-feature","type":"feature","title":"Vorschau","why":"Verständlicher"},
+        {"id":"sg-release","type":"next","title":"Release veröffentlichen","why":"Bereit"},
+        {"id":"sg-idea","type":"next","category":"idea","title":"Einfacherer Ablauf","why":"Weniger Schritte"}
+    ]});
+    assert!(Kind::Card
+        .missing_fields(&doc)
+        .contains(&"suggestions[].category".to_owned()));
+    let (clean, _) = validate(Kind::Card, &doc, &[]).unwrap();
+    assert_eq!(clean["suggestions"][0]["category"], "idea");
+    assert_eq!(clean["suggestions"][1]["category"], "recommendation");
+    assert_eq!(clean["suggestions"][2]["category"], "idea");
+    assert_eq!(
+        Kind::Card.current_view(&doc)["suggestions"][0]["category"],
+        "idea"
+    );
+    assert!(doc["suggestions"][0].get("category").is_none());
+    doc["suggestions"][0]["category"] = json!("recommendation");
+    assert_eq!(
+        validate(Kind::Card, &doc, &[]).unwrap().0["suggestions"][0]["category"],
+        "recommendation"
+    );
+    doc["suggestions"][0]["category"] = json!("unknown");
+    assert!(validate(Kind::Card, &doc, &[])
+        .unwrap_err()
+        .iter()
+        .any(|e| e.starts_with("suggestions[0].category")));
+    doc["suggestions"] = json!((0..8).map(|i| json!({"type":"next","category":if i < 4 {"idea"} else {"recommendation"}, "title":"Vorschlag", "why":"Nützlich"})).collect::<Vec<_>>());
+    assert!(validate(Kind::Card, &doc, &[]).is_ok());
+    doc["suggestions"][4]["category"] = json!("idea");
+    assert!(validate(Kind::Card, &doc, &[])
+        .unwrap_err()
+        .iter()
+        .any(|e| e.contains("limit is 4 per category")));
+    let brief = json!({"greeting":"Hallo","synergies":[{"title":"Gemeinsames Aufräumen","why":"Platz"},{"title":"Gemeinsame Suche","why":"Leichter finden","category":"idea"}]});
+    let clean = validate(Kind::Portfolio, &brief, &[]).unwrap().0;
+    assert_eq!(clean["synergies"][0]["category"], "recommendation");
+    assert_eq!(clean["synergies"][1]["category"], "idea");
+}
+
+#[test]
 fn documents_need_no_effort_estimates_and_drop_legacy_estimates() {
     let card = json!({
         "one_liner": "Ein Testprojekt",

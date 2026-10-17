@@ -32,10 +32,16 @@ pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// Items shown at least this many days are listed for the brief as long-standing.
 const LONG_STANDING_DAYS: i64 = 7;
 
-/// A retained proposal as agents read it: without the obsolete effort estimate.
+/// A retained proposal as agents read it, with the same category as the window.
 fn without_effort(mut proposal: Value) -> Value {
+    let category = cards::proposal_category(
+        &proposal["item"],
+        proposal["kind"].as_str().unwrap_or("suggestion"),
+    );
+    proposal["category"] = json!(category);
     if let Some(item) = proposal["item"].as_object_mut() {
         item.remove("effort");
+        item.insert("category".into(), json!(category));
     }
     proposal
 }
@@ -1744,6 +1750,7 @@ impl Watchtower {
                 Some("new_day")
             }
             Some(pf) if !self.unchecked_ideas(Some(&pf.data))?.is_empty() => Some("owner_idea"),
+            Some(pf) if !Kind::Portfolio.missing_fields(&pf.data).is_empty() => Some("new_fields"),
             Some(_) if cards_changed => Some("cards_changed"),
             Some(_) => None,
         };
@@ -1967,9 +1974,9 @@ impl Watchtower {
             .flatten()
             .enumerate()
             .filter(|(_, q)| {
-                q["recommended"].as_u64().is_some_and(|n| {
-                    n as usize > q["options"].as_array().map_or(0, Vec::len)
-                })
+                q["recommended"]
+                    .as_u64()
+                    .is_some_and(|n| n as usize > q["options"].as_array().map_or(0, Vec::len))
             })
             .map(|(i, _)| format!("waiting_on_you[{i}].recommended"))
             .collect();
@@ -2304,7 +2311,7 @@ impl Watchtower {
                     "open_ends": picked("open_ends", &["kind", "title", "detail", "source", "age_days"]),
                     "health_notes": c["health_notes"],
                     "decisions": c["decisions"],
-                    "suggestions": picked("suggestions", &["id", "type", "title", "why", "evidence", "done_when"]),
+                    "suggestions": picked("suggestions", &["id", "category", "type", "title", "why", "evidence", "done_when"]),
                     "cross_project_hints": c["cross_project_hints"],
                     "recent_changes": dated_since(&c["recent_changes"], &week_from),
                     "milestones": dated_since(&c["milestones"], &week_from),
@@ -2375,6 +2382,7 @@ impl Watchtower {
             "brief_persistence": self.brief_persistence(previous.as_ref(), &reactions)?,
             "owner_response": self.owner_response(&reactions, &open_questions),
             "projects": rows,
+            "new_fields": previous.as_ref().map(|p| Kind::Portfolio.missing_fields(&p.data)),
             "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": Kind::Portfolio.current_view(&p.data)})),
             "owner_last_opened": self.store.pref("last_visit")?,
             "feedback": reactions.iter().map(feedback_context).collect::<Vec<_>>(),
@@ -3967,7 +3975,7 @@ impl Watchtower {
             "synergy_first_seen": synergy_first_seen,
             "brief_persistence": brief_persistence,
             "ideas": self.store.ideas()?.iter().map(|i|extend(idea_json(i),json!({"checked":!unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
-            "proposals": self.store.proposals()?,
+            "proposals": self.store.proposals()?.into_iter().map(without_effort).collect::<Vec<_>>(),
             "tasks": tasks,
             "review_week": self.review_week().0,
             "run_status": self.run_status()?,

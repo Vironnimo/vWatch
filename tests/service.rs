@@ -48,8 +48,9 @@ fn morning_run_cycle() {
         .as_object_mut()
         .unwrap()
         .remove("done_when");
+    older["suggestions"][0].as_object_mut().unwrap().remove("category");
     svc.store().rewrite_latest_card("demo", &older).unwrap();
-    let entry = json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["suggestions[].done_when", "handbook"]});
+    let entry = json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["suggestions[].category", "suggestions[].done_when", "handbook"]});
     assert_eq!(svc.due(14, true).unwrap()["projects"][0], entry);
     assert_eq!(
         svc.context("demo").unwrap()["new_fields"],
@@ -507,8 +508,16 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     assert!(err.hint.unwrap().contains("demo"));
 
     brief["focus"][0]["project"] = json!("demo");
+    brief["synergies"] = json!([{"title":"Suche teilen", "why":"Leichter finden", "category":"idea", "projects":["demo"]}]);
     svc.put_portfolio(brief, false, false).unwrap();
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
+    let mut old = svc.portfolio().unwrap()["portfolio"].clone();
+    old["synergies"][0].as_object_mut().unwrap().remove("category");
+    svc.store().rewrite_latest_portfolio(&old).unwrap();
+    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["reason"], "new_fields");
+    assert_eq!(svc.portfolio_context().unwrap()["new_fields"], json!(["synergies[].category"]));
+    old["synergies"][0]["category"] = json!("idea");
+    svc.put_portfolio(old, false, false).unwrap();
     // a card change the brief does not build on leaves it current; one it builds on makes it due
     // Writes within one clock tick must still compare with the card the brief read.
     svc.put_card(
@@ -1857,7 +1866,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
     let rating = &ctx["feedback"][0];
     assert_eq!(
         rating["item"],
-        json!({"kind": "suggestion", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "done_when": ""})
+        json!({"kind": "suggestion", "category": "idea", "type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "", "done_when": ""})
     );
     assert_eq!(
         (rating["project"].as_str(), rating["note"].as_str()),

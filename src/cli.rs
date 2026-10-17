@@ -173,6 +173,9 @@ enum Cmd {
         /// Project ID. Omit for project proposals and portfolio ideas together.
         #[arg(long)]
         project: Option<String>,
+        /// idea: new capabilities; recommendation: next steps and upkeep. Omit for both.
+        #[arg(long, value_parser = ["idea", "recommendation"])]
+        category: Option<String>,
     },
     /// Undo one recorded owner change if its result has not changed again
     Undo { token: String },
@@ -909,7 +912,9 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             from,
             until,
         } => svc.statistics(project.as_deref(), from.as_deref(), until.as_deref())?,
-        Cmd::Proposals { project } => svc.proposals(project.as_deref())?,
+        Cmd::Proposals { project, category } => {
+            svc.proposals(project.as_deref(), category.as_deref())?
+        }
         Cmd::History { action } => match action {
             HistoryCmd::List {
                 project,
