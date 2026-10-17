@@ -381,7 +381,9 @@ fn service_with_completion_race(
             }
             now
         }),
-        Box::new(|path, today, _ci| watchtower::facts::collect(path, today, false)),
+        Box::new(|path, today, _ci, previous| {
+            watchtower::facts::collect_reusing(path, today, false, previous)
+        }),
     );
     (svc, armed, calls)
 }

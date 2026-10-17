@@ -2,6 +2,7 @@ mod common;
 
 use chrono::NaiveDate;
 use serde_json::Value;
+use std::path::Path;
 use watchtower::facts;
 
 fn today() -> NaiveDate {
@@ -334,5 +335,183 @@ fn facts_show_release_overnight_work_and_colliding_lines_of_work() {
             ("main:main".into(), "branch:feature".into(), f0.clone()),
             ("worktree:wt".into(), "branch:feature".into(), f0)
         ]
+    );
+}
+
+/// Commit file contents (None deletes the file) at `date`.
+fn commit(repo: &Path, files: &[(&str, Option<&str>)], date: &str) {
+    for (path, content) in files {
+        let full = repo.join(path);
+        match content {
+            Some(text) => {
+                std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+                std::fs::write(full, text).unwrap();
+            }
+            None => std::fs::remove_file(full).unwrap(),
+        }
+    }
+    common::git(repo, &["add", "-A"]);
+    common::git_at(repo, &["commit", "-q", "-m", date], date);
+}
+
+#[test]
+fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(
+        tmp.path(),
+        "demo",
+        &["2025-09-30T12:00:00", "2026-07-01T10:00:00"],
+    );
+    commit(
+        &repo,
+        &[("app.rs", Some("fn main() {}\n"))],
+        "2026-09-29T10:00:00",
+    );
+    let path = repo.to_str().unwrap();
+    let day = |offset| today() + chrono::Duration::days(offset);
+    // marked values can only come from the previous measurement
+    let marked = |facts: &Value| {
+        let mut facts = facts.clone();
+        facts["code"]["source_code"] = 999.into();
+        facts["activity"]["days"][1]["added"] = 777.into();
+        facts
+    };
+    let first = facts::collect(path, today(), false);
+    assert_eq!(first["activity"]["days"][0]["date"], "2025-09-30");
+    assert_eq!(first["activity"]["days"][1]["date"], "2026-07-01");
+
+    // the same HEAD and working tree on the same day
+    assert_eq!(
+        facts::collect_reusing(path, today(), false, Some(&first)),
+        first
+    );
+    let reused = facts::collect_reusing(path, today(), false, Some(&marked(&first)));
+    assert_eq!(
+        (
+            reused["code"]["source_code"].as_u64(),
+            reused["activity"]["days"][1]["added"].as_u64()
+        ),
+        (Some(999), Some(777))
+    );
+
+    // later days drop the days that left the window and keep the rest
+    for offset in [1, 40] {
+        let full = facts::collect(path, day(offset), false);
+        assert_eq!(full["activity"]["days"][0]["date"], "2026-07-01");
+        assert_eq!(
+            facts::collect_reusing(path, day(offset), false, Some(&first)),
+            full
+        );
+        let carried = facts::collect_reusing(path, day(offset), false, Some(&marked(&first)));
+        assert_eq!(carried["activity"]["days"][0]["added"], 777);
+    }
+
+    // HEAD moved forward: only the new commits are read and the code is counted again
+    commit(
+        &repo,
+        &[("app.rs", Some("fn main() {}\nfn more() {}\n"))],
+        "2026-09-30T06:00:00",
+    );
+    let moved = facts::collect(path, today(), false);
+    assert_eq!(moved["activity"]["days"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        facts::collect_reusing(path, today(), false, Some(&first)),
+        moved
+    );
+    assert_eq!(
+        facts::collect_reusing(path, day(1), false, Some(&first)),
+        facts::collect(path, day(1), false)
+    );
+    let extended = facts::collect_reusing(path, today(), false, Some(&marked(&first)));
+    assert_eq!(extended["activity"]["days"][1]["added"], 777);
+    assert_eq!(extended["code"], moved["code"]);
+
+    // rewritten history is measured again in full
+    common::git(&repo, &["reset", "-q", "--hard", "HEAD~2"]);
+    commit(
+        &repo,
+        &[("other.rs", Some("fn other() {}\n"))],
+        "2026-09-30T07:00:00",
+    );
+    assert_eq!(
+        facts::collect_reusing(path, today(), false, Some(&marked(&moved))),
+        facts::collect(path, today(), false)
+    );
+
+    // so is a history whose shape changed under the same HEAD
+    let before = facts::collect(path, today(), false);
+    common::git(&repo, &["replace", "--graft", "HEAD~1"]);
+    let grafted = facts::collect_reusing(path, today(), false, Some(&marked(&before)));
+    let full = facts::collect(path, today(), false);
+    assert_ne!(full["activity"], before["activity"]);
+    assert_eq!(grafted["activity"], full["activity"]);
+}
+
+#[test]
+fn hotspots_rank_recent_changes_to_source_files_that_still_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(tmp.path(), "demo", &[]);
+    // before the 90-day window
+    commit(&repo, &[("main.rs", Some("a\n"))], "2026-07-01T10:00:00");
+    commit(&repo, &[("main.rs", Some("a\nb\n"))], "2026-07-02T10:00:00");
+    commit(
+        &repo,
+        &[
+            ("main.rs", Some("a\nb\nc\n")),
+            ("lib.rs", Some("x\n")),
+            ("README.md", Some("# r\n")),
+            ("config.toml", Some("a = 1\n")),
+            ("gone.rs", Some("g\n")),
+            ("node_modules/dep.js", Some("d();\n")),
+        ],
+        "2026-08-01T10:00:00",
+    );
+    commit(
+        &repo,
+        &[
+            ("gone.rs", None),
+            ("lib.rs", Some("y\n")),
+            ("README.md", Some("# r2\n")),
+            ("node_modules/dep.js", Some("e();\n")),
+        ],
+        "2026-09-01T10:00:00",
+    );
+    commit(&repo, &[("dropped.rs", Some("d\n"))], "2026-09-05T10:00:00");
+    // a side line of work merged without its changes still counts
+    common::git(&repo, &["checkout", "-q", "-b", "side"]);
+    commit(
+        &repo,
+        &[("lib.rs", Some("y\nside\n"))],
+        "2026-09-10T10:00:00",
+    );
+    common::git(&repo, &["checkout", "-q", "main"]);
+    commit(
+        &repo,
+        &[("main.rs", Some("a\nb\nc\nd\n"))],
+        "2026-09-11T10:00:00",
+    );
+    common::git_at(
+        &repo,
+        &["merge", "-q", "-s", "ours", "--no-edit", "side"],
+        "2026-09-12T10:00:00",
+    );
+    commit(
+        &repo,
+        &[("main.rs", Some("a\nb\nc\nd\ne\n"))],
+        "2026-09-20T10:00:00",
+    );
+    // deleted in the working tree, not yet committed
+    std::fs::remove_file(repo.join("dropped.rs")).unwrap();
+
+    let f = facts::collect(repo.to_str().unwrap(), today(), false);
+
+    let a = &f["activity"];
+    assert_eq!(a["hotspots_from"], "2026-07-02");
+    assert_eq!(
+        a["hotspots"],
+        serde_json::json!([
+            {"path":"main.rs","changes":4,"added":4,"removed":0},
+            {"path":"lib.rs","changes":3,"added":3,"removed":1},
+        ])
     );
 }

@@ -369,7 +369,7 @@ fn due_preserves_failed_measurements_and_never_calls_their_cards_current() {
                 .unwrap()
                 .with_timezone(&chrono::Utc)
         }),
-        Box::new(|_, _, _| json!({"ok":false,"is_git":true,"error":"git_unavailable"})),
+        Box::new(|_, _, _, _| json!({"ok":false,"is_git":true,"error":"git_unavailable"})),
     );
     let due = failed.due(14, true).unwrap();
     assert_eq!(due["refreshed"][0]["ok"], false);

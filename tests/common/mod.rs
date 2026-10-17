@@ -72,7 +72,7 @@ pub fn service(dir: &Path) -> (Watchtower, Clock) {
     let svc = Watchtower::with_parts(
         store,
         Box::new(move || *tick.0.lock().unwrap()),
-        Box::new(|path, today, _ci| facts::collect(path, today, false)),
+        Box::new(|path, today, _ci, previous| facts::collect_reusing(path, today, false, previous)),
     );
     (svc, clock)
 }

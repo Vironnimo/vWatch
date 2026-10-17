@@ -206,6 +206,32 @@ fn databases_from_the_first_history_version_stop_recording_repeats_and_keep_save
 }
 
 #[test]
+fn refreshes_keep_the_code_count_until_the_working_tree_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    std::fs::write(repo.join("app.py"), "print('one')\n").unwrap();
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    let code = |svc: &watchtower::Watchtower| {
+        svc.store().facts("demo").unwrap().unwrap().data["code"]["source_code"].clone()
+    };
+    assert_eq!(code(&svc), 1);
+    // a marked count can only survive as the previous measurement
+    let saved = svc.store().facts("demo").unwrap().unwrap();
+    let mut marked = saved.data.clone();
+    marked["code"]["source_code"] = json!(999);
+    svc.store()
+        .save_facts("demo", &svc.now(), &saved.fingerprint, &marked)
+        .unwrap();
+    clock.advance(Duration::hours(1));
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(code(&svc), 999);
+    std::fs::write(repo.join("app.py"), "print('one')\nprint('two')\n").unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(code(&svc), 2);
+}
+
+#[test]
 fn archived_git_windows_still_cover_old_periods_and_do_not_turn_gaps_into_zeroes() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());

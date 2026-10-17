@@ -1414,8 +1414,8 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
     let tmp = tempfile::tempdir().unwrap();
     let ci = Arc::new(Mutex::new("green"));
     let seen = ci.clone();
-    let collect = move |path: &str, today, _ci| {
-        let mut f = watchtower::facts::collect(path, today, false);
+    let collect = move |path: &str, today, _ci, previous: Option<&serde_json::Value>| {
+        let mut f = watchtower::facts::collect_reusing(path, today, false, previous);
         f["ci"] = json!({"state": *seen.lock().unwrap()});
         f
     };

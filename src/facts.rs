@@ -4,8 +4,9 @@
 //! repository. The GitHub CI lookup is optional and uses the `gh` CLI when it is
 //! installed and the repository has a github.com remote.
 
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -169,11 +170,62 @@ fn monday(d: NaiveDate) -> NaiveDate {
     d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
 }
 
-fn commits(repo: &Path, today: NaiveDate) -> Value {
-    let out = git(repo, &["log", "--format=%cs", "HEAD"]).unwrap_or_default();
-    let dates: Vec<NaiveDate> = out
-        .split_whitespace()
-        .filter_map(|l| NaiveDate::parse_from_str(l, "%Y-%m-%d").ok())
+struct Commit {
+    parents: Vec<String>,
+    /// Committer time in seconds since the epoch.
+    time: i64,
+    /// Committer date in the committer's time zone.
+    date: Option<NaiveDate>,
+}
+
+/// HEAD's whole ancestry from one `git log`, shared by the commit counts and the activity.
+struct History(HashMap<String, Commit>);
+
+impl History {
+    fn read(repo: &Path, head: &str) -> Option<History> {
+        let out = git(repo, &["log", "--format=%H%x09%P%x09%ct%x09%cs", head])?;
+        let mut commits = HashMap::new();
+        for line in out.lines() {
+            let mut parts = line.split('\t');
+            let (Some(hash), Some(parents), Some(time), Some(date)) =
+                (parts.next(), parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            commits.insert(
+                hash.to_owned(),
+                Commit {
+                    parents: parents.split_whitespace().map(str::to_owned).collect(),
+                    time: time.parse().unwrap_or(i64::MIN),
+                    date: NaiveDate::parse_from_str(date, "%Y-%m-%d").ok(),
+                },
+            );
+        }
+        Some(History(commits))
+    }
+
+    /// The commits reachable from `rev`, itself included; None when it is not in this history.
+    fn ancestry(&self, rev: &str) -> Option<HashSet<&str>> {
+        let (start, _) = self.0.get_key_value(rev)?;
+        let mut seen = HashSet::from([start.as_str()]);
+        let mut open = vec![start.as_str()];
+        while let Some(hash) = open.pop() {
+            for parent in &self.0[hash].parents {
+                if let Some((key, _)) = self.0.get_key_value(parent) {
+                    if seen.insert(key.as_str()) {
+                        open.push(key.as_str());
+                    }
+                }
+            }
+        }
+        Some(seen)
+    }
+}
+
+fn commits(history: Option<&History>, today: NaiveDate) -> Value {
+    let dates: Vec<NaiveDate> = history
+        .into_iter()
+        .flat_map(|h| h.0.values().filter_map(|c| c.date))
         .collect();
     let mut weekly = vec![0u32; WEEKS];
     let this_monday = monday(today);
@@ -269,15 +321,7 @@ struct Dirty {
     mtimes: Vec<SystemTime>,
 }
 
-/// The paths `git status` reports in a working tree, untracked files included.
-fn status_paths(dir: &Path) -> Option<Vec<String>> {
-    let raw = git(
-        dir,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    Some(parse_status_paths(&raw))
-}
-
+/// The paths in `git status --porcelain=v1 -z` output, untracked files included.
 fn parse_status_paths(raw: &str) -> Vec<String> {
     let tokens: Vec<&str> = raw.split('\0').collect();
     let mut out = Vec::new();
@@ -298,24 +342,33 @@ fn parse_status_paths(raw: &str) -> Vec<String> {
 
 /// Notice edits even when file and line counts stay the same. Content reads are bounded;
 /// larger files still contribute their full size and high-resolution modification time.
-fn dirty_fingerprint<'a>(repo: &Path, raw: &str, paths: impl Iterator<Item = &'a str>) -> Value {
+/// Also returns each path's modification time, following symlinks, so callers need no second pass.
+fn dirty_fingerprint<'a>(
+    repo: &Path,
+    raw: &str,
+    paths: impl Iterator<Item = &'a str>,
+) -> (Value, Vec<Option<SystemTime>>) {
     if raw.is_empty() {
-        return Value::Null;
+        return (Value::Null, Vec::new());
     }
     let mut hash = Sha1::new();
     hash.update(raw.as_bytes());
     let mut remaining = MAX_FINGERPRINT_BYTES;
+    let mut mtimes = Vec::new();
     for path in paths {
         hash.update(path.as_bytes());
         let full = repo.join(path);
+        let mut mtime = None;
         if let Ok(meta) = std::fs::symlink_metadata(&full) {
             hash.update(meta.len().to_le_bytes());
             if let Ok(at) = meta.modified() {
+                mtime = Some(at);
                 let at = DateTime::<Utc>::from(at);
                 hash.update(at.timestamp().to_le_bytes());
                 hash.update(at.timestamp_subsec_nanos().to_le_bytes());
             }
             if meta.is_symlink() {
+                mtime = std::fs::metadata(&full).and_then(|m| m.modified()).ok();
                 if let Ok(target) = std::fs::read_link(&full) {
                     hash.update(target.to_string_lossy().as_bytes());
                 }
@@ -330,8 +383,9 @@ fn dirty_fingerprint<'a>(repo: &Path, raw: &str, paths: impl Iterator<Item = &'a
                 }
             }
         }
+        mtimes.push(mtime);
     }
-    json!(format!("{:x}", hash.finalize()))
+    (json!(format!("{:x}", hash.finalize())), mtimes)
 }
 
 fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
@@ -366,8 +420,11 @@ fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     }
 
     let (mut added, mut removed) = (0u64, 0u64);
-    // An unborn branch has no HEAD, but its index still contains staged additions.
-    let baseline = if has_head {
+    // A clean status leaves no lines to count. An unborn branch has no HEAD, but its index still
+    // contains staged additions.
+    let baseline = if paths.is_empty() {
+        String::new()
+    } else if has_head {
         "HEAD".to_owned()
     } else {
         git(repo, &["hash-object", "-t", "tree", "--stdin"])
@@ -417,21 +474,15 @@ fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
 
     // Files copied in keep far older mtimes, so only edits after the last commit date the work;
     // when every file is older, the work is at risk since that commit.
-    let last_commit = if has_head {
+    let last_commit = if has_head && !paths.is_empty() {
         git(repo, &["log", "-1", "--format=%ct"])
             .and_then(|s| s.trim().parse::<u64>().ok())
             .map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
     } else {
         None
     };
-    let mtimes: Vec<SystemTime> = paths
-        .iter()
-        .filter_map(|p| {
-            std::fs::metadata(repo.join(p))
-                .and_then(|m| m.modified())
-                .ok()
-        })
-        .collect();
+    let (fingerprint, mtimes) = dirty_fingerprint(repo, &raw, paths.iter().copied());
+    let mtimes: Vec<SystemTime> = mtimes.into_iter().flatten().collect();
     let after_commit = mtimes
         .iter()
         .copied()
@@ -446,7 +497,7 @@ fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
             "files": paths.len(), "modified": modified, "untracked": untracked, "deleted": deleted,
             "lines_added": added, "lines_removed": removed,
             "oldest_change": oldest.map(iso), "newest_change": newest.map(iso),
-            "fingerprint": dirty_fingerprint(repo, &raw, paths.iter().copied()),
+            "fingerprint": fingerprint,
         }),
         newest,
         paths: paths.iter().map(|p| (*p).to_owned()).collect(),
@@ -454,7 +505,36 @@ fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     })
 }
 
-fn worktrees(repo: &Path) -> Value {
+/// Measure `items` in order on a few threads. Starting git dominates per-checkout measurements, so
+/// repositories with many worktrees would otherwise wait on one process after another.
+fn parallel<T: Sync, R: Send>(items: &[T], measure: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    const THREADS: usize = 4;
+    let size = items.len().div_ceil(THREADS).max(1);
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = items
+            .chunks(size)
+            .map(|chunk| scope.spawn(|| chunk.iter().map(&measure).collect::<Vec<R>>()))
+            .collect();
+        parts
+            .into_iter()
+            .flat_map(|part| {
+                part.join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect()
+    })
+}
+
+/// An extra checkout's uncommitted paths and their modification times, read once per measurement.
+struct Checkout {
+    dir: PathBuf,
+    branch: Option<String>,
+    paths: Vec<String>,
+    mtimes: Vec<Option<SystemTime>>,
+}
+
+/// The extra worktrees, plus the status of each one that exists for the overnight and collision views.
+fn worktrees(repo: &Path) -> (Value, Vec<Checkout>) {
     let mut items: Vec<Value> = Vec::new();
     for line in git(repo, &["worktree", "list", "--porcelain"])
         .unwrap_or_default()
@@ -480,31 +560,47 @@ fn worktrees(repo: &Path) -> Value {
             current.is_none() || std::fs::canonicalize(path).ok() != current
         })
         .collect();
-    for item in &mut extra {
-        let path = Path::new(item["path"].as_str().unwrap_or(""));
-        let raw = if path.is_dir() {
+    let statuses = parallel(&extra, |item| {
+        let path = PathBuf::from(item["path"].as_str().unwrap_or(""));
+        let exists = path.is_dir();
+        let raw = if exists {
             git(
-                path,
+                &path,
                 &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
             )
         } else {
             None
         };
         let paths = raw.as_deref().map(parse_status_paths);
-        let fingerprint = match (raw.as_deref(), paths.as_ref()) {
+        let (fingerprint, mtimes) = match (raw.as_deref(), paths.as_ref()) {
             (Some(raw), Some(paths)) => {
-                dirty_fingerprint(path, raw, paths.iter().map(String::as_str))
+                dirty_fingerprint(&path, raw, paths.iter().map(String::as_str))
             }
-            _ => Value::Null,
+            _ => (Value::Null, Vec::new()),
         };
+        (path, exists, paths, fingerprint, mtimes)
+    });
+    let mut checkouts = Vec::new();
+    for (item, (path, exists, paths, fingerprint, mtimes)) in extra.iter_mut().zip(statuses) {
         item["dirty_files"] = json!(paths.as_ref().map(Vec::len));
         item["dirty_fingerprint"] = fingerprint;
+        if exists {
+            checkouts.push(Checkout {
+                branch: item["branch"].as_str().map(str::to_owned),
+                dir: path,
+                paths: paths.unwrap_or_default(),
+                mtimes,
+            });
+        }
     }
     let prunable = extra
         .iter()
         .filter(|w| w["prunable"] == json!(true))
         .count();
-    json!({"count": extra.len(), "prunable": prunable, "items": extra})
+    (
+        json!({"count": extra.len(), "prunable": prunable, "items": extra}),
+        checkouts,
+    )
 }
 
 fn branches(repo: &Path, current: Option<&str>) -> Value {
@@ -550,7 +646,7 @@ fn release(repo: &Path) -> Value {
 
 /// What happened since yesterday evening: commits on every local branch (worktrees included),
 /// their size, reverts among them, and uncommitted files edited in that time.
-fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, worktrees: &Value) -> Value {
+fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[Checkout]) -> Value {
     let evening = today
         .pred_opt()
         .and_then(|d| d.and_hms_opt(EVENING_HOUR, 0, 0))
@@ -593,21 +689,12 @@ fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, worktrees: &Value) -> Val
             }
         }
     }
-    let mut touched = dirty.mtimes.iter().filter(|t| **t >= since).count();
-    for wt in worktrees["items"].as_array().into_iter().flatten() {
-        let dir = Path::new(wt["path"].as_str().unwrap_or(""));
-        if dir.is_dir() {
-            let paths = status_paths(dir).unwrap_or_default();
-            touched += paths
-                .iter()
-                .filter(|p| {
-                    std::fs::metadata(dir.join(p))
-                        .and_then(|m| m.modified())
-                        .is_ok_and(|t| t >= since)
-                })
-                .count();
-        }
-    }
+    let touched = dirty.mtimes.iter().filter(|t| **t >= since).count()
+        + checkouts
+            .iter()
+            .flat_map(|c| c.mtimes.iter().flatten())
+            .filter(|t| **t >= since)
+            .count();
     json!({"since": iso(since), "commits": commits, "lines_added": added, "lines_removed": removed, "reverts": reverts, "uncommitted_touched": touched})
 }
 
@@ -618,7 +705,7 @@ fn collisions(
     repo: &Path,
     base: Option<&str>,
     dirty: &Dirty,
-    worktrees: &Value,
+    checkouts: &[Checkout],
     branches: &Value,
 ) -> Value {
     let base = base.filter(|b| *b != "HEAD");
@@ -642,23 +729,22 @@ fn collisions(
         })
         .unwrap_or_default()
     };
-    let mut lines: Vec<(Value, std::collections::BTreeSet<String>)> = Vec::new();
+    let mut lines: Vec<(Value, BTreeSet<String>)> = Vec::new();
     lines.push((
         json!({"kind": "main", "name": base.unwrap_or("HEAD")}),
         dirty.paths.iter().cloned().collect(),
     ));
+    let committed = match base {
+        Some(b) => parallel(checkouts, |c| diff(&c.dir, format!("{b}...HEAD"))),
+        None => Vec::new(),
+    };
+    let mut committed = committed.into_iter();
     let mut in_worktree: Vec<String> = Vec::new();
-    for wt in worktrees["items"].as_array().into_iter().flatten() {
-        let dir = Path::new(wt["path"].as_str().unwrap_or(""));
-        if !dir.is_dir() {
-            continue;
-        }
-        let branch = wt["branch"].as_str().map(str::to_owned);
-        let mut files: std::collections::BTreeSet<String> =
-            status_paths(dir).unwrap_or_default().into_iter().collect();
-        if let Some(b) = base {
-            files.extend(diff(dir, format!("{b}...HEAD")));
-        }
+    for checkout in checkouts {
+        let dir = checkout.dir.as_path();
+        let branch = checkout.branch.clone();
+        let mut files: BTreeSet<String> = checkout.paths.iter().cloned().collect();
+        files.extend(committed.next().into_iter().flatten());
         let name = branch.clone().unwrap_or_else(|| {
             dir.file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -668,14 +754,19 @@ fn collisions(
         lines.push((json!({"kind": "worktree", "name": name}), files));
     }
     if let Some(b) = base {
-        for br in branches["unmerged"].as_array().into_iter().flatten() {
-            let name = br["name"].as_str().unwrap_or("");
-            if !name.is_empty() && !in_worktree.iter().any(|w| w == name) {
-                lines.push((
-                    json!({"kind": "branch", "name": name}),
-                    diff(repo, format!("{b}...{name}")).into_iter().collect(),
-                ));
-            }
+        let names: Vec<&str> = branches["unmerged"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|br| br["name"].as_str())
+            .filter(|name| !name.is_empty() && !in_worktree.iter().any(|w| w == name))
+            .collect();
+        let changed = parallel(&names, |name| diff(repo, format!("{b}...{name}")));
+        for (name, files) in names.into_iter().zip(changed) {
+            lines.push((
+                json!({"kind": "branch", "name": name}),
+                files.into_iter().collect(),
+            ));
         }
     }
     let mut out = Vec::new();
@@ -882,6 +973,18 @@ fn docs_mtime(repo: &Path) -> Option<SystemTime> {
 /// Collect the facts of one repository. Never fails for repository problems;
 /// `ok: false` with an `error` code says why nothing could be measured.
 pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
+    collect_reusing(path, today, with_ci, None)
+}
+
+/// [`collect`], given `previous`, the last facts measured in the same folder. The code scan and the
+/// activity reconstruction are carried over while their inputs are unchanged, and the activity is
+/// extended when HEAD only moved forward; the result equals a full measurement.
+pub fn collect_reusing(
+    path: &str,
+    today: NaiveDate,
+    with_ci: bool,
+    previous: Option<&Value>,
+) -> Value {
     let repo = Path::new(path);
     if !repo.is_dir() {
         return json!({"ok": false, "error": "path_missing", "is_git": false});
@@ -893,8 +996,9 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
     let trimmed = |v: Option<String>| v.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
     let head = trimmed(git(repo, &["rev-parse", "HEAD"]));
     let branch = trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]));
+    let history = head.as_deref().and_then(|h| History::read(repo, h));
     let commits = if head.is_some() {
-        commits(repo, today)
+        commits(history.as_ref(), today)
     } else {
         empty_commits()
     };
@@ -902,18 +1006,51 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
     let Some(dirty) = dirty(repo, head.is_some()) else {
         return json!({"ok": false, "error": "git_status_failed", "is_git": true});
     };
+    // The CI state comes over the network; it is read while the local measurements run.
+    let ci = with_ci.then(|| {
+        let (repo, remotes, branch) = (repo.to_owned(), remotes.clone(), branch.clone());
+        std::thread::spawn(move || ci(&repo, &remotes, branch.as_deref()))
+    });
     let (upstream, ahead, behind, unpushed_since) = upstream(repo);
     let newest_local = dirty
         .newest
         .map(|t| DateTime::<Local>::from(t).date_naive().to_string());
-    let worktrees = worktrees(repo);
+    let (worktrees, checkouts) = worktrees(repo);
     let branches = branches(repo, branch.as_deref());
-    let night = night(repo, today, &dirty, &worktrees);
-    let collisions = collisions(repo, branch.as_deref(), &dirty, &worktrees, &branches);
+    let night = night(repo, today, &dirty, &checkouts);
+    let collisions = collisions(repo, branch.as_deref(), &dirty, &checkouts, &branches);
     let last_work = [commits["last"].as_str().map(str::to_owned), newest_local]
         .into_iter()
         .flatten()
         .max();
+    let release = release(repo);
+    let docs_mtime = docs_mtime(repo).map(iso);
+    let previous = previous.filter(|p| p["ok"] == true);
+    // The same HEAD and uncommitted state mean the same working-tree files.
+    let unchanged = previous.is_some_and(|p| {
+        p["head"] == json!(head) && p["dirty"]["fingerprint"] == dirty.value["fingerprint"]
+    });
+    let files = statistics::Files::new(repo);
+    let code = statistics::code(
+        repo,
+        &files,
+        previous.filter(|_| unchanged).map(|p| &p["code"]),
+    );
+    let activity = statistics::activity(
+        repo,
+        today,
+        head.as_deref(),
+        history.as_ref(),
+        previous.filter(|p| p["branch"] == json!(branch)),
+        unchanged,
+        &files,
+    );
+    let ci = match ci {
+        Some(lookup) => lookup
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        None => json!({"state": "skipped"}),
+    };
     let mut measured = json!({
         "ok": true, "is_git": true, "head": head, "branch": branch,
         "commits": commits,
@@ -923,14 +1060,14 @@ pub fn collect(path: &str, today: NaiveDate, with_ci: bool) -> Value {
         "dirty": dirty.value,
         "worktrees": worktrees,
         "branches": branches,
-        "release": release(repo),
+        "release": release,
         "night": night,
         "collisions": collisions,
-        "ci": if with_ci { ci(repo, &remotes, branch.as_deref()) } else { json!({"state": "skipped"}) },
-        "docs_mtime": docs_mtime(repo).map(iso),
+        "ci": ci,
+        "docs_mtime": docs_mtime,
         "last_work": last_work,
-        "code": statistics::code(repo),
-        "activity": statistics::activity(repo, today, head.as_deref()),
+        "code": code,
+        "activity": activity,
     });
     if head != trimmed(git(repo, &["rev-parse", "HEAD"]))
         || branch != trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]))

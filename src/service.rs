@@ -131,8 +131,8 @@ impl From<rusqlite::Error> for WatchtowerError {
 
 pub type Result<T> = std::result::Result<T, WatchtowerError>;
 pub type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
-/// Measures one repository: (path, today, with_ci) -> facts.
-pub type Collector = Box<dyn Fn(&str, NaiveDate, bool) -> Value + Send + Sync>;
+/// Measures one repository: (path, today, with_ci, the folder's previous facts) -> facts.
+pub type Collector = Box<dyn Fn(&str, NaiveDate, bool, Option<&Value>) -> Value + Send + Sync>;
 
 pub struct Watchtower {
     store: Store,
@@ -880,7 +880,7 @@ impl Watchtower {
         let svc = Watchtower::with_parts(
             Store::open(db)?,
             Box::new(Utc::now),
-            Box::new(facts::collect),
+            Box::new(facts::collect_reusing),
         );
         svc.give_items_ids()?;
         Ok(svc)
@@ -1395,7 +1395,14 @@ impl Watchtower {
 
     fn refresh_one(&self, project: &Project, today: NaiveDate, with_ci: bool) -> Result<Value> {
         let before = self.store.facts(&project.id)?;
-        let mut data = (self.collect)(&project.path, today, with_ci);
+        // Stored facts always describe the current folder (a relink deletes them), so slow scans
+        // whose inputs are unchanged carry over from them.
+        let mut data = (self.collect)(
+            &project.path,
+            today,
+            with_ci,
+            before.as_ref().map(|b| &b.data),
+        );
         if !with_ci {
             if let Some(ci) = before
                 .as_ref()
