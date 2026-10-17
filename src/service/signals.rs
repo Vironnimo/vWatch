@@ -82,6 +82,12 @@ fn trend(kind: &str, then: &RiskObservation, now: &RiskObservation) -> Value {
     }
 }
 
+/// Calendar days in local time, as the owner counts them.
+fn local_days(at: &str, now: DateTime<Utc>) -> i64 {
+    let day = |t: DateTime<Utc>| t.with_timezone(&Local).date_naive();
+    (day(now) - day(parse(at))).num_days().max(0)
+}
+
 /// Unbroken runs of uncommitted work, unpushed commits and failed CI that last
 /// until the current measurement. `at_least` means the run started before the
 /// first saved observation, so `since` is a lower bound.
@@ -117,7 +123,7 @@ pub(crate) fn risk_streaks(
             }
         }
         let mut streak = json!({
-            "kind": kind, "since": start.at, "days": (now - parse(&start.at)).num_days().max(0),
+            "kind": kind, "since": start.at, "days": local_days(&start.at, now),
             "at_least": !broken, "then": amount(kind, start), "now": amount(kind, &current),
             "trend": trend(kind, start, &current),
         });

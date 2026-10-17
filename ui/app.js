@@ -8,6 +8,8 @@
   const TYPE = { next: 'Nächster Schritt', feature: 'Feature', cleanup: 'Aufräumen', park: 'Parken' };
   const CI = { green: ['grün', 'good'], red: ['rot', 'bad'], running: ['läuft', ''], none: ['keins', ''], unknown: ['unbekannt', ''], skipped: ['—', ''] };
   const VERDICT = { park: ['parken', 'warn'], revive: ['zurückholen', 'good'], finish: ['fertig machen', 'good'], archive: ['archivieren', 'bad'] };
+  // the owner intent that takes over a park/archive/revive verdict
+  const VERDICT_STATUS = { park: 'parked', archive: 'archived', revive: 'active' };
   const MOD_TITLES = {
     focus: 'Heute zuerst', projects: 'Deine Projekte', waiting: 'Wartet auf dich', safety: 'Sicherheitslage', recent: 'Was passiert ist',
     across: 'Quer durch alle Projekte', ideas: 'Ideen', pulse: 'Puls', kpis: 'Lage auf einen Blick', cards: 'Projekte',
@@ -117,7 +119,16 @@
   const hiddenByRating = id => !showRated && snoozeFor !== id && (rated(id) === 'down' || rated(id) === 'later');
   // the owner's reply to a question: answered (with the answer as note) or done
   const reply = id => { const f = id && S.feedback[id]; return f && (f.value === 'answered' || f.value === 'done') ? f : null; };
-  const openQs = c => c.waiting_on_you.filter(w => !reply(w.id));
+  // postponed questions return on their date; until then they wait outside the list
+  const openQs = c => c.waiting_on_you.filter(w => !reply(w.id) && rated(w.id) !== 'later');
+  // how long the owner has been shown an item, from the saved card or brief versions
+  const shownRow = (rows, match) => (rows || []).find(match) || null;
+  const questionAge = id => { const q = id && findQ(id); return q ? shownRow(q.p.item_persistence, r => r.id === id) : null; };
+  const days = n => `${num(n)} ${n === 1 ? 'Tag' : 'Tagen'}`;
+  const openSince = row => row && row.days >= 3 ? `seit ${days(row.days)} offen` : '';
+  // a measured risk that has lasted: since when and whether it grows
+  const streak = (p, kind) => shownRow(p && p.risk_streaks, s => s.kind === kind);
+  const streakText = s => s ? `${s.at_least ? 'seit mindestens' : 'seit'} ${days(s.days)}${s.trend === 'growing' ? ', wächst' : s.trend === 'shrinking' ? ', schrumpft' : ''}` : '';
   function findQ(id) {
     for (const p of S.projects) { const w = p.card && p.card.waiting_on_you.find(x => x.id === id); if (w) return { p, w }; }
     return null;
@@ -154,10 +165,17 @@
     const d = f.dirty || {};
     const out = { remote: f.has_remote, unsaved: null, level: '', ahead: Number.isFinite(f.ahead) ? f.ahead : null, ci: (f.ci || {}).state || 'unknown', leftovers: null };
     if (d.files) {
-      const age = d.oldest_change ? daysSince(d.oldest_change) : 0;
-      out.unsaved = `${num(d.files)} Dateien, +${num(d.lines_added)}/−${num(d.lines_removed)}${age > 0 ? `, seit ${age} ${age === 1 ? 'Tag' : 'Tagen'}` : ''}`;
-      out.unsavedShort = `${num(d.files)} ${d.files === 1 ? 'Datei' : 'Dateien'} offen${age > 0 ? ` · ${age} T` : ''}`;
+      // the saved observations know how long uncommitted work has existed; file times reset with every commit
+      const run = streak(p, 'uncommitted');
+      const age = run ? run.days : d.oldest_change ? daysSince(d.oldest_change) : 0;
+      const since = run && run.days > 0 ? `, ${streakText(run)}` : age > 0 ? `, seit ${days(age)}` : '';
+      out.unsaved = `${num(d.files)} Dateien, +${num(d.lines_added)}/−${num(d.lines_removed)}${since}`;
+      out.unsavedShort = `${num(d.files)} ${d.files === 1 ? 'Datei' : 'Dateien'} offen${age > 0 ? ` · ${age} T${run && run.trend === 'growing' ? ' ↑' : ''}` : ''}`;
     }
+    const unpushed = streak(p, 'unpushed');
+    out.aheadSince = unpushed && unpushed.days > 0 ? streakText(unpushed) : '';
+    const ciRun = f.ci && f.ci.at && out.ci === 'red' ? daysSince(f.ci.at) : null;
+    out.ciAge = ciRun != null && ciRun >= 2 ? `letzter Lauf vor ${days(ciRun)}` : '';
     const unmerged = ((f.branches || {}).unmerged || []).length;
     const wts = (f.worktrees || {}).count || 0;
     const parts = [];
@@ -426,8 +444,9 @@
     const t = (S.portfolio && S.portfolio.focus) || [];
     if (!t.length) return '';
     const date = S.portfolio_updated_at ? ` · Einschätzung vom ${fmtDate(S.portfolio_updated_at)}` : '';
+    const carried = it => { const row = shownRow((S.brief_persistence || {}).items, r => r.id === it.id && r.kind === 'focus'); return row && row.versions >= 3 && row.days >= 3 ? `<span class="faint q-age">seit ${days(row.days)} im Fokus</span>` : ''; };
     return mod('focus', 'Als Nächstes', `Vom Agent über alle Projekte hinweg ausgewählt${date}`, `<div class="focus">${t.slice(0, 3).map((it, i) => `
-      <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)}</div>
+      <div class="item${reply(it.id) ? ' done' : ''}"><div class="n">${i + 1}</div><div><div class="t">${esc(it.title)} ${carried(it)}</div>
       <div class="meta">${plink(it.project)}${taskBtn(it.id || `focus-${i}`, { projects: [it.project], title: it.title, why: it.why, done_when: it.done_when })}${it.id ? `<button type="button" class="check" data-focus-done="${esc(it.id)}" aria-pressed="${!!reply(it.id)}">${reply(it.id) ? '✓ erledigt' : 'erledigt?'}</button>` : ''}</div>
       <div class="why">${esc(it.why)}</div>${byId(it.project) && byId(it.project).card_outdated ? '<p class="report-freshness">Projekt seit der Einschätzung verändert · vor dem Auftrag prüfen</p>' : ''}</div></div>`).join('')}</div>`);
   }
@@ -461,9 +480,9 @@
     const out = [];
     if (s.remote === false) out.push(noRemoteTag(p));
     if (s.unsavedShort) out.push(`<span class="tag ${s.level}">${esc(s.unsavedShort)}</span>`);
-    if (s.ahead > 0) out.push(`<span class="tag">${s.ahead} lokale Commits vor Upstream</span>`);
+    if (s.ahead > 0) out.push(`<span class="tag"${s.aheadSince ? ` title="${esc(s.aheadSince)}"` : ''}>${s.ahead} lokale Commits vor Upstream</span>`);
     if (s.ahead == null) out.push('<span class="tag">Push-Stand unbekannt</span>');
-    if (s.ci === 'red') out.push('<span class="tag bad">CI rot</span>');
+    if (s.ci === 'red') out.push(`<span class="tag bad"${s.ciAge ? ` title="${esc(s.ciAge)}"` : ''}>CI rot</span>`);
     if (!s.unsaved && f.dirty && f.dirty.files === 0) out.push('<span class="tag">Arbeitsstand sauber</span>');
     out.push(collisionTag(p));
     return out.join('');
@@ -503,13 +522,15 @@
   // one question: answer it or mark it done; answered ones show the reply until the next card
   function question(w, withSource) {
     const f = reply(w.id);
+    if (!f && rated(w.id) === 'later') return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">Später · kommt am ${fmtDate(snoozedUntil(S.feedback[w.id]))} wieder · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">jetzt entscheiden</button></div></li>`;
     if (f) return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Erledigt'} · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">zurücknehmen</button></div></li>`;
-    const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">antworten</button><button type="button" data-qdone="${esc(w.id)}">erledigt</button></span>` : '';
+    const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">antworten</button><button type="button" data-qdone="${esc(w.id)}">erledigt</button><button type="button" data-qlater="${esc(w.id)}" title="Eine Woche zurückstellen">später</button></span>` : '';
     const form = answering === w.id ? `<div class="inrow"><input type="text" aria-label="Deine Antwort" data-draft="${esc(w.id)}" data-kind="answer" maxlength="600" value="${esc(drafts[w.id] || '')}" placeholder="Deine Antwort, der nächste Lauf nimmt sie in die Karte auf">
       <button type="button" class="btn primary" data-answer-save="${esc(w.id)}">Senden</button><button type="button" class="btn" data-answer-cancel>Abbrechen</button></div>` : '';
-    const opts = (w.options || []).length && w.id && answering !== w.id ? `<div class="qopts">${w.options.map((o, i) => `<button type="button" class="opt" data-opt="${esc(w.id)}" data-i="${i}" title="${esc(o.effect || '')}">${esc(o.answer)}</button>`).join('')}</div>` : '';
+    const opts = (w.options || []).length && w.id && answering !== w.id ? `<div class="qopts">${w.options.map((o, i) => `<button type="button" class="opt${w.recommended === i + 1 ? ' rec' : ''}" data-opt="${esc(w.id)}" data-i="${i}" title="${esc(o.effect || '')}">${esc(o.answer)}${w.recommended === i + 1 ? ' <span class="rec-l">empfohlen</span>' : ''}</button>`).join('')}</div>` : '';
     const src = w.source ? (withSource ? `<div class="qsrc mono">${esc(w.source)}</div>` : '') : '';
-    return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}</span>${acts}</div>${opts}${src}${form}</li>`;
+    const age = openSince(questionAge(w.id));
+    return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}${age ? ` <span class="faint q-age">${esc(age)}</span>` : ''}</span>${acts}</div>${opts}${src}${form}</li>`;
   }
 
   function blockWaiting(limitPer = 2) {
@@ -548,13 +569,13 @@
   function blockSafety() {
     const rows = byLastWork(visible()).filter(p => p.facts && p.facts.is_git).map(p => {
       const s = safety(p);
-      const unsaved = [s.unsaved ? `<span>${esc(s.unsaved)}</span>` : p.facts.dirty && p.facts.dirty.files === 0 ? 'Arbeitsstand sauber' : 'Arbeitsstand unbekannt', s.ahead == null ? 'Push-Stand unbekannt' : s.ahead > 0 ? `${s.ahead} lokale Commits vor Upstream` : 'Kein Vorsprung zum lokalen Upstream-Stand'].join('<br>');
+      const unsaved = [s.unsaved ? `<span>${esc(s.unsaved)}</span>` : p.facts.dirty && p.facts.dirty.files === 0 ? 'Arbeitsstand sauber' : 'Arbeitsstand unbekannt', s.ahead == null ? 'Push-Stand unbekannt' : s.ahead > 0 ? `${s.ahead} lokale Commits vor Upstream${s.aheadSince ? `, ${esc(s.aheadSince)}` : ''}` : 'Kein Vorsprung zum lokalen Upstream-Stand'].join('<br>');
       const ci = CI[s.ci] || CI.unknown;
       return `<tr><td>${plink(p.id)}</td>
         <td>${s.remote ? `<span class="tag">${esc((p.facts.remotes || []).map(r => r.name).join(', ') || 'Remote eingerichtet')}</span>` : s.remote === false ? noRemoteTag(p) : '<span class="faint">unbekannt</span>'}</td>
         <td>${unsaved}</td>
         <td>${s.leftovers ? `<span class="faint">${esc(s.leftovers)}</span>` : ''} ${collisionTag(p)}</td>
-        <td>${ci[1] ? `<span class="tag ${ci[1]}">${ci[0]}</span>` : `<span class="faint">${ci[0]}</span>`}</td></tr>`;
+        <td>${ci[1] ? `<span class="tag ${ci[1]}">${ci[0]}</span>` : `<span class="faint">${ci[0]}</span>`}${s.ciAge ? `<div class="faint">${esc(s.ciAge)}</div>` : ''}</td></tr>`;
     }).join('');
     if (!rows) return '';
     return mod('safety', 'Git-Zustand', 'Lokal gemessene Fakten. Remotes belegen keine Sicherung; der Upstream-Stand wird ohne Fetch gelesen.', `<div class="tablewrap"><table class="safety"><thead><tr><th>Projekt</th><th>Remote</th><th>Arbeitsstand</th><th>Weitere Arbeitslinien</th><th>CI</th></tr></thead><tbody>${rows}</tbody></table></div>`);
@@ -593,8 +614,10 @@
       const name = byId(r.project) ? byId(r.project).name : r.project;
       if (noteFor === r.id) return noteForm(r.id, `${v[0]}: ${name}`);
       if (hiddenByRating(r.id)) return '';
+      const p = byId(r.project), target = VERDICT_STATUS[r.verdict];
+      const adopt = p && target && p.status !== target ? `<div class="taskrow"><span class="task-actions"><button class="linkish task" type="button" data-verdict-status="${esc(target)}" data-project="${esc(p.id)}" title="Setzt deine Absicht für das Projekt; die Agents richten sich danach">Als „${esc(STATUS[target])}“ übernehmen</button></span></div>` : '';
       return `<div class="idea"><div class="kind">Parken oder zurückholen?</div><div class="h"><div class="t">${esc(name)}</div><span class="tag ${v[1]}">${esc(v[0])}</span></div>
-        <div class="why">${esc(r.why)}</div>${myNote(r.id)}<div class="foot"><div class="who">${plink(r.project)}</div>${fbButtons(r.id)}</div></div>`;
+        <div class="why">${esc(r.why)}</div>${myNote(r.id)}<div class="foot"><div class="who">${plink(r.project)}</div>${fbButtons(r.id)}</div>${adopt}</div>`;
     };
     const cards = [
       ...(pf.patterns || []).map(s => ideaCard(s, s.projects, null, 'Muster')),
@@ -761,10 +784,14 @@
     const projects = byAttention(visible());
     const tasks = (S.tasks || []).filter(t => ['review', 'blocked'].includes(t.status)).map(t => ({ type: 'task', task: t, score: t.status === 'blocked' ? 100 : 90 }));
     const goals = projects.filter(goalIsDue).map(p => ({ type: 'goal', p, score: 80, title: p.goal }));
-    const questions = projects.flatMap(p => p.card ? openQs(p.card).map((q, i) => ({ type: 'question', p, q, title: q.title, score: 50 - i })) : []);
+    const questions = projects.flatMap(p => p.card ? openQs(p.card).map((q, i) => ({ type: 'question', p, q, title: q.title, score: 50 - i, age: openSince(questionAge(q.id)) })) : []);
     const problems = projects.flatMap(p => {
       if (p.facts?.error === 'path_missing') return [{ type: 'problem', p, score: 75, title: 'Projektordner fehlt – Pfad prüfen', label: 'Ordner fehlt' }];
-      return safety(p).ci === 'red' ? [{ type: 'problem', p, score: 70, title: 'CI meldet fehlgeschlagene Prüfungen', label: 'CI rot' }] : [];
+      const s = safety(p);
+      // a risk that keeps growing for a week is news even when nobody asks about it
+      const growing = ['uncommitted', 'unpushed'].map(kind => streak(p, kind)).filter(r => r && r.trend === 'growing' && r.days >= 7 && p.status === 'active')
+        .map(r => ({ type: 'problem', p, score: 65, label: 'Wächst', title: r.kind === 'uncommitted' ? `${num(r.now.files)} Dateien nicht committet, vorher ${num(r.then.files)}` : `${num(r.now.commits)} Commits nicht gepusht, vorher ${num(r.then.commits)}`, age: streakText({ ...r, trend: null }) }));
+      return [...growing, ...(s.ci === 'red' ? [{ type: 'problem', p, score: 70, title: 'CI meldet fehlgeschlagene Prüfungen', label: 'CI rot', age: s.ciAge }] : [])];
     });
     return [...tasks, ...goals, ...problems, ...questions].sort((a, b) => b.score - a.score);
   }
@@ -776,7 +803,7 @@
     const row = item => {
       if (item.type === 'task') return `<details class="attention-row" ${foldAttrs(`attention:${item.task.id}`)}><summary><span class="tag ask">${item.task.status === 'blocked' ? 'Blockiert' : 'Ergebnis prüfen'}</span><span class="attention-title">${esc(item.task.title)}</span><span class="faint">#${item.task.id}</span></summary><div class="attention-detail">${trackedTask(item.task)}</div></details>`;
       const label = item.label || (item.type === 'goal' ? (item.p.goal_due < S.today ? 'Ziel überfällig' : 'Ziel heute fällig') : 'Entscheidung');
-      return `<div class="attention-row"><span class="tag ask">${label}</span><button type="button" class="linkish attention-title" data-attention-project="${esc(item.p.id)}" data-attention-tab="${item.type === 'problem' ? 'history' : 'work'}" data-attention-anchor="${esc(item.q ? `question:${item.q.id}` : item.type === 'problem' ? 'facts' : 'owner')}">${esc(item.title)}</button><span class="attention-project">${esc(item.p.name)}</span></div>`;
+      return `<div class="attention-row"><span class="tag ask">${label}</span><button type="button" class="linkish attention-title" data-attention-project="${esc(item.p.id)}" data-attention-tab="${item.type === 'problem' ? 'history' : 'work'}" data-attention-anchor="${esc(item.q ? `question:${item.q.id}` : item.type === 'problem' ? 'facts' : 'owner')}">${esc(item.title)}</button><span class="attention-project">${esc(item.p.name)}${item.age ? ` · ${esc(item.age)}` : ''}</span></div>`;
     };
     return `<section class="morning-attention"><div class="attention-head"><div><h2>Braucht dich</h2><p class="muted">${items.length} ${items.length === 1 ? 'Punkt wartet' : 'Punkte warten'} auf eine Entscheidung oder Prüfung.</p></div>${questions ? `<button class="btn" type="button" data-round-start>${questions === 1 ? 'Entscheidung beantworten' : `${questions} Entscheidungen nacheinander`}</button>` : ''}</div><div class="attention-list">${(showAllAttention ? items : items.slice(0, 5)).map(row).join('')}</div>${items.length > 5 ? `<button class="more" type="button" data-attention-all>${showAllAttention ? 'wieder weniger anzeigen' : `alle ${items.length} anzeigen`}</button>` : ''}${inspection}</section>`;
   }
@@ -873,6 +900,12 @@
     && f.item?.kind === 'question' && ['answered', 'done'].includes(f.value)
     && !(p.card?.waiting_on_you || []).some(w => w.id === id))
     .sort((a, b) => String(b[1].at || '').localeCompare(String(a[1].at || '')));
+  // the agent dated an open end when it wrote the card; it keeps ageing until the next card
+  function openEndAge(p, o) {
+    const since = p.card_updated_at ? Math.max(0, daysSince(p.card_updated_at)) : 0;
+    const age = o.age_days != null ? o.age_days + since : (shownRow(p.item_persistence, r => r.kind === 'open_end' && r.title === o.title) || {}).days;
+    return age >= 3 ? `seit ${days(age)} offen` : '';
+  }
   function projectPageHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
     const commits = f.commits || {};
@@ -915,7 +948,7 @@
       const histRow = (h, i, a) => `<li><span class="when">${stampOf(h.at)}</span><span class="rail"></span><span class="what">${esc(h.headline)}${a[i + 1] && a[i + 1].phase !== h.phase ? ` <span class="pill ${esc(h.phase)}">${esc(PHASE[h.phase] || h.phase)}</span>` : ''}</span></li>`;
       const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details ${foldAttrs(`chronicle:${p.id}`)}><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
       work += section('questions', 'Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true).replace('<li ', `<li ${anchor(`question:${w.id}`)} `)).join('')}</ul>` : '')
-        + section('open-ends', 'Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map((o, i) => `<div class="row" ${anchor(`open:${i}`)}><div class="t">${esc(o.title)}</div><span class="tag">${esc(KIND[o.kind] || o.kind)}</span>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '')
+        + section('open-ends', 'Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map((o, i) => `<div class="row" ${anchor(`open:${i}`)}><div class="t">${esc(o.title)}${openEndAge(p, o) ? ` <span class="faint q-age">${esc(openEndAge(p, o))}</span>` : ''}</div><span class="tag">${esc(KIND[o.kind] || o.kind)}</span>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '')
         + section('suggestions', 'Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
         + section('decisions', 'Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map((n, i) => `<li ${anchor(`decision:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts')
         + section('connections', 'Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map((n, i) => `<li ${anchor(`connection:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '');
@@ -1002,7 +1035,7 @@
     const queue = [...visible()].filter(p => p.card).sort((a, b) => risk(b) - risk(a)).flatMap(p => openQs(p.card).map(w => w.id)).filter(Boolean);
     if (!queue.length) return;
     closeIdeaRound();
-    round = { queue, i: 0, stats: { answered: 0, done: 0, skipped: 0 }, busy: false };
+    round = { queue, i: 0, stats: { answered: 0, done: 0, later: 0, skipped: 0 }, busy: false };
     renderRound();
   }
   const closeRound = () => { if (!round) return; round = null; $('#round-root').innerHTML = ''; };
@@ -1013,21 +1046,22 @@
     const previousInput = $('#round-answer');
     const hadFocus = previousInput && document.activeElement === previousInput;
     const selection = hadFocus ? [previousInput.selectionStart, previousInput.selectionEnd] : null;
-    while (round.i < round.queue.length && (!findQ(round.queue[round.i]) || reply(round.queue[round.i]))) round.i++;
+    while (round.i < round.queue.length && (!findQ(round.queue[round.i]) || reply(round.queue[round.i]) || rated(round.queue[round.i]) === 'later')) round.i++;
     const n = round.queue.length;
     let body;
     if (round.i >= n) {
       const st = round.stats;
-      body = `<h3>Geschafft.</h3><p class="muted">${st.answered} beantwortet, ${st.done} erledigt, ${st.skipped} übersprungen. Die Agents lesen deine Antworten beim nächsten Lauf.</p>
+      body = `<h3>Geschafft.</h3><p class="muted">${st.answered} beantwortet, ${st.done} erledigt, ${st.later} auf später gelegt, ${st.skipped} übersprungen. Die Agents lesen deine Antworten beim nächsten Lauf.</p>
         <div class="actions"><button class="btn primary" type="button" data-round-close>Schließen</button></div>`;
     } else {
       const { p, w } = findQ(round.queue[round.i]);
-      const opts = (w.options || []).map((o, i) => `<button type="button" class="ropt" data-round-opt="${i}"><span class="k mono">${i + 1}</span><span><b>${esc(o.answer)}</b>${o.effect ? `<span class="muted">${esc(o.effect)}</span>` : ''}</span></button>`).join('');
+      const opts = (w.options || []).map((o, i) => `<button type="button" class="ropt${w.recommended === i + 1 ? ' rec' : ''}" data-round-opt="${i}"><span class="k mono">${i + 1}</span><span><b>${esc(o.answer)}</b>${w.recommended === i + 1 ? ' <span class="rec-l">empfohlen</span>' : ''}${o.effect ? `<span class="muted">${esc(o.effect)}</span>` : ''}</span></button>`).join('');
+      const age = openSince(questionAge(w.id));
       body = `<div class="rproj">${dot(p.id)}<b>${esc(p.name)}</b>${p.card.headline ? `<span class="faint"> · ${esc(p.card.headline)}</span>` : ''}</div>
-        <h3>${esc(w.title)}</h3>${w.source ? `<div class="qsrc mono">${esc(w.source)}</div>` : ''}
+        <h3>${esc(w.title)}</h3>${age ? `<div class="faint">${esc(age)}</div>` : ''}${w.source ? `<div class="qsrc mono">${esc(w.source)}</div>` : ''}
         ${opts ? `<div class="ropts">${opts}</div>` : ''}
         <div class="inrow"><input type="text" id="round-answer" data-draft="${esc(w.id)}" data-kind="answer" value="${esc(drafts[w.id] || '')}" maxlength="600" placeholder="${opts ? 'Oder eigene Antwort' : 'Deine Antwort'}" aria-label="Deine Antwort"><button class="btn primary" type="button" data-round-send>Antworten</button></div>
-        <div class="actions"><button class="btn" type="button" data-round-done title="Die Frage ist erledigt oder nicht mehr nötig">Erledigt</button><button class="btn" type="button" data-round-skip>Überspringen</button></div>`;
+        <div class="actions"><button class="btn" type="button" data-round-done title="Die Frage ist erledigt oder nicht mehr nötig">Erledigt</button><button class="btn" type="button" data-round-later title="Kommt in ${S.snooze_days || 7} Tagen wieder">Später</button><button class="btn" type="button" data-round-skip>Überspringen</button></div>`;
     }
     root.innerHTML = `<div class="scrim" data-round-close></div><div class="round" role="dialog" aria-modal="true" aria-label="Entscheidungsrunde">
       <div class="rhead"><span class="faint">Entscheidungsrunde${round.i < n ? ` · Frage ${round.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-round-close>beenden</button></div>
@@ -1048,11 +1082,11 @@
     if (value === 'skip') { round.stats.skipped++; round.i++; renderRound(); return; }
     active.busy = true;
     document.querySelectorAll('#round-root button:not([data-round-close]), #round-answer').forEach(el => { el.disabled = true; });
-    const saved = await react(id, value, note);
+    const saved = value === 'later' ? await react(id, 'later', undefined, undefined, addDays(S.today, S.snooze_days || 7)) : await react(id, value, note);
     // A save may finish after the owner closed this round or started another one.
     if (round !== active) return;
     active.busy = false;
-    if (saved) { active.stats[value === 'answered' ? 'answered' : 'done']++; active.i++; delete drafts[id]; }
+    if (saved) { active.stats[value]++; active.i++; if (value !== 'later') delete drafts[id]; }
     renderRound();
   }
 
@@ -1768,6 +1802,17 @@
     await setPref('hidden_modules', [...collapsed]);
     $(`[data-mod-toggle="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
   }
+  // the owner takes over an agent's park/archive/revive verdict as their own intent
+  async function adoptVerdict(id, status) {
+    const p = byId(id);
+    if (!p) return;
+    try {
+      const result = await call('set_status', { id, status, note: p.status_note || '' });
+      await load(false);
+      const token = typeof result?.undo === 'string' ? result.undo.match(/^watchtower undo ([a-f0-9]{32})$/)?.[1] : null;
+      toast(`${p.name}: „${STATUS[status]}“ übernommen.`, token ? async () => { try { await call('undo', { token }); } catch (e) { toast('Rückgängig hat nicht geklappt: ' + errText(e)); } await load(false); } : null);
+    } catch (e) { toast('Status nicht gespeichert: ' + errText(e)); }
+  }
   async function setStatus(status, note) {
     const id = openId;
     try { await call('set_status', { id, status, note }); clearProjectDraft(id, 'status_note', note); await load(false); }
@@ -1930,6 +1975,7 @@
       if (t.closest('[data-round-send]')) { const v = ($('#round-answer').value || '').trim(); if (v) roundStep('answered', v); else $('#round-answer').focus(); return; }
       if (t.closest('[data-round-done]')) { roundStep('done', null); return; }
       if (t.closest('[data-round-skip]')) { roundStep('skip'); return; }
+      if (t.closest('[data-round-later]')) { roundStep('later'); return; }
     }
     const opt = t.closest('[data-opt]');
     if (opt) { const q = findQ(opt.dataset.opt); if (q) react(q.w.id, 'answered', q.w.options[Number(opt.dataset.i)].answer, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.'); return; }
@@ -1973,6 +2019,10 @@
     if (t.closest('[data-answer-cancel]')) { answering = null; render(); return; }
     const qd = t.closest('[data-qdone]');
     if (qd) { react(qd.dataset.qdone, 'done', null, 'Als erledigt markiert.'); return; }
+    const ql = t.closest('[data-qlater]');
+    if (ql) { const until = addDays(S.today, S.snooze_days || 7); react(ql.dataset.qlater, 'later', undefined, `Zurückgestellt bis ${fmtDate(until)}.`, until); return; }
+    const vs = t.closest('[data-verdict-status]');
+    if (vs) { adoptVerdict(vs.dataset.project, vs.dataset.verdictStatus); return; }
     const ru = t.closest('[data-reply-undo]');
     if (ru) { react(ru.dataset.replyUndo, null); return; }
     const fd = t.closest('[data-focus-done]');

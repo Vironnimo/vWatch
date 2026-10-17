@@ -66,6 +66,28 @@ test('Today surfaces failed checks and missing folders while ordinary repository
   assert.doesNotMatch(html, /Gerade wartet nichts auf dich|700|40 lokale|6 Worktrees/);
 });
 
+test('Today names lasting growing risks and how long questions wait, and hides postponed questions', async () => {
+  const a = await app(undefined, expose), p = a.state.projects[0];
+  p.facts = facts({ ahead: 11 });
+  p.risk_streaks = [{ kind: 'unpushed', since: '2026-01-01T08:00:00Z', days: 12, at_least: true, then: { commits: 7 }, now: { commits: 11 }, trend: 'growing' }];
+  p.card.waiting_on_you = [{ id: 'q-old', title: 'Pick the mail provider', options: [{ title: 'Own server' }, { title: 'Relay' }], recommended: 2 },
+    { id: 'q-later', title: 'Decide the release name' }];
+  p.item_persistence = [{ kind: 'question', id: 'q-old', title: 'Pick the mail provider', days: 9, versions: 4 }];
+  a.state.feedback = { 'q-later': { value: 'later', at: a.state.today, snoozed_until: '2999-01-01' } };
+  await a.ui.load(false);
+  const html = a.ui.blockAttention();
+  assert.match(html, /Wächst/);
+  assert.match(html, /11 Commits nicht gepusht, vorher 7/);
+  assert.match(html, /seit mindestens 12 Tagen/);
+  assert.match(html, /Pick the mail provider/);
+  assert.match(html, /seit 9 Tagen offen/);
+  assert.doesNotMatch(html, /Decide the release name/);
+  // a short or shrinking streak is ordinary work and stays quiet
+  p.risk_streaks[0].days = 3;
+  await a.ui.load(false);
+  assert.doesNotMatch(a.ui.blockAttention(), /Wächst/);
+});
+
 test('attention follows owner action rather than dirty file counts, local commits or missing remotes', async () => {
   const a = await app(undefined, expose), base = structuredClone(fixture().projects[0]);
   base.card.waiting_on_you = [];
