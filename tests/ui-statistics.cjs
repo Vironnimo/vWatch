@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app, deferred } = require('./ui-helpers.cjs');
-const expose = `Object.assign(ui, { renderStatistics, metricCurve, languageBars, projectStatistics, fetchStatistics, invalidateStatistics, historyDetail, saveOwnerIdea, ideaCollection, keepStatisticsDraft,
-  stats: data => { statsData = data; }, history: (data, versions) => { statsTab = 'history'; statsHistory = data; statsVersions = versions; },
+const expose = `Object.assign(ui, { renderStatistics, metricCurve, languageBars, projectStatistics, fetchStatistics, invalidateStatistics, resetStatistics, historyDetail, saveOwnerIdea, ideaCollection, keepStatisticsDraft,
+  stats: data => { statsData = data; }, openFold: id => openFolds.add(id), history: (data, versions) => { statsTab = 'history'; statsHistory = data; statsVersions = versions; },
   detail: data => { statsDetail = data; }, ideaEdit: (id, value) => ownerIdeaDrafts.set(id, value), ideaEditState: id => ownerIdeaDrafts.get(id) });`;
 
 test('statistics show missing values honestly and break curves at incomplete or incompatible observations', async () => {
@@ -61,10 +61,41 @@ test('live refresh retains unsubmitted filters and an immutable comparison', asy
   a.ui.stats({ projects: [], summary: {} });
   a.ui.keepStatisticsDraft({ target: { id: 'stats-from', value: '2026-08-01' } });
   a.ui.detail({ from: 1, to: 2, changes: [{ field: 'headline', before: 'Alt', after: 'Neu' }] });
-  a.ui.invalidateStatistics(true);
+  a.ui.invalidateStatistics();
   a.ui.stats({ projects: [], summary: {} });
   assert.match(a.ui.renderStatistics(), /value="2026-08-01"/);
   assert.match(a.ui.historyDetail(), /Vorher/);
-  a.ui.invalidateStatistics();
+  a.ui.resetStatistics();
   assert.equal(a.ui.historyDetail(), '');
+});
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('reloads keep the shown statistics and fetch again only after measured facts changed', async () => {
+  let reads = 0;
+  const a = await app(command => command === 'statistics' ? { from: '2026-10-01', until: '2026-10-07', projects: [], summary: { source_code: 1000 + ++reads, measured_projects: 1, projects: 1 } } : {}, expose);
+  a.state.prefs.style = 'statistics'; a.state.projects[0].facts_collected_at = '2026-10-07T08:00:00Z';
+  await a.ui.load(false); await settle();
+  assert.equal(reads, 1); assert.match(a.node('#view').innerHTML, /1\.001/);
+  await a.ui.load(false); await settle();
+  assert.equal(reads, 1);
+  a.state.projects[0].facts_collected_at = '2026-10-07T08:20:00Z';
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /1\.001/); assert.doesNotMatch(a.node('#view').innerHTML, /Lade Messstände/);
+  await settle();
+  assert.equal(reads, 2); assert.match(a.node('#view').innerHTML, /1\.002/);
+});
+
+test('observation rows list changes only, flat stretches draw no inner dots and closed sections hold no rows', async () => {
+  const a = await app(undefined, expose);
+  const sample = (day, code) => ({ at: `2026-10-0${day}T08:00:00Z`, ok: true, branch: 'main', path: '/repo', code: { ok: true, source_code: code, method: 'm' }, dirty: { files: 0 }, ahead: 0, ci: { state: 'green' } });
+  const samples = [sample(1, 10), sample(2, 10), sample(3, 10), sample(4, 12), sample(5, 12)];
+  const p = { id: 'sample', name: 'Sample', current: samples[4], samples, activity: { days: [{ date: '2026-10-01', commits: 1, added: 1, removed: 0 }] }, confirmed_completions: 0 };
+  const closed = a.ui.projectStatistics(p);
+  assert.match(closed, /Messwerte im Zeitraum \(2 Stände\)/); assert.doesNotMatch(closed, /<tbody>/);
+  a.ui.openFold('stats:observations:sample');
+  const open = a.ui.projectStatistics(p);
+  assert.equal((open.match(/<tr>/g) || []).length, 3); assert.doesNotMatch(open, /NaN|undefined/);
+  const curve = a.ui.metricCurve(samples, s => s.code.source_code, 'Code', '#fff');
+  assert.equal((curve.match(/<circle/g) || []).length, 4); assert.equal((curve.match(/<path d="M[0-9.]+,/g) || []).length, 1);
 });

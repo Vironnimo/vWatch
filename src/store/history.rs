@@ -46,7 +46,7 @@ pub(super) fn migrate(db: &Connection) -> Result<()> {
         |r| r.get(0),
     )?;
     if done {
-        return Ok(());
+        return record_changed_samples(db);
     }
     // Preserve the one measurement old installations still possess; never invent older samples.
     db.execute_batch("INSERT OR IGNORE INTO fact_payloads(data) SELECT json_extract(data,'$.code') FROM facts WHERE json_type(data,'$.code')='object';
@@ -238,53 +238,177 @@ pub(super) fn migrate(db: &Connection) -> Result<()> {
         "INSERT INTO history_migrations VALUES('durable-history-v1')",
         [],
     )?;
+    record_changed_samples(db)
+}
+
+/// A refresh that measures exactly the previous state adds no information. Keep the first
+/// observation of each UTC day so durations stay measurable; saved samples stay untouched.
+fn record_changed_samples(db: &Connection) -> Result<()> {
+    let done: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM history_migrations WHERE name='changed-samples-v1')",
+        [],
+        |r| r.get(0),
+    )?;
+    if done {
+        return Ok(());
+    }
+    db.execute_batch(
+        "DROP TRIGGER IF EXISTS samples_insert; DROP TRIGGER IF EXISTS samples_update;",
+    )?;
+    for action in ["INSERT", "UPDATE"] {
+        db.execute_batch(&format!("CREATE TRIGGER samples_{} AFTER {action} ON facts BEGIN
+            INSERT INTO fact_payloads(data) SELECT json_extract(NEW.data,'$.code') WHERE json_type(NEW.data,'$.code')='object' AND NOT EXISTS(SELECT 1 FROM fact_payloads WHERE data=json_extract(NEW.data,'$.code'));
+            INSERT INTO fact_payloads(data) SELECT json_extract(NEW.data,'$.activity') WHERE json_type(NEW.data,'$.activity')='object' AND NOT EXISTS(SELECT 1 FROM fact_payloads WHERE data=json_extract(NEW.data,'$.activity'));
+            INSERT INTO fact_samples(project_id,at,fingerprint,path,identity_revision,origin,data,code_payload,activity_payload)
+            SELECT n.project_id,n.at,n.fingerprint,n.path,n.identity_revision,'observed',n.data,n.code,n.activity
+            FROM (SELECT NEW.project_id AS project_id,NEW.collected_at AS at,NEW.fingerprint AS fingerprint,p.path AS path,p.identity_revision AS identity_revision,
+                json_remove(NEW.data,'$.code','$.activity') AS data,
+                (SELECT id FROM fact_payloads WHERE data=json_extract(NEW.data,'$.code')) AS code,
+                (SELECT id FROM fact_payloads WHERE data=json_extract(NEW.data,'$.activity')) AS activity
+                FROM (SELECT 1) LEFT JOIN projects p ON p.id=NEW.project_id) n
+            LEFT JOIN (SELECT * FROM fact_samples WHERE project_id=NEW.project_id ORDER BY at DESC,id DESC LIMIT 1) l ON 1
+            WHERE l.id IS NULL OR substr(l.at,1,10)<substr(n.at,1,10) OR l.data IS NOT n.data
+                OR l.code_payload IS NOT n.code OR l.activity_payload IS NOT n.activity OR l.fingerprint IS NOT n.fingerprint
+                OR l.path IS NOT n.path OR l.identity_revision IS NOT n.identity_revision; END;", action.to_lowercase()))?;
+    }
+    db.execute(
+        "INSERT INTO history_migrations VALUES('changed-samples-v1')",
+        [],
+    )?;
     Ok(())
 }
 
+/// The measured values statistics show for every observation. Lists, links and descriptive
+/// text stay with the current and baseline views.
+const SAMPLE_POINT: &str = "SELECT s.id,s.at,s.path,s.origin,
+    json_object('ok',s.data->'$.ok','error',s.data->'$.error','branch',s.data->'$.branch','head',s.data->'$.head',
+    'commits',json_object('total',s.data->'$.commits.total'),'dirty',s.data->'$.dirty','ahead',s.data->'$.ahead','behind',s.data->'$.behind',
+    'unpushed_since',s.data->'$.unpushed_since','worktrees',json_remove(s.data->'$.worktrees','$.items'),'branches',s.data->'$.branches',
+    'release',s.data->'$.release','ci',json_remove(s.data->'$.ci','$.workflows','$.url','$.title','$.repo'),
+    'space',json_remove(s.data->'$.space','$.dirs'),
+    'code',json_remove(c.data,'$.languages','$.largest_files','$.exclusions','$.percentage_basis'))
+    FROM fact_samples s LEFT JOIN fact_payloads c ON c.id=s.code_payload";
+
+fn sample_point(r: &Row) -> Result<Value> {
+    Ok(
+        json!({"id":r.get::<_,i64>(0)?,"at":r.get::<_,String>(1)?,"path":r.get::<_,Option<String>>(2)?,
+        "origin":r.get::<_,String>(3)?,"facts":super::json(r.get(4)?)}),
+    )
+}
+
+/// The observation a Git reconstruction run started with.
+struct Run {
+    id: i64,
+    at: String,
+    path: Option<String>,
+    payload: i64,
+}
+
+/// One project's stored observations for a statistics period.
+pub struct PeriodSamples {
+    /// The last observation before the period.
+    pub previous: Option<Value>,
+    /// Observations in the period: the first of each UTC day, every change and the last one.
+    pub samples: Vec<Value>,
+    /// Frequently changed files of the latest complete Git reconstruction, with its range.
+    pub hotspots: Option<Value>,
+    /// Git reconstructions overlapping the period, oldest first, with days inside the period.
+    pub reconstructions: Vec<Value>,
+}
+
 impl Store {
-    /// Keep past Git reconstructions useful after the current rolling window has moved on.
-    pub fn activity_observations(
-        &self,
-        project: Option<&str>,
-        from: &str,
-        until: &str,
-    ) -> Result<Vec<Value>> {
+    /// One project's period through its time index: each UTC day's first observation and every
+    /// change, without the large code lists or Git reconstructions of repeated observations.
+    pub fn period_samples(&self, project: &str, from: &str, until: &str) -> Result<PeriodSamples> {
         self.with(|db| {
-            let mut stmt = db.prepare("SELECT s.project_id,s.at,s.path,json_extract(s.data,'$.branch'),a.data
+            let previous = db
+                .prepare(&format!("{SAMPLE_POINT} WHERE s.project_id=?1 AND s.at<?2 ORDER BY s.at DESC,s.id DESC LIMIT 1"))?
+                .query_row(params![project, from], sample_point)
+                .optional()?;
+            // A reconstruction made before the period ends before it; later ones can still cover it,
+            // because saved Git windows stay valid after the rolling window has moved on. One ordered
+            // pass compares neighbours; only kept observations are read as JSON.
+            let mut points = Vec::<i64>::new();
+            let mut point: Option<(String, String, Option<i64>, Option<String>)> = None;
+            let mut last = None;
+            let mut runs = Vec::<Run>::new();
+            let mut run: Option<(String, i64, Option<String>)> = None;
+            let mut scan = db.prepare("SELECT id,at,path,code_payload,activity_payload,data FROM fact_samples
+                WHERE project_id=?1 AND at>=date(?2,'-1 day') ORDER BY at,id")?;
+            let mut rows = scan.query(params![project, from])?;
+            while let Some(r) = rows.next()? {
+                let id: i64 = r.get(0)?;
+                let at = r.get_ref(1)?.as_str()?;
+                let path = r.get_ref(2)?.as_str_or_null()?;
+                let code: Option<i64> = r.get(3)?;
+                let data = r.get_ref(5)?.as_str()?;
+                let day = at.get(..10).unwrap_or(at);
+                if day >= from && day <= until {
+                    let same = point.as_ref().is_some_and(|(d, data_before, code_before, path_before)| {
+                        d == day && data_before == data && *code_before == code && path_before.as_deref() == path
+                    });
+                    if !same {
+                        points.push(id);
+                        point = Some((day.to_owned(), data.to_owned(), code, path.map(str::to_owned)));
+                    }
+                    last = Some(id);
+                }
+                if let Some(payload) = r.get::<_, Option<i64>>(4)? {
+                    let same = run.as_ref().is_some_and(|(data_before, payload_before, path_before)| {
+                        data_before == data && *payload_before == payload && path_before.as_deref() == path
+                    });
+                    if !same {
+                        runs.push(Run { id, at: at.to_owned(), path: path.map(str::to_owned), payload });
+                        run = Some((data.to_owned(), payload, path.map(str::to_owned)));
+                    }
+                }
+            }
+            drop(rows);
+            if last.is_some() && points.last() != last.as_ref() {
+                points.extend(last);
+            }
+            let mut read = db.prepare(&format!("{SAMPLE_POINT} WHERE s.id=?1"))?;
+            let samples = points
+                .iter()
+                .map(|id| read.query_row([id], sample_point))
+                .collect::<Result<Vec<_>>>()?;
+            let hotspots = db.query_row("SELECT json_object('hotspots',a.data->'$.hotspots','from',a.data->'$.from','through',a.data->'$.through')
                 FROM fact_samples s JOIN fact_payloads a ON a.id=s.activity_payload
-                WHERE (?1 IS NULL OR s.project_id=?1) AND json_extract(a.data,'$.ok')=1
-                AND json_extract(a.data,'$.from')<=?3 AND json_extract(a.data,'$.through')>=?2
-                AND s.id=(SELECT max(b.id) FROM fact_samples b WHERE b.project_id=s.project_id AND b.activity_payload=s.activity_payload AND b.path IS s.path AND json_extract(b.data,'$.branch') IS json_extract(s.data,'$.branch'))
-                ORDER BY s.at,s.id")?;
-            let rows = stmt.query_map(params![project,from,until], |r| Ok(json!({
-                "project":r.get::<_,String>(0)?,"at":r.get::<_,String>(1)?,"path":r.get::<_,Option<String>>(2)?,
-                "branch":r.get::<_,Option<String>>(3)?,"activity":super::json(r.get(4)?)
-            })))?;
-            rows.collect()
+                WHERE s.project_id=?1 AND a.data->>'$.ok'=1 ORDER BY s.at DESC,s.id DESC LIMIT 1", [project], |r| r.get(0))
+                .optional()?.map(super::json);
+            // Each reconstruction counts once per branch and folder, ordered by its latest run.
+            let mut branch = db.prepare("SELECT data->>'$.branch' FROM fact_samples WHERE id=?1")?;
+            let mut latest = std::collections::HashMap::<(i64, Option<String>, Option<String>), Run>::new();
+            for run in runs {
+                let branch: Option<String> = branch.query_row([run.id], |r| r.get(0))?;
+                latest.insert((run.payload, run.path.clone(), branch), run);
+            }
+            let mut latest: Vec<_> = latest.into_iter().collect();
+            latest.sort_by(|a, b| (&a.1.at, a.1.id).cmp(&(&b.1.at, b.1.id)));
+            let mut window = db.prepare("SELECT json_object('from',a.data->'$.from','through',a.data->'$.through','days',
+                (SELECT json_group_array(json(d.value)) FROM json_each(a.data,'$.days') d WHERE d.value->>'$.date' BETWEEN ?2 AND ?3))
+                FROM fact_payloads a WHERE a.id=?1 AND a.data->>'$.ok'=1 AND a.data->>'$.from'<=?3 AND a.data->>'$.through'>=?2")?;
+            let mut reconstructions = Vec::new();
+            for ((payload, path, branch), run) in latest {
+                if let Some(activity) = window.query_row(params![payload, from, until], |r| r.get::<_, String>(0)).optional()? {
+                    reconstructions.push(json!({"at":run.at,"path":path,"branch":branch,"activity":super::json(activity)}));
+                }
+            }
+            Ok(PeriodSamples { previous, samples, hotspots, reconstructions })
         })
     }
-    /// Only the selected period, its preceding baseline and latest evidence; avoid loading all years.
-    pub fn statistics_samples(
-        &self,
-        project: Option<&str>,
-        from: &str,
-        until: &str,
-    ) -> Result<Vec<Value>> {
+
+    /// One complete observation with its full code measurement, for the current and baseline views.
+    pub fn fact_sample(&self, id: i64) -> Result<Option<Value>> {
         self.with(|db| {
-            let mut stmt=db.prepare("SELECT s.id,s.project_id,s.at,s.path,s.origin,s.data,c.data,a.data FROM fact_samples s
-                LEFT JOIN fact_payloads c ON c.id=s.code_payload LEFT JOIN fact_payloads a ON a.id=s.activity_payload
-                WHERE (?1 IS NULL OR s.project_id=?1) AND (
-                    (s.at>=?2 AND s.at < date(?3,'+1 day'))
-                    OR s.id=(SELECT id FROM fact_samples b WHERE b.project_id=s.project_id AND b.at<?2 ORDER BY b.at DESC,b.id DESC LIMIT 1)
-                    OR s.id=(SELECT b.id FROM fact_samples b JOIN fact_payloads p ON p.id=b.activity_payload WHERE b.project_id=s.project_id AND json_extract(p.data,'$.ok')=1 ORDER BY b.at DESC,b.id DESC LIMIT 1)
-                ) ORDER BY s.at,s.id")?;
-            let rows=stmt.query_map(params![project,from,until],|r| {
-                let mut facts=super::json(r.get(5)?);
-                if let Some(code)=r.get::<_,Option<String>>(6)? {facts["code"]=super::json(code);}
-                if let Some(activity)=r.get::<_,Option<String>>(7)? {facts["activity"]=super::json(activity);}
-                Ok(json!({"id":r.get::<_,i64>(0)?,"project":r.get::<_,String>(1)?,"at":r.get::<_,String>(2)?,"path":r.get::<_,Option<String>>(3)?,"origin":r.get::<_,String>(4)?,"facts":facts}))
-            })?;
-            rows.collect()
+            db.query_row("SELECT s.id,s.at,s.path,s.origin,s.data,c.data FROM fact_samples s
+                LEFT JOIN fact_payloads c ON c.id=s.code_payload WHERE s.id=?1", [id], |r| {
+                let mut facts = super::json(r.get(4)?);
+                if let Some(code) = r.get::<_, Option<String>>(5)? {
+                    facts["code"] = super::json(code);
+                }
+                Ok(json!({"id":r.get::<_,i64>(0)?,"at":r.get::<_,String>(1)?,"path":r.get::<_,Option<String>>(2)?,"origin":r.get::<_,String>(3)?,"facts":facts}))
+            }).optional()
         })
     }
     pub fn fact_samples(

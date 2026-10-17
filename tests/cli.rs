@@ -711,3 +711,36 @@ fn project_update_cli_preserves_the_registered_id_and_card_history() {
     }
     assert_eq!(run(&home, &["card", "show", "demo"]).1["version"], 1);
 }
+
+#[test]
+fn readable_statistics_round_shares_and_list_languages_largest_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let repo = common::demo_repo(tmp.path());
+    std::fs::write(repo.join("app.py"), "a = 1\nb = 2\nc = 3\n").unwrap();
+    std::fs::write(repo.join("app.js"), "let a = 1;\n").unwrap();
+    human_success(
+        &home,
+        &["projects", "add", repo.to_str().unwrap(), "--id", "demo"],
+    );
+    std::fs::write(repo.join("more.js"), "let b = 2;\nlet c = 3;\nlet d = 4;\n").unwrap();
+    human_success(&home, &["facts", "refresh", "demo", "--no-ci"]);
+    let out = human_success(&home, &["statistics"]);
+    assert!(
+        out.contains("Summary: 1 of 1 projects measured completely; 7 source code lines.\nSource code languages, largest first:\n  JavaScript: 4 lines (57.1%)\n  Python: 3 lines (42.9%)\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  Change: +3 source code lines (+75.0%)\n"),
+        "{out}"
+    );
+    assert!(out.contains("    Coverage: "), "{out}");
+    assert!(
+        out.contains(
+            "  2 observation points in the period: the first of each UTC day and every change."
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("Entry") && !out.contains("57.14"), "{out}");
+}

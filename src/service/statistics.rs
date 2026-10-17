@@ -70,30 +70,15 @@ impl Watchtower {
             Some(id) => vec![self.historical_project(id)?],
             None => self.store.projects()?,
         };
-        let all = self.store.statistics_samples(project, &from, &until)?;
-        let reconstructions = self.store.activity_observations(project, &from, &until)?;
         let tasks = self.store.tasks()?;
         let mut output = Vec::new();
         let mut totals = BTreeMap::<String, u64>::new();
         let mut known = 0;
         for p in projects {
-            let samples: Vec<&Value> = all.iter().filter(|s| s["project"] == p.id).collect();
-            let in_period: Vec<&Value> = samples
-                .iter()
-                .copied()
-                .filter(|s| {
-                    let date = s["at"].as_str().unwrap_or("").get(..10).unwrap_or("");
-                    date >= from.as_str() && date <= until.as_str()
-                })
-                .collect();
-            let last =
-                samples.iter().copied().rev().find(|s| {
-                    s["at"].as_str().unwrap_or("").get(..10).unwrap_or("") <= until.as_str()
-                });
-            let previous =
-                samples.iter().copied().rev().find(|s| {
-                    s["at"].as_str().unwrap_or("").get(..10).unwrap_or("") < from.as_str()
-                });
+            let period = self.store.period_samples(&p.id, &from, &until)?;
+            let in_period: Vec<&Value> = period.samples.iter().collect();
+            let previous = period.previous.as_ref();
+            let last = in_period.last().copied().or(previous);
             let complete = |s: &&Value| {
                 s["facts"]["ok"] == true
                     && s["facts"]["code"]["ok"] == true
@@ -104,8 +89,18 @@ impl Watchtower {
                 .or_else(|| in_period.iter().copied().find(complete))
                 .or(previous)
                 .or_else(|| in_period.first().copied());
-            let current = last.map(sample_view);
-            let base = baseline.map(sample_view);
+            // Only these two views carry every language and the largest files.
+            let full = |sample: Option<&Value>| -> Result<Option<Value>> {
+                match sample.and_then(|s| s["id"].as_i64()) {
+                    Some(id) => Ok(self.store.fact_sample(id)?.as_ref().map(sample_view)),
+                    None => Ok(None),
+                }
+            };
+            let current = full(last)?;
+            let base = match (baseline, last) {
+                (Some(a), Some(b)) if a["id"] == b["id"] => current.clone(),
+                _ => full(baseline)?,
+            };
             let comparable = match (baseline, last) {
                 (Some(a), Some(b)) if a["id"] != b["id"] => {
                     a["facts"]["code"]["ok"] == true
@@ -149,16 +144,11 @@ impl Watchtower {
                 }
             }
             // Git dates can reconstruct activity before the first Watchtower observation.
-            let activity = samples.iter().rev().find_map(|s| {
-                (s["facts"]["activity"]["ok"] == true).then_some(&s["facts"]["activity"])
-            });
+            let activity = period.hotspots.as_ref();
             let mut activity_days = BTreeMap::<String, Value>::new();
             let mut coverage = Vec::new();
-            for observation in reconstructions.iter().filter(|r| {
-                r["project"] == p.id
-                    && last.is_none_or(|s| {
-                        r["branch"] == s["facts"]["branch"] && r["path"] == s["path"]
-                    })
+            for observation in period.reconstructions.iter().filter(|r| {
+                last.is_none_or(|s| r["branch"] == s["facts"]["branch"] && r["path"] == s["path"])
             }) {
                 let a = &observation["activity"];
                 let (Some(a_from), Some(a_until)) = (a["from"].as_str(), a["through"].as_str())
@@ -225,12 +215,7 @@ impl Watchtower {
             output.push(json!({"id":p.id,"name":p.name,"status":p.status,"removed":p.removed_at.is_some(),
                 "current":current,"baseline":base,"change":change,"comparable":comparable,
                 "comparison_note":if comparable {"Comparable observed working-tree measurements."} else {"Two complete measurements with the same branch, folder and counting method are required; gaps prevent comparison."},
-                "samples":in_period.into_iter().map(|s| {
-                    let mut v=sample_view(s);
-                    if let Some(code)=v["code"].as_object_mut(){code.remove("languages");code.remove("largest_files");}
-                    if let Some(worktrees)=v["worktrees"].as_object_mut(){worktrees.remove("items");}
-                    v
-                }).collect::<Vec<_>>(),
+                "samples":in_period.into_iter().map(sample_view).collect::<Vec<_>>(),
                 "activity":{"origin":"reconstructed","complete":complete_activity,"coverage_from":merged.first().map(|r|r.0.to_string()),"coverage_through":merged.last().map(|r|r.1.to_string()),"coverage":merged.iter().map(|r|json!({"from":r.0.to_string(),"through":r.1.to_string()})).collect::<Vec<_>>(),"branch":last.map(|s|&s["facts"]["branch"]),"days":days,"totals":activity_counts,
                     "hotspots":activity.map(|a|&a["hotspots"]),"hotspots_from":activity.map(|a|&a["from"]),"hotspots_through":activity.map(|a|&a["through"])},
                 "confirmed_completions":completed}));
@@ -239,7 +224,7 @@ impl Watchtower {
         let languages:Vec<Value>=totals.into_iter().map(|(language,lines)|json!({"language":language,"code":lines,"percent":(code>0).then(||lines as f64*100.0/code as f64)})).collect();
         Ok(
             json!({"from":from,"until":until,"projects":output,"summary":{"projects":output.len(),"measured_projects":known,"source_code":(known>0).then_some(code),"languages":languages},
-            "note":"Stored observations only; no refresh or acknowledgement. Code is the working tree, including uncommitted files. Activity is reconstructed from available Git history. Missing observations are unknown."}),
+            "note":"Stored observations only; no refresh or acknowledgement. Samples are the first observation of each UTC day and every change; an observation holds until the next one. Code is the working tree, including uncommitted files. Activity is reconstructed from available Git history. Missing observations are unknown."}),
         )
     }
 
@@ -361,7 +346,7 @@ impl Watchtower {
     pub fn facts_history(&self, id: &str) -> Result<Value> {
         self.historical_project(id)?;
         Ok(
-            json!({"project":id,"samples":self.store.fact_samples(Some(id),None,None)?,"note":"Every saved observation, oldest first, including failed measurements. Retained marks the last facts available when history recording began."}),
+            json!({"project":id,"samples":self.store.fact_samples(Some(id),None,None)?,"note":"Every saved observation, oldest first, including failed measurements. A refresh is saved when it differs from the previous observation or is the first of its UTC day. Retained marks the last facts available when history recording began."}),
         )
     }
 }

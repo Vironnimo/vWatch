@@ -27,7 +27,42 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                 ),
             );
             line(&mut out, 0, &format!("Note: {}", text(&data["note"])));
-            field(&mut out, "Summary", &data["summary"], 0);
+            let summary = &data["summary"];
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "Summary: {} of {} projects measured completely; {} source code lines.",
+                    text(&summary["measured_projects"]),
+                    text(&summary["projects"]),
+                    text(&summary["source_code"])
+                ),
+            );
+            let mut languages: Vec<&Value> = list(&summary["languages"]).iter().collect();
+            languages.sort_by(|a, b| {
+                b["code"]
+                    .as_u64()
+                    .cmp(&a["code"].as_u64())
+                    .then_with(|| text(&a["language"]).cmp(&text(&b["language"])))
+            });
+            if !languages.is_empty() {
+                line(&mut out, 0, "Source code languages, largest first:");
+            }
+            for l in languages {
+                let share = l["percent"]
+                    .as_f64()
+                    .map(|p| format!(" ({})", percent(p, false)));
+                line(
+                    &mut out,
+                    1,
+                    &format!(
+                        "{}: {} lines{}",
+                        text(&l["language"]),
+                        text(&l["code"]),
+                        share.unwrap_or_default()
+                    ),
+                );
+            }
             for p in list(&data["projects"]) {
                 line(
                     &mut out,
@@ -44,24 +79,49 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     1,
                 );
                 field(&mut out, "Baseline at", &p["baseline"]["at"], 1);
+                let change = &p["change"];
+                let change = match change["code"].as_i64() {
+                    Some(lines) => format!(
+                        "{lines:+} source code lines{}",
+                        change["percent"]
+                            .as_f64()
+                            .map(|p| format!(" ({})", percent(p, true)))
+                            .unwrap_or_default()
+                    ),
+                    None => "-".into(),
+                };
+                line(&mut out, 1, &format!("Change: {change}"));
                 fields(
                     &mut out,
                     p,
-                    &["change", "comparison_note", "confirmed_completions"],
+                    &["comparison_note", "confirmed_completions"],
                     1,
                 );
-                field(
+                let activity = &p["activity"];
+                line(&mut out, 1, "Reconstructed Git activity:");
+                field(&mut out, "Complete", &activity["complete"], 2);
+                let coverage: Vec<String> = list(&activity["coverage"])
+                    .iter()
+                    .map(|c| format!("{} through {}", text(&c["from"]), text(&c["through"])))
+                    .collect();
+                line(
                     &mut out,
-                    "Reconstructed Git activity",
-                    &json!({"complete":p["activity"]["complete"],
-                    "coverage":p["activity"]["coverage"],"totals":p["activity"]["totals"]}),
-                    1,
+                    2,
+                    &format!(
+                        "Coverage: {}",
+                        if coverage.is_empty() {
+                            "none".into()
+                        } else {
+                            coverage.join("; ")
+                        }
+                    ),
                 );
+                field(&mut out, "Totals", &activity["totals"], 2);
                 line(
                     &mut out,
                     1,
                     &format!(
-                        "{} observations in the period. facts history with this project ID reads full measurements; statistics --json also includes daily activity and language details.",
+                        "{} observation points in the period: the first of each UTC day and every change. facts history with this project ID reads full measurements; statistics --json also includes daily activity and language details.",
                         list(&p["samples"]).len()
                     ),
                 );
@@ -801,6 +861,22 @@ fn text(value: &Value) -> String {
             items.iter().map(text).collect::<Vec<_>>().join(", ")
         }
         _ => "-".into(),
+    }
+}
+/// One decimal is enough to read a share; a tiny nonzero share never reads as zero.
+fn percent(value: f64, signed: bool) -> String {
+    let rounded = format!("{:.1}", value.abs());
+    let sign = if value < 0.0 {
+        "-"
+    } else if signed && value > 0.0 {
+        "+"
+    } else {
+        ""
+    };
+    if value != 0.0 && rounded == "0.0" {
+        format!("{sign}<0.1%")
+    } else {
+        format!("{sign}{rounded}%")
     }
 }
 fn line(out: &mut String, depth: usize, content: &str) {

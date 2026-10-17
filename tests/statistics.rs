@@ -9,7 +9,7 @@ fn count(db: &rusqlite::Connection, table: &str) -> i64 {
 }
 
 #[test]
-fn observations_keep_every_timestamp_deduplicate_payloads_and_compare_known_measurements() {
+fn observations_record_changes_deduplicate_payloads_and_compare_known_measurements() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());
     let repo = demo_repo(tmp.path());
@@ -33,7 +33,7 @@ fn observations_keep_every_timestamp_deduplicate_payloads_and_compare_known_meas
     svc.store()
         .save_facts("demo", &svc.now(), &saved.fingerprint, &saved.data)
         .unwrap();
-    assert_eq!(count(&db, "fact_samples"), 2);
+    assert_eq!(count(&db, "fact_samples"), 1);
     assert_eq!(count(&db, "fact_payloads"), payloads);
     clock.advance(Duration::days(1));
     std::fs::write(
@@ -45,7 +45,11 @@ fn observations_keep_every_timestamp_deduplicate_payloads_and_compare_known_meas
     let stats = svc
         .statistics(Some("demo"), Some("2026-09-30"), Some("2026-10-01"))
         .unwrap();
-    assert_eq!(stats["projects"][0]["samples"].as_array().unwrap().len(), 3);
+    assert_eq!(stats["projects"][0]["samples"].as_array().unwrap().len(), 2);
+    let point = &stats["projects"][0]["samples"][1];
+    assert_eq!(point["code"]["source_code"], 2);
+    assert!(point["code"]["languages"].is_null() && point["worktrees"]["items"].is_null());
+    assert!(stats["projects"][0]["current"]["code"]["languages"].is_array());
     assert_eq!(stats["projects"][0]["change"]["code"], 1);
     assert_eq!(stats["summary"]["source_code"], 2);
     let observations = svc.store().fact_samples(Some("demo"), None, None).unwrap();
@@ -64,16 +68,141 @@ fn observations_keep_every_timestamp_deduplicate_payloads_and_compare_known_meas
         .unwrap();
     assert!(stats["summary"]["source_code"].is_null());
     assert!(stats["projects"][0]["change"].is_null());
-    assert_eq!(count(&db, "fact_samples"), 4);
+    assert_eq!(count(&db, "fact_samples"), 3);
     svc.remove_project("demo").unwrap();
     svc.restore_project("demo").unwrap();
-    assert_eq!(count(&db, "fact_samples"), 4);
+    assert_eq!(count(&db, "fact_samples"), 3);
     std::fs::write(repo.join("oversized.py"), vec![b'x'; 4_000_001]).unwrap();
     svc.refresh_facts(None, false).unwrap();
     let incomplete = svc.facts("demo").unwrap();
     assert_eq!(incomplete["code"]["partial"], true);
     assert_eq!(incomplete["code"]["unread_files"], 1);
     assert!(svc.statistics(Some("demo"), None, None).unwrap()["summary"]["source_code"].is_null());
+}
+
+#[test]
+fn identical_refreshes_add_no_sample_but_a_new_day_a_change_or_a_relink_does() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    assert_eq!(count(&db, "fact_samples"), 1);
+    clock.advance(Duration::minutes(20));
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(count(&db, "fact_samples"), 1);
+    let stored = svc.store().facts("demo").unwrap().unwrap();
+    assert_eq!(stored.collected_at, "2026-09-30T08:20:00Z");
+    // The first observation of each UTC day is kept, so durations stay measurable.
+    clock.advance(Duration::hours(16));
+    let save = |data: &Value| {
+        svc.store()
+            .save_facts("demo", &svc.now(), &stored.fingerprint, data)
+            .unwrap()
+    };
+    save(&stored.data);
+    assert_eq!(count(&db, "fact_samples"), 2);
+    save(&stored.data);
+    assert_eq!(count(&db, "fact_samples"), 2);
+    let mut ci = stored.data.clone();
+    ci["ci"] = json!({"state":"red"});
+    save(&ci);
+    assert_eq!(count(&db, "fact_samples"), 3);
+    std::fs::write(repo.join("new.py"), "print('new')\n").unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(count(&db, "fact_samples"), 4);
+    let changed = svc.store().facts("demo").unwrap().unwrap();
+    db.execute(
+        "UPDATE projects SET identity_revision=identity_revision+1 WHERE id='demo'",
+        [],
+    )
+    .unwrap();
+    svc.store()
+        .save_facts("demo", &svc.now(), &changed.fingerprint, &changed.data)
+        .unwrap();
+    assert_eq!(count(&db, "fact_samples"), 5);
+    let history = svc.facts_history("demo").unwrap();
+    assert_eq!(history["samples"].as_array().unwrap().len(), 5);
+    assert!(history["note"]
+        .as_str()
+        .unwrap()
+        .contains("first of its UTC day"));
+}
+
+#[test]
+fn statistics_skip_repeated_observations_without_changing_their_results() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    for (step, file) in [
+        (Duration::hours(2), Some("print(1)\n")),
+        (Duration::days(1), None),
+        (Duration::hours(1), Some("print(1)\nprint(2)\n")),
+        (Duration::days(1), None),
+    ] {
+        clock.advance(step);
+        if let Some(text) = file {
+            std::fs::write(repo.join("a.py"), text).unwrap();
+        }
+        svc.refresh_facts(None, false).unwrap();
+    }
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    assert_eq!(count(&db, "fact_samples"), 5);
+    let read = || {
+        (
+            svc.statistics(Some("demo"), Some("2026-09-30"), Some("2026-10-02"))
+                .unwrap(),
+            svc.statistics(None, Some("2026-09-30"), None).unwrap(),
+        )
+    };
+    let before = read();
+    let points = before.0["projects"][0]["samples"].as_array().unwrap();
+    assert_eq!(points.len(), 5);
+    assert_eq!(before.0["projects"][0]["change"]["code"], 2);
+    // Earlier versions saved every refresh: repeat all but the latest observation a minute later.
+    db.execute_batch("INSERT INTO fact_samples(project_id,at,fingerprint,path,identity_revision,origin,data,code_payload,activity_payload)
+        SELECT project_id,strftime('%Y-%m-%dT%H:%M:%SZ',at,'+1 minute'),fingerprint,path,identity_revision,origin,data,code_payload,activity_payload
+        FROM fact_samples WHERE id<(SELECT max(id) FROM fact_samples)").unwrap();
+    assert_eq!(count(&db, "fact_samples"), 9);
+    assert_eq!(read(), before);
+}
+
+#[test]
+fn databases_from_the_first_history_version_stop_recording_repeats_and_keep_saved_samples() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    drop(svc);
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute_batch("DELETE FROM history_migrations WHERE name='changed-samples-v1'; DROP TRIGGER samples_update;
+        CREATE TRIGGER samples_update AFTER UPDATE ON facts BEGIN
+        INSERT INTO fact_samples(project_id,at,fingerprint,path,identity_revision,origin,data,code_payload,activity_payload)
+        SELECT NEW.project_id,NEW.collected_at,NEW.fingerprint,p.path,p.identity_revision,'observed',json_remove(NEW.data,'$.code','$.activity'),
+        (SELECT id FROM fact_payloads WHERE data=json_extract(NEW.data,'$.code')),
+        (SELECT id FROM fact_payloads WHERE data=json_extract(NEW.data,'$.activity'))
+        FROM (SELECT 1) LEFT JOIN projects p ON p.id=NEW.project_id; END;
+        UPDATE facts SET collected_at='2026-09-30T08:10:00Z';").unwrap();
+    assert_eq!(count(&db, "fact_samples"), 2);
+    let (svc, clock) = service(tmp.path());
+    assert_eq!(count(&db, "fact_samples"), 2);
+    clock.advance(Duration::minutes(20));
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(count(&db, "fact_samples"), 2);
+    let applied: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM history_migrations WHERE name='changed-samples-v1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied, 1);
+    let stats = svc.statistics(Some("demo"), None, None).unwrap();
+    assert_eq!(
+        stats["projects"][0]["current"]["at"],
+        "2026-09-30T08:10:00Z"
+    );
 }
 
 #[test]
@@ -242,7 +371,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
     let events = count(&db, "content_history");
     drop(svc);
-    let (svc, _) = service(tmp.path());
+    let (svc, clock) = service(tmp.path());
     assert_eq!(count(&db, "content_history"), events);
     assert_eq!(count(&db, "fact_samples"), 1);
     db.execute_batch("CREATE TRIGGER test_abort BEFORE INSERT ON content_history BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
@@ -260,6 +389,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     assert_eq!(svc.store().facts("demo").unwrap().unwrap().data, before);
     db.execute_batch("DROP TRIGGER test_sample_abort").unwrap();
     svc.refresh_facts(None, false).unwrap();
+    clock.advance(Duration::days(1));
     svc.refresh_facts(None, false).unwrap();
     let statistics = svc.statistics(Some("demo"), None, None).unwrap();
     assert_eq!(statistics["projects"][0]["comparable"], true);
