@@ -165,12 +165,15 @@ This requests review; it does not confirm completion on the user's behalf. For a
 Context includes reactions and their original item text. Keep an item's `id` only when retaining that same item in its original document. Omit `id` for a new item.
 
 - `down`: omit that idea, including rewordings. Repeated rejections of a kind of suggestion apply across projects; propose that kind only with evidence that addresses the user's stated objection.
-- `later`: wait until `snoozed_until`; without that date, wait 14 days from the reaction's timestamp.
+- `later`: wait until `snoozed_until`; without that date, wait 14 days from the reaction's timestamp. Keep a postponed question unchanged; do not reword or ask it again before then.
 - `up`: keep the direction while useful; remove completed or disproved suggestions.
 - `answered` or question `done`: incorporate the answer where it belongs and remove the question. A focus item marked `done` stays finished unless evidence shows remaining work.
 - An assigned task is unfinished. `review` is an agent's reported result awaiting the user; only task `done` is confirmed. Do not propose assigning the same work again.
 - A recorded decision or warning acknowledgement is deliberate. Respect its reason; report material worsening without repeating the original unwanted proposal.
 - `parked`: describe calmly without pressing to revive. `done`: look for deterioration. Archived projects are excluded from daily runs. Measure progress and the next step against the user's goal and due date.
+- Reactions come only from the user. When evidence settles a question, remove the question; never record feedback, status or goals from your own findings.
+
+Context states how long each item has been shown (`item_persistence`, `long_standing_items`, `brief_persistence`) and how long measured risks have lasted (`risk_streaks`). Keep a retained item's wording unless its evidence changed: the user's unread list then shows only real news. An item shown 7 days or longer without a reaction changes form: a question gets options with a `recommended` answer, a suggestion or focus item becomes a smaller first step, or you remove it when it no longer earns the user's attention. For a lasting risk, state its duration and growth from `risk_streaks` instead of restating it.
 
 ## Limits and command help
 

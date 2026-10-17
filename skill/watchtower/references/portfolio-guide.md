@@ -10,12 +10,16 @@ Run `watchtower portfolio context` and follow every output page before writing. 
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
 - Respect task assignments, reported results awaiting review, project status and acknowledged warnings. Do not suggest assigning the same work twice or reversing a deliberate choice.
+- `brief_persistence.items` gives each previous item's first appearance and number of briefs. `dropped_focus` lists focus items that left recent briefs without the user marking them done: when their work remains unfinished, name them in `attention_note` so the user can tell set aside from done.
+- `owner_response` shows whether the user reacts. With no reaction in 14 days, lead with the single decision that unblocks the most instead of adding questions.
 
 ## Synthesize after the project reviews
 
 Do this in every daily run, even when no report is due. Bring together the project-review outcomes and observations collected along the way with all summaries in this context. Start from what the projects help the user accomplish, not just their current tasks or existing suggestions. An unchanged project can provide the missing capability for another project's need.
 
 Look for repeated friction, complementary capabilities, useful transfers of a proven approach, and work that could disappear through simplification. Also consider unmet needs that none of the current projects serves well. Derive concrete possibilities from these connections; a list of shared risks or today's focus is not a substitute for ideas. Check the strongest candidates against actual capabilities, current proposals, user decisions and assigned work. Read more source only where it changes that judgment.
+
+Repository hygiene (commit, push, remove worktrees, delete build output, repair CI) is never a synergy or app idea; it enters focus as one concrete step when its risk streak is growing or blocks a goal.
 
 Choose where each useful idea belongs: improve one project through its `suggestions`; connect existing work through `synergies`; propose `new_apps` when a distinct need warrants a separate app. Do not force every idea into existing projects or invent an app to fill the list. Evidence supports the need and available building blocks; the solution can be new. Explain the benefit and sources in the destination field, considering `cross_project_hints` too.
 

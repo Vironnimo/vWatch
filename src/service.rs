@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde_json::{json, Map, Value};
 
+mod signals;
 mod statistics;
 mod undo;
 use undo::with_receipt;
@@ -28,6 +29,16 @@ fn document_request(value: &Value) -> String {
 }
 
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
+/// Items shown at least this many days are listed for the brief as long-standing.
+const LONG_STANDING_DAYS: i64 = 7;
+
+/// A retained proposal as agents read it: without the obsolete effort estimate.
+fn without_effort(mut proposal: Value) -> Value {
+    if let Some(item) = proposal["item"].as_object_mut() {
+        item.remove("effort");
+    }
+    proposal
+}
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
 pub const RATINGS: &[&str] = &["up", "later", "down"];
 pub const PREFS: &[&str] = &["style", "hidden_modules"];
@@ -127,6 +138,8 @@ pub struct Watchtower {
     store: Store,
     clock: Clock,
     collect: Collector,
+    /// Item appearances read so far, extended by later saves.
+    ages: Mutex<signals::AgeIndex>,
 }
 
 /// Semantic identities keep regenerated item ids and advancing age counters out
@@ -375,7 +388,7 @@ fn find_repos(dir: &Path, depth: usize) -> Vec<PathBuf> {
 /// The reactions the owner can give to an item of this kind.
 fn reactions_for(kind: &str) -> &'static [&'static str] {
     match kind {
-        "question" => &["answered", "done"],
+        "question" => &["answered", "done", "later"],
         "focus" => &["done"],
         _ => RATINGS,
     }
@@ -828,6 +841,8 @@ fn owner_basis(p: &Project, reactions: &[Feedback], warning_acks: &Value, tasks:
     let questions: Map<String, Value> = reactions
         .iter()
         .filter(|f| f.project_id.as_deref() == Some(&p.id) && kind_of(f) == "question")
+        // postponing a question is not an answer the card must react to
+        .filter(|f| f.value != "later")
         .map(|f| (f.item_id.clone(), json!({"value": f.value, "note": f.note})))
         .collect();
     let mut project = pick(
@@ -913,6 +928,7 @@ impl Watchtower {
             store,
             clock,
             collect,
+            ages: Mutex::default(),
         }
     }
 
@@ -1658,13 +1674,18 @@ impl Watchtower {
             .filter(|f| f.project_id.as_deref() == Some(id) || RATINGS.contains(&f.value.as_str()))
             .map(feedback_context)
             .collect();
-        let mut facts_context = stored.data;
+        let mut facts_context = stored.data.clone();
         if let Some(object) = facts_context.as_object_mut() {
             object.remove("activity");
         }
         if let Some(code) = facts_context["code"].as_object_mut() {
             code.remove("largest_files");
         }
+        let item_persistence = match &card {
+            Some(c) => self.card_persistence(id, &c.data, &reactions)?,
+            None => Vec::new(),
+        };
+        let risk_streaks = self.project_streaks(id, Some(&stored))?;
         let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() { " Use --merge only when sending changed top-level fields; send each changed list in full." } else { " Send a complete card." });
         Ok(json!({
             "today": self.today().to_string(),
@@ -1673,7 +1694,9 @@ impl Watchtower {
             "new_fields": card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)),
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": Kind::Card.current_view(&c.data)})),
             "since_previous_card": since,
-            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["scope"]==id && p["in_report"]==false).collect::<Vec<_>>(),
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["scope"]==id && p["in_report"]==false).map(without_effort).collect::<Vec<_>>(),
+            "risk_streaks": risk_streaks,
+            "item_persistence": item_persistence,
             "feedback": feedback,
             "feedback_summary": feedback_summary(&reactions),
             "tasks": self.tasks(Some(id))?["tasks"],
@@ -1743,6 +1766,22 @@ impl Watchtower {
                 .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
         })?;
         self.validate_item_ids(Kind::Card, Some(id), &clean)?;
+        let unmatched: Vec<String> = clean["waiting_on_you"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, q)| {
+                q["recommended"].as_u64().is_some_and(|n| {
+                    n as usize > q["options"].as_array().map_or(0, Vec::len)
+                })
+            })
+            .map(|(i, _)| format!("waiting_on_you[{i}].recommended"))
+            .collect();
+        if !unmatched.is_empty() {
+            return Err(WatchtowerError::new("invalid_card", format!("The card was not saved: {} names an option the question does not have.", unmatched.join(", ")))
+                .hint("Set recommended to the 1-based number of one of the question's options, or null when no option is recommended."));
+        }
         let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
         // fields the previous card lacked and this save did not send end up empty; say so
         let lacking = previous
@@ -2025,6 +2064,7 @@ impl Watchtower {
 
     fn portfolio_context_data(&self) -> Result<Value> {
         let mut rows = Vec::new();
+        let mut open_questions = Vec::new();
         let previous = self.store.latest_portfolio()?;
         let reactions = self.store.feedback()?;
         let (week, from, to) = self.review_week();
@@ -2057,6 +2097,7 @@ impl Watchtower {
                 "recent_changes": dated_between(&card.data["recent_changes"], &week_from, &week_to),
                 "milestones": dated_between(&card.data["milestones"], &week_from, &week_to),
             }));
+            let card_data = card.as_ref().map(|card| card.data.clone());
             let card_json = card.map(|card| {
                 let c = &Kind::Card.current_view(&card.data);
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
@@ -2064,7 +2105,7 @@ impl Watchtower {
                     "version": card.version, "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
                     "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
-                    "waiting_on_you": picked("waiting_on_you", &["id", "title", "source", "options"]),
+                    "waiting_on_you": picked("waiting_on_you", &["id", "title", "source", "options", "recommended"]),
                     "open_ends": picked("open_ends", &["kind", "title", "detail", "source", "age_days"]),
                     "health_notes": c["health_notes"],
                     "decisions": c["decisions"],
@@ -2074,8 +2115,43 @@ impl Watchtower {
                     "milestones": dated_since(&c["milestones"], &week_from),
                 })
             });
+            let risk_streaks = self.project_streaks(&p.id, stored.as_ref())?;
+            let persistence = match &card_data {
+                Some(data) => self.card_persistence(&p.id, data, &reactions)?,
+                None => Vec::new(),
+            };
+            let replied = |row: &&Value| {
+                row["owner_reaction"]["value"]
+                    .as_str()
+                    .is_some_and(|v| v == "answered" || v == "done")
+            };
+            open_questions.extend(
+                persistence
+                    .iter()
+                    .filter(|row| row["kind"] == "question")
+                    .filter(|row| !replied(row))
+                    .cloned(),
+            );
+            // The card above already shows each item's text; an ID identifies it.
+            let long_standing: Vec<Value> = persistence
+                .into_iter()
+                .filter(|row| row["days"].as_i64().unwrap_or(0) >= LONG_STANDING_DAYS)
+                .map(|mut row| {
+                    if let Some(fields) = row.as_object_mut() {
+                        fields.remove("first_seen");
+                        if fields.get("id").is_some_and(Value::is_string) {
+                            fields.remove("title");
+                        } else {
+                            fields.remove("id");
+                        }
+                    }
+                    row
+                })
+                .collect();
             rows.push(json!({
                 "id": p.id, "name": p.name, "status": p.status, "status_note": p.status_note, "goal": p.goal, "goal_due": p.goal_due,
+                "risk_streaks": risk_streaks,
+                "long_standing_items": long_standing,
                 "warning_acknowledgements": self.warning_acknowledgements(&p.id)?,
                 "facts": {
                     "ok": f["ok"], "error": f["error"], "collected_at": collected_at,
@@ -2100,7 +2176,9 @@ impl Watchtower {
             "today": self.today().to_string(),
             "review_week": {"week": week, "from": from.to_string(), "to": to.to_string(), "due": !reviewed},
             "owner_ideas": self.store.ideas()?.iter().map(|i| extend(idea_json(i), json!({"checked": !unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
-            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["in_report"]==false && (p["scope"]=="@portfolio" || rows.iter().any(|r|r["id"]==p["scope"]))).collect::<Vec<_>>(),
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["in_report"]==false && (p["scope"]=="@portfolio" || rows.iter().any(|r|r["id"]==p["scope"]))).map(without_effort).collect::<Vec<_>>(),
+            "brief_persistence": self.brief_persistence(previous.as_ref(), &reactions)?,
+            "owner_response": self.owner_response(&reactions, &open_questions),
             "projects": rows,
             "previous_portfolio": previous.map(|p| json!({"version": p.version, "created_at": p.created_at, "portfolio": Kind::Portfolio.current_view(&p.data)})),
             "owner_last_opened": self.store.pref("last_visit")?,
@@ -3510,6 +3588,11 @@ impl Watchtower {
                 .map(|(i, (at, data))| json!({"version": i + 1, "at": at, "headline": data["headline"], "phase": data["phase"]}))
                 .rev()
                 .collect();
+            let risk_streaks = self.project_streaks(&p.id, stored.as_ref())?;
+            let item_persistence = match &card {
+                Some(c) => self.card_persistence(&p.id, &c.data, &reactions)?,
+                None => Vec::new(),
+            };
             projects.push(extend(
                 pick(
                     &project_json(&p),
@@ -3532,6 +3615,8 @@ impl Watchtower {
                     "suggestion_first_seen": suggestion_first_seen,
                     "card_outdated": outdated,
                     "warnings": self.project_warnings(&p.id)?,
+                    "risk_streaks": risk_streaks,
+                    "item_persistence": item_persistence,
                     "history": history,
                 }),
             ));
@@ -3628,6 +3713,7 @@ impl Watchtower {
             task["source_snapshot"] = snapshot.unwrap_or(Value::Null);
             task["source_first_seen"] = date;
         }
+        let brief_persistence = self.brief_persistence(portfolio.as_ref(), &reactions)?;
         let unchecked = self.unchecked_ideas(portfolio.as_ref().map(|p| &p.data))?;
         let feedback: Map<String, Value> = reactions
             .into_iter()
@@ -3652,6 +3738,7 @@ impl Watchtower {
             "portfolio_updated_at": portfolio.as_ref().map(|p| &p.created_at),
             "new_app_first_seen": new_app_first_seen,
             "synergy_first_seen": synergy_first_seen,
+            "brief_persistence": brief_persistence,
             "ideas": self.store.ideas()?.iter().map(|i|extend(idea_json(i),json!({"checked":!unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
             "proposals": self.store.proposals()?,
             "tasks": tasks,

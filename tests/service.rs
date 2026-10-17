@@ -1629,3 +1629,89 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
             .starts_with("q-")
     );
 }
+
+#[test]
+fn contexts_report_how_long_risks_and_items_have_lasted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    std::fs::write(repo.join("draft.txt"), "one\n").unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    let question = json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}, {"answer": "JSON"}], "recommended": 2}]);
+    svc.put_card("demo", card_with(json!({"waiting_on_you": question})), false, false)
+        .unwrap();
+    let id = svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["recommended"], 2);
+
+    clock.advance(Duration::days(3));
+    std::fs::write(repo.join("draft.txt"), "one\ntwo\nthree\n").unwrap();
+    std::fs::write(repo.join("more.txt"), "four\n").unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    let mut kept = card_with(json!({"waiting_on_you": [{"id": id, "title": "Welches Format?"}]}));
+    kept["open_ends"] = json!([{"kind": "uncommitted", "title": "Entwurf nicht committet"}]);
+    svc.put_card("demo", kept, false, false).unwrap();
+
+    let context = svc.context("demo").unwrap();
+    let streak = &context["risk_streaks"][0];
+    assert_eq!(streak["kind"], "uncommitted");
+    assert_eq!(streak["days"], 3);
+    // The clean measurement at registration bounds the run.
+    assert_eq!(streak["at_least"], false);
+    assert_eq!(streak["then"]["files"], 1);
+    assert_eq!(streak["now"]["files"], 2);
+    assert_eq!(streak["trend"], "growing");
+    let items = context["item_persistence"].as_array().unwrap();
+    let asked = items.iter().find(|i| i["id"] == id.as_str()).unwrap();
+    assert_eq!((asked["kind"].as_str(), asked["days"].as_i64(), asked["versions"].as_i64()), (Some("question"), Some(3), Some(2)));
+    let open_end = items.iter().find(|i| i["kind"] == "open_end").unwrap();
+    assert_eq!((open_end["days"].as_i64(), open_end["versions"].as_i64()), (Some(0), Some(1)));
+
+    // Committing ends the run; the brief sees long-standing items and the owner's silence.
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "draft"]);
+    clock.advance(Duration::days(5));
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(svc.context("demo").unwrap()["risk_streaks"], json!([]));
+    let brief = svc.portfolio_context().unwrap();
+    let standing = &brief["projects"][0]["long_standing_items"];
+    assert!(standing.as_array().unwrap().iter().any(|i| i["id"] == id.as_str() && i["days"] == 8));
+    assert_eq!(brief["owner_response"]["open_questions"], 1);
+    assert_eq!(brief["owner_response"]["oldest_open_question_days"], 8);
+    assert_eq!(brief["owner_response"]["reactions_last_14_days"], 0);
+}
+
+#[test]
+fn questions_can_wait_and_cards_keep_decisions_short() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    let wrong = json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}], "recommended": 2}]);
+    let error = svc
+        .put_card("demo", card_with(json!({"waiting_on_you": wrong})), false, false)
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_card");
+    assert!(error.message.contains("waiting_on_you[0].recommended"), "{}", error.message);
+    let four = json!((0..4).map(|i| json!({"title": format!("Frage {i}?")})).collect::<Vec<_>>());
+    let error = svc
+        .put_card("demo", card_with(json!({"waiting_on_you": four})), false, false)
+        .unwrap_err();
+    assert!(error.message.contains("limit is 3"), "{}", error.message);
+
+    svc.put_card("demo", card_with(json!({"waiting_on_you": [{"title": "Welches Format?"}]})), false, false)
+        .unwrap();
+    let id = svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    svc.set_feedback_until(&id, Some("later"), None, Some("2026-10-07"))
+        .unwrap();
+    let state = svc.state(false).unwrap();
+    assert_eq!(state["feedback"][&id]["snoozed_until"], "2026-10-07");
+    // Postponing is not an answer, so the card does not become due for it.
+    assert_eq!(svc.due(30, false).unwrap()["projects"], json!([]));
+}

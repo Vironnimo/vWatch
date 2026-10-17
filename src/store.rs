@@ -158,6 +158,16 @@ pub struct Feedback {
     pub snoozed_until: Option<String>,
 }
 
+/// One measurement of the facts that make up a persisting risk; `None` is unknown.
+pub struct RiskObservation {
+    pub at: String,
+    pub ok: bool,
+    pub dirty_files: Option<i64>,
+    pub lines_added: Option<i64>,
+    pub ahead: Option<i64>,
+    pub ci: Option<String>,
+}
+
 pub struct Store {
     db: Mutex<Connection>,
 }
@@ -490,6 +500,64 @@ impl Store {
                 db.prepare("SELECT created_at, data FROM cards WHERE project_id = ?1 ORDER BY id")?;
             let rows = stmt.query_map([id], |r| Ok((r.get::<_, String>(0)?, json(r.get(1)?))))?;
             rows.collect()
+        })
+    }
+
+    /// The owner-facing lists of each document saved after row `after`, oldest first:
+    /// (row id, saved at, one JSON value per named list). Only the named lists are parsed.
+    pub fn document_lists_after(
+        &self,
+        project: Option<&str>,
+        after: i64,
+        lists: &[&str],
+    ) -> Result<Vec<(i64, String, Vec<Value>)>> {
+        let columns: String = lists
+            .iter()
+            .map(|l| format!(",json_extract(data,'$.{l}')"))
+            .collect();
+        let sql = match project {
+            Some(_) => format!("SELECT id,created_at{columns} FROM cards WHERE project_id=?1 AND id>?2 ORDER BY id"),
+            None => format!("SELECT id,created_at{columns} FROM portfolio WHERE ?1 IS NULL AND id>?2 ORDER BY id"),
+        };
+        self.with(|db| {
+            db.prepare(&sql)?
+                .query_map(params![project, after], |r| {
+                    let mut parsed = Vec::new();
+                    for i in 0..lists.len() {
+                        let text: Option<String> = r.get(i + 2)?;
+                        parsed.push(text.map(json).unwrap_or(Value::Null));
+                    }
+                    Ok((r.get(0)?, r.get(1)?, parsed))
+                })?
+                .collect()
+        })
+    }
+
+    /// Risk-relevant measurements of a project, newest first: every saved facts
+    /// sample plus the facts basis each card was written against.
+    pub fn risk_observations(&self, project: &str) -> Result<Vec<RiskObservation>> {
+        self.with(|db| {
+            db.prepare("SELECT at,ok,files,added,ahead,ci FROM (
+                    SELECT created_at AS at,json_extract(basis,'$.readable') AS ok,
+                        json_extract(basis,'$.uncommitted[0]') AS files,json_extract(basis,'$.uncommitted[1]') AS added,
+                        json_extract(basis,'$.unpushed') AS ahead,ci,id AS seq,0 AS src
+                    FROM cards WHERE project_id=?1 AND basis IS NOT NULL
+                    UNION ALL
+                    SELECT at,json_extract(data,'$.ok'),json_extract(data,'$.dirty.files'),json_extract(data,'$.dirty.lines_added'),
+                        json_extract(data,'$.ahead'),json_extract(data,'$.ci.state'),id,1
+                    FROM fact_samples WHERE project_id=?1)
+                ORDER BY at DESC,src DESC,seq DESC")?
+                .query_map([project], |r| {
+                    Ok(RiskObservation {
+                        at: r.get(0)?,
+                        ok: r.get::<_, Option<bool>>(1)?.unwrap_or(false),
+                        dirty_files: r.get(2)?,
+                        lines_added: r.get(3)?,
+                        ahead: r.get(4)?,
+                        ci: r.get(5)?,
+                    })
+                })?
+                .collect()
         })
     }
 

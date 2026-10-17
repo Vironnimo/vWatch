@@ -145,6 +145,8 @@ const QUESTION: &[Field] = &[
     f("title", words(12), Required),
     f("source", TEXT, Text("")),
     f("options", Ty::List(&Ty::Obj(OPTION), Some(3)), Empty),
+    // The 1-based number of the option the agent recommends, when one is clearly better.
+    f("recommended", Ty::Nullable(&Ty::Int { min: 1, max: 3 }), Null),
 ];
 const VISION: &[Field] = &[
     f("statement", Ty::Nullable(&SENTENCE), Null),
@@ -215,12 +217,12 @@ const CARD: &[Field] = &[
     f("milestones", Ty::List(&Ty::Obj(MILESTONE), None), Empty),
     f("features", Ty::List(&words(8), None), Empty),
     f("open_ends", Ty::List(&Ty::Obj(OPEN_END), None), Empty),
-    f("waiting_on_you", Ty::List(&Ty::Obj(QUESTION), None), Empty),
+    f("waiting_on_you", Ty::List(&Ty::Obj(QUESTION), Some(3)), Empty),
     f("vision", Ty::Obj(VISION), Filled),
     f("reentry", Ty::Obj(REENTRY), Required),
     f("health_notes", Ty::List(&SENTENCE, None), Empty),
     f("decisions", Ty::List(&sentence(20), None), Empty),
-    f("suggestions", Ty::List(&Ty::Obj(SUGGESTION), None), Empty),
+    f("suggestions", Ty::List(&Ty::Obj(SUGGESTION), Some(4)), Empty),
     f("cross_project_hints", Ty::List(&SENTENCE, None), Empty),
     f("handbook", Ty::Obj(HANDBOOK), Filled),
 ];

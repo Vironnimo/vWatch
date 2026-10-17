@@ -337,26 +337,23 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
     svc.add_project(repo.to_str().unwrap(), Some("demo"), Some("Demo"))
         .unwrap();
     svc.put_card("demo", common::card(), false, false).unwrap();
-    let token = svc.context("demo").unwrap()["context_token"]
+    svc.put_portfolio(serde_json::json!({"greeting": "Moin."}), false, false)
+        .unwrap();
+    let token = svc.portfolio_context().unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();
-    let mut card = common::card();
-    card["features"] = serde_json::json!((0..45)
-        .map(|i| format!("Feature{i}{}", "x".repeat(250)))
-        .collect::<Vec<_>>());
     // Item receipts remain complete even when their IDs and titles need pages.
-    card["suggestions"] = serde_json::json!((0..100)
-        .map(|i| serde_json::json!({"type":"feature", "title":format!("Suggestion{i}{}", "x".repeat(100)), "why":"Prüfen"}))
-        .collect::<Vec<_>>());
-    let file = temp.path().join("card.json");
-    std::fs::write(&file, serde_json::to_vec(&card).unwrap()).unwrap();
+    let brief = serde_json::json!({"greeting": "Moin.", "patterns": (0..100)
+        .map(|i| serde_json::json!({"title":format!("Pattern{i}{}", "x".repeat(100)), "why":"Prüfen"}))
+        .collect::<Vec<_>>()});
+    let file = temp.path().join("brief.json");
+    std::fs::write(&file, serde_json::to_vec(&brief).unwrap()).unwrap();
     let (status, mut page) = run(
         &home,
         &[
-            "card",
+            "portfolio",
             "put",
-            "demo",
             "--file",
             file.to_str().unwrap(),
             "--context-token",
@@ -364,7 +361,7 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
         ],
     );
     assert_eq!(status, 0, "{page}");
-    assert!(page.contains("Card saved as version 2"));
+    assert!(page.contains("saved as version 2"), "{page}");
     assert!(page.contains("Context token:"));
     assert!(
         page.lines()
@@ -385,10 +382,9 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
         assert!(pages < 20);
     }
     assert!(pages > 0);
-    assert_eq!(svc.card("demo").unwrap()["version"], 2);
     assert_eq!(
-        svc.card("demo").unwrap()["card"]["features"],
-        card["features"]
+        svc.portfolio().unwrap()["portfolio"]["patterns"].as_array().unwrap().len(),
+        100
     );
 }
 
