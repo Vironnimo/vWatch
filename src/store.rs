@@ -137,6 +137,22 @@ pub struct Idea {
     pub revision: i64,
 }
 
+/// One saved card or brief version as stored; `project_id` is empty for briefs.
+pub struct DocumentRow {
+    pub id: i64,
+    pub project_id: Option<String>,
+    pub created_at: String,
+    pub data: String,
+}
+
+pub struct DocumentRows {
+    pub cards: Vec<DocumentRow>,
+    pub briefs: Vec<DocumentRow>,
+    /// The newest card row of every project.
+    pub latest_cards: Vec<i64>,
+    pub latest_brief: Option<i64>,
+}
+
 pub struct StoredPortfolio {
     pub version: i64,
     pub created_at: String,
@@ -561,6 +577,71 @@ impl Store {
         })
     }
 
+    /// Saved card and brief versions an incremental reader has not seen yet: rows after
+    /// `cards_after`/`briefs_after`, the rows it asks for again, and which rows are still
+    /// the newest of their project or of the briefs. Only those can still be rewritten
+    /// in place; older versions never change. One read transaction keeps it consistent.
+    pub fn document_rows(
+        &self,
+        cards_after: i64,
+        cards_again: &[i64],
+        briefs_after: i64,
+        briefs_again: &[i64],
+    ) -> Result<DocumentRows> {
+        self.with(|db| {
+            let tx =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Deferred)?;
+            let row = |r: &Row| {
+                Ok(DocumentRow {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    created_at: r.get(2)?,
+                    data: r.get(3)?,
+                })
+            };
+            let rows = |table: &str, scope: &str, after: i64, again: &[i64]| {
+                let columns = format!("SELECT id, {scope}, created_at, data FROM {table}");
+                let mut found = tx
+                    .prepare(&format!("{columns} WHERE id > ?1 ORDER BY id"))?
+                    .query_map([after], row)?
+                    .collect::<Result<Vec<_>>>()?;
+                let mut by_id = tx.prepare(&format!("{columns} WHERE id = ?1"))?;
+                for id in again {
+                    found.extend(by_id.query_row([id], row).optional()?);
+                }
+                Ok::<_, rusqlite::Error>(found)
+            };
+            let cards = rows("cards", "project_id", cards_after, cards_again)?;
+            let briefs = rows("portfolio", "NULL", briefs_after, briefs_again)?;
+            let latest_cards = tx
+                .prepare("SELECT max(id) FROM cards GROUP BY project_id")?
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<Vec<i64>>>()?;
+            let latest_brief = tx.query_row("SELECT max(id) FROM portfolio", [], |r| r.get(0))?;
+            tx.commit()?;
+            Ok(DocumentRows {
+                cards,
+                briefs,
+                latest_cards,
+                latest_brief,
+            })
+        })
+    }
+
+    /// One saved version's content by row id, from `cards` or from the briefs.
+    pub fn document_data(&self, brief: bool, id: i64) -> Result<Option<Value>> {
+        let table = if brief { "portfolio" } else { "cards" };
+        self.with(|db| {
+            db.query_row(
+                &format!("SELECT data FROM {table} WHERE id = ?1"),
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map(|data| data.map(json))
+        })
+    }
+
     pub fn card_version(&self, id: &str, version: i64) -> Result<Option<StoredCard>> {
         if version < 1 {
             return Ok(None);
@@ -690,9 +771,20 @@ impl Store {
     }
 
     pub fn latest_portfolio(&self) -> Result<Option<StoredPortfolio>> {
+        self.newest_portfolio("basis")
+    }
+
+    /// The newest brief as shown, leaving its large basis unread (`None`).
+    pub fn latest_portfolio_content(&self) -> Result<Option<StoredPortfolio>> {
+        self.newest_portfolio("NULL")
+    }
+
+    fn newest_portfolio(&self, basis: &str) -> Result<Option<StoredPortfolio>> {
         self.with(|db| {
             db.query_row(
-                "SELECT id, created_at, data, basis FROM portfolio ORDER BY id DESC LIMIT 1",
+                &format!(
+                    "SELECT id, created_at, data, {basis} FROM portfolio ORDER BY id DESC LIMIT 1"
+                ),
                 [],
                 |r| {
                     Ok(StoredPortfolio {

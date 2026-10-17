@@ -140,6 +140,7 @@ pub struct Watchtower {
     collect: Collector,
     /// Item appearances read so far, extended by later saves.
     ages: Mutex<signals::AgeIndex>,
+    documents: Mutex<DocumentIndex>,
 }
 
 /// Semantic identities keep regenerated item ids and advancing age counters out
@@ -201,28 +202,178 @@ fn document_item(kind: Kind, doc: &Value, item_id: &str) -> Option<Value> {
     None
 }
 
-/// Historical identities retain both their first appearance and last authored
-/// snapshot for older tasks that predate saved source snapshots.
-fn remember_items(
-    history: &mut Map<String, Value>,
-    kind: Kind,
-    doc: &Value,
-    project: Option<&str>,
-    at: &str,
-) {
-    for (list, _, _) in kind.items() {
-        for item in doc[*list].as_array().into_iter().flatten() {
-            let Some(id) = item["id"].as_str() else {
-                continue;
-            };
-            let first_seen = history
-                .get(id)
-                .map(|entry| entry["first_seen"].clone())
-                .unwrap_or_else(|| json!(at));
-            history.insert(id.to_owned(), json!({
-                "first_seen": first_seen, "item": document_item(kind, doc, id), "project_id": project,
-            }));
+/// What the window needs from one saved card or brief version: its headline and
+/// phase, and the ids of its rated items as (index in `Kind::items`, id).
+#[derive(Default, Debug, PartialEq)]
+struct Digest {
+    headline: Value,
+    phase: Value,
+    items: Vec<(usize, String)>,
+}
+
+/// The fields a digest reads from a saved document; everything else is skipped
+/// unparsed. A document of another shape falls back to a full parse.
+#[derive(serde::Deserialize)]
+struct DigestFields {
+    #[serde(default)]
+    headline: Value,
+    #[serde(default)]
+    phase: Value,
+    #[serde(default)]
+    suggestions: Option<Vec<Listed>>,
+    #[serde(default)]
+    waiting_on_you: Option<Vec<Listed>>,
+    #[serde(default)]
+    focus: Option<Vec<Listed>>,
+    #[serde(default)]
+    patterns: Option<Vec<Listed>>,
+    #[serde(default)]
+    synergies: Option<Vec<Listed>>,
+    #[serde(default)]
+    new_apps: Option<Vec<Listed>>,
+    #[serde(default)]
+    park_or_revive: Option<Vec<Listed>>,
+}
+
+#[derive(serde::Deserialize)]
+struct Listed {
+    #[serde(default)]
+    id: Value,
+}
+
+fn digest(kind: Kind, text: &str) -> Digest {
+    let fields = text
+        .trim_start()
+        .starts_with('{')
+        .then(|| serde_json::from_str::<DigestFields>(text).ok())
+        .flatten();
+    let Some(mut fields) = fields else {
+        return full_digest(kind, text);
+    };
+    let mut items = Vec::new();
+    for (list, (name, _, _)) in kind.items().iter().enumerate() {
+        let listed = match *name {
+            "suggestions" => fields.suggestions.take(),
+            "waiting_on_you" => fields.waiting_on_you.take(),
+            "focus" => fields.focus.take(),
+            "patterns" => fields.patterns.take(),
+            "synergies" => fields.synergies.take(),
+            "new_apps" => fields.new_apps.take(),
+            "park_or_revive" => fields.park_or_revive.take(),
+            _ => return full_digest(kind, text),
+        };
+        items.extend(
+            listed
+                .into_iter()
+                .flatten()
+                .filter_map(|item| match item.id {
+                    Value::String(id) => Some((list, id)),
+                    _ => None,
+                }),
+        );
+    }
+    Digest {
+        headline: fields.headline,
+        phase: fields.phase,
+        items,
+    }
+}
+
+fn full_digest(kind: Kind, text: &str) -> Digest {
+    let doc: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+    let items = kind
+        .items()
+        .iter()
+        .enumerate()
+        .flat_map(|(list, (name, _, _))| {
+            doc[*name]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item["id"].as_str())
+                .map(move |id| (list, id.to_owned()))
+        })
+        .collect();
+    Digest {
+        headline: doc["headline"].clone(),
+        phase: doc["phase"].clone(),
+        items,
+    }
+}
+
+struct IndexedVersion {
+    row: i64,
+    created_at: String,
+    digest: Digest,
+    /// The newest version of its project or of the briefs, which can still be
+    /// rewritten in place; it is read again until a newer version exists.
+    newest: bool,
+}
+
+/// Every saved card and brief version, digested once. Older versions never change,
+/// so the window's repeated reads only load new and still-newest versions.
+#[derive(Default)]
+struct DocumentIndex {
+    /// Card versions per project id, oldest first.
+    cards: std::collections::HashMap<String, Vec<IndexedVersion>>,
+    briefs: Vec<IndexedVersion>,
+    cards_after: i64,
+    briefs_after: i64,
+}
+
+impl DocumentIndex {
+    fn refresh(&mut self, store: &Store) -> Result<()> {
+        let newest = |v: &&IndexedVersion| v.newest;
+        let cards_again: Vec<i64> = self
+            .cards
+            .values()
+            .flatten()
+            .filter(newest)
+            .map(|v| v.row)
+            .collect();
+        let briefs_again: Vec<i64> = self.briefs.iter().filter(newest).map(|v| v.row).collect();
+        let rows = store.document_rows(
+            self.cards_after,
+            &cards_again,
+            self.briefs_after,
+            &briefs_again,
+        )?;
+        fn place(versions: &mut Vec<IndexedVersion>, version: IndexedVersion) {
+            match versions.binary_search_by_key(&version.row, |v| v.row) {
+                Ok(i) => versions[i] = version,
+                Err(i) => versions.insert(i, version),
+            }
         }
+        for row in rows.cards {
+            self.cards_after = self.cards_after.max(row.id);
+            let version = IndexedVersion {
+                row: row.id,
+                digest: digest(Kind::Card, &row.data),
+                created_at: row.created_at,
+                newest: rows.latest_cards.contains(&row.id),
+            };
+            place(
+                self.cards
+                    .entry(row.project_id.unwrap_or_default())
+                    .or_default(),
+                version,
+            );
+        }
+        for row in rows.briefs {
+            self.briefs_after = self.briefs_after.max(row.id);
+            let version = IndexedVersion {
+                row: row.id,
+                digest: digest(Kind::Portfolio, &row.data),
+                created_at: row.created_at,
+                newest: rows.latest_brief == Some(row.id),
+            };
+            place(&mut self.briefs, version);
+        }
+        Ok(())
+    }
+
+    fn cards(&self, project: &str) -> &[IndexedVersion] {
+        self.cards.get(project).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -688,6 +839,42 @@ pub(crate) fn fact_warnings(facts: &Value) -> Vec<Value> {
     warnings
 }
 
+/// The state of the project's assigned tasks that its card answers to.
+fn task_basis(tasks: &[Value], id: &str) -> Value {
+    Value::Array(
+        tasks
+            .iter()
+            .filter(|task| {
+                task["projects"]
+                    .as_array()
+                    .is_some_and(|projects| projects.iter().any(|p| p == id))
+            })
+            .map(|task| pick(task, &["id", "status", "revision"]))
+            .collect(),
+    )
+}
+
+/// Measured warnings with the owner's acknowledgements applied.
+fn acknowledged_warnings(facts: &Value, acknowledgements: &Value) -> Value {
+    let mut warnings = fact_warnings(facts);
+    for warning in &mut warnings {
+        let previous = acknowledgements
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|ack| ack["key"] == warning["key"]);
+        warning["acknowledged"] = json!(previous.is_some_and(|ack| warning_ack_applies(
+            warning["key"].as_str().unwrap_or(""),
+            &ack["basis"],
+            &warning["basis"]
+        )));
+        warning["note"] = previous
+            .map(|ack| ack["note"].clone())
+            .unwrap_or_else(|| json!(""));
+    }
+    json!(warnings)
+}
+
 fn warning_ack_applies(key: &str, before: &Value, now: &Value) -> bool {
     match key {
         "no_remote" => {
@@ -929,6 +1116,7 @@ impl Watchtower {
             clock,
             collect,
             ages: Mutex::default(),
+            documents: Mutex::default(),
         }
     }
 
@@ -2670,24 +2858,10 @@ impl Watchtower {
             .facts(id)?
             .map(|facts| facts.data)
             .unwrap_or(Value::Null);
-        let acknowledgements = self.store.warning_acknowledgements(id)?;
-        let mut warnings = fact_warnings(&facts);
-        for warning in &mut warnings {
-            let previous = acknowledgements
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|ack| ack["key"] == warning["key"]);
-            warning["acknowledged"] = json!(previous.is_some_and(|ack| warning_ack_applies(
-                warning["key"].as_str().unwrap_or(""),
-                &ack["basis"],
-                &warning["basis"]
-            )));
-            warning["note"] = previous
-                .map(|ack| ack["note"].clone())
-                .unwrap_or_else(|| json!(""));
-        }
-        Ok(json!(warnings))
+        Ok(acknowledged_warnings(
+            &facts,
+            &self.store.warning_acknowledgements(id)?,
+        ))
     }
 
     pub fn set_warning_ack(&self, id: &str, key: &str, note: Option<&str>) -> Result<Value> {
@@ -2852,28 +3026,36 @@ impl Watchtower {
 
     /// The ids of parked ideas the latest brief has not assessed yet.
     fn unchecked_ideas(&self, brief: Option<&Value>) -> Result<Vec<i64>> {
-        let basis = self
-            .store
-            .latest_portfolio()?
-            .and_then(|p| p.basis)
-            .unwrap_or(Value::Null);
         let checked: Vec<i64> = brief
             .and_then(|b| b["idea_checks"].as_array())
             .into_iter()
             .flatten()
             .filter_map(|c| c["idea"].as_i64())
             .collect();
-        Ok(self
-            .store
-            .ideas()?
-            .into_iter()
-            .filter(|i| {
-                !checked.contains(&i.id)
-                    || (i.revision > 1
-                        && basis["@ideas"][i.id.to_string()].as_i64() != Some(i.revision))
-            })
-            .map(|i| i.id)
-            .collect())
+        // The brief's basis is large; only an edited, already checked idea needs it.
+        let mut basis = None;
+        let mut unchecked = Vec::new();
+        for idea in self.store.ideas()? {
+            let stale = checked.contains(&idea.id) && idea.revision > 1 && {
+                if basis.is_none() {
+                    basis = Some(
+                        self.store
+                            .latest_portfolio()?
+                            .and_then(|p| p.basis)
+                            .unwrap_or(Value::Null),
+                    );
+                }
+                basis
+                    .as_ref()
+                    .map_or(&Value::Null, |b| &b["@ideas"][idea.id.to_string()])
+                    .as_i64()
+                    != Some(idea.revision)
+            };
+            if !checked.contains(&idea.id) || stale {
+                unchecked.push(idea.id);
+            }
+        }
+        Ok(unchecked)
     }
 
     /// The calendar week before this one, which the week review looks back on.
@@ -2969,18 +3151,7 @@ impl Watchtower {
     }
 
     fn project_task_basis(&self, id: &str) -> Result<Value> {
-        Ok(Value::Array(
-            self.store
-                .tasks()?
-                .iter()
-                .filter(|task| {
-                    task["projects"]
-                        .as_array()
-                        .is_some_and(|projects| projects.iter().any(|p| p == id))
-                })
-                .map(|task| pick(task, &["id", "status", "revision"]))
-                .collect(),
-        ))
+        Ok(task_basis(&self.store.tasks()?, id))
     }
 
     // ---------- tracked daily runs ----------
@@ -3422,11 +3593,10 @@ impl Watchtower {
         let mut projects = Map::new();
         if let Some(baseline) = &state.baseline {
             let before = &baseline["snapshot"];
-            let old_feedback = before["feedback"].as_array().cloned().unwrap_or_default();
+            let old_feedback = before["feedback"].as_array().map_or(&[][..], Vec::as_slice);
             let feedback = current_snapshot["feedback"]
                 .as_array()
-                .cloned()
-                .unwrap_or_default();
+                .map_or(&[][..], Vec::as_slice);
             for project in current_snapshot["projects"]
                 .as_array()
                 .into_iter()
@@ -3439,9 +3609,9 @@ impl Watchtower {
                     .flatten()
                     .find(|p| p["id"] == project["id"] && p["status"] != "archived");
                 let previous = old
-                    .map(|p| digest_items(p, &old_feedback))
+                    .map(|p| digest_items(p, old_feedback))
                     .unwrap_or_default();
-                let current = digest_items(project, &feedback);
+                let current = digest_items(project, feedback);
                 let unread_recent: Vec<usize> = project["card"]["recent_changes"]
                     .as_array()
                     .into_iter()
@@ -3494,9 +3664,11 @@ impl Watchtower {
                     }));
                 }
                 if let Some(id) = project["id"].as_str() {
+                    let old_card = old.map_or(&Value::Null, |p| &p["card"]);
                     projects.insert(id.to_owned(), json!({
                         "card_unread": entries.len() != first_entry
-                            || reading_content(&project["card"]) != reading_content(&old.map(|p| &p["card"]).cloned().unwrap_or(Value::Null)),
+                            || (project["card"] != *old_card
+                                && reading_content(&project["card"]) != reading_content(old_card)),
                         "unread_recent_changes": unread_recent,
                     }));
                 }
@@ -3554,20 +3726,39 @@ impl Watchtower {
         let (changes, reading) = self.reading_state()?;
         let mut projects = Vec::new();
         let reactions = self.store.feedback()?;
-        let mut item_history = Map::new();
         let mut tasks = self.store.tasks()?;
-        for p in self.store.projects()? {
+        let mut documents = self.documents.lock().unwrap_or_else(|e| e.into_inner());
+        documents.refresh(&self.store)?;
+        let documents = &*documents;
+        let suggestions = Kind::Card
+            .items()
+            .iter()
+            .position(|(list, _, _)| *list == "suggestions");
+        let registered = self.store.projects()?;
+        for p in &registered {
             let stored = self.store.facts(&p.id)?;
             let card = self.store.latest_card(&p.id)?;
+            let acknowledgements = self.store.warning_acknowledgements(&p.id)?;
             let outdated = card_outdated(
                 card.as_ref(),
                 stored.as_ref(),
-                &p,
+                p,
                 &reactions,
-                &self.warning_acknowledgements(&p.id)?,
-                &self.project_task_basis(&p.id)?,
+                &acknowledgements,
+                &task_basis(&tasks, &p.id),
             );
-            let cards = self.store.card_history(&p.id)?;
+            let warnings = acknowledged_warnings(
+                stored.as_ref().map_or(&Value::Null, |s| &s.data),
+                &acknowledgements,
+            );
+            let pending_owner_replies = self.pending_run_replies(p, card.as_ref(), &reactions);
+            let risk_streaks = self.project_streaks(&p.id, stored.as_ref())?;
+            let item_persistence = match &card {
+                Some(c) => self.card_persistence(&p.id, &c.data, &reactions)?,
+                None => Vec::new(),
+            };
+            let (facts, facts_collected_at) = stored.map(|s| (s.data, s.collected_at)).unzip();
+            let versions = documents.cards(&p.id);
             let suggestion_ids: Vec<&str> = card
                 .as_ref()
                 .and_then(|c| c.data["suggestions"].as_array())
@@ -3575,34 +3766,29 @@ impl Watchtower {
                 .flatten()
                 .filter_map(|item| item["id"].as_str())
                 .collect();
-            // An edited or returning idea keeps the date of its first saved ID.
-            // Reuse the history needed below; never use the current card's date.
+            // An edited or returning idea keeps the date of its first saved ID;
+            // never use the current card's date.
             let mut suggestion_first_seen = Map::new();
-            for (at, data) in &cards {
-                remember_items(&mut item_history, Kind::Card, data, Some(&p.id), at);
-                for item in data["suggestions"].as_array().into_iter().flatten() {
-                    if let Some(id) = item["id"].as_str().filter(|id| suggestion_ids.contains(id)) {
+            for version in versions {
+                for (list, id) in &version.digest.items {
+                    if Some(*list) == suggestions && suggestion_ids.contains(&id.as_str()) {
                         suggestion_first_seen
-                            .entry(id.to_owned())
-                            .or_insert_with(|| Value::String(at.clone()));
+                            .entry(id.clone())
+                            .or_insert_with(|| json!(version.created_at));
                     }
                 }
             }
+            let (card_data, card_updated_at) = card.map(|c| (c.data, c.created_at)).unzip();
             // the headline of every card version, newest first: the project's story in one line per update
-            let history: Vec<Value> = cards
-                .into_iter()
+            let history: Vec<Value> = versions
+                .iter()
                 .enumerate()
-                .map(|(i, (at, data))| json!({"version": i + 1, "at": at, "headline": data["headline"], "phase": data["phase"]}))
+                .map(|(i, v)| json!({"version": i + 1, "at": v.created_at, "headline": v.digest.headline, "phase": v.digest.phase}))
                 .rev()
                 .collect();
-            let risk_streaks = self.project_streaks(&p.id, stored.as_ref())?;
-            let item_persistence = match &card {
-                Some(c) => self.card_persistence(&p.id, &c.data, &reactions)?,
-                None => Vec::new(),
-            };
             projects.push(extend(
                 pick(
-                    &project_json(&p),
+                    &project_json(p),
                     &[
                         "id",
                         "name",
@@ -3614,14 +3800,14 @@ impl Watchtower {
                     ],
                 ),
                 json!({
-                    "facts": stored.as_ref().map(|s| s.data.clone()),
-                    "facts_collected_at": stored.map(|s| s.collected_at),
-                    "card": card.as_ref().map(|c| c.data.clone()),
-                    "pending_owner_replies": self.pending_run_replies(&p, card.as_ref(), &reactions),
-                    "card_updated_at": card.map(|c| c.created_at),
+                    "facts": facts,
+                    "facts_collected_at": facts_collected_at,
+                    "card": card_data,
+                    "pending_owner_replies": pending_owner_replies,
+                    "card_updated_at": card_updated_at,
                     "suggestion_first_seen": suggestion_first_seen,
                     "card_outdated": outdated,
-                    "warnings": self.project_warnings(&p.id)?,
+                    "warnings": warnings,
                     "risk_streaks": risk_streaks,
                     "item_persistence": item_persistence,
                     "history": history,
@@ -3637,19 +3823,20 @@ impl Watchtower {
                 .map(|read| read["unread_recent_changes"].clone())
                 .unwrap_or(Value::Null);
         }
-        let portfolio = self.store.latest_portfolio()?;
-        for brief in self.store.portfolio_history()? {
-            remember_items(
-                &mut item_history,
-                Kind::Portfolio,
-                &brief.data,
-                None,
-                &brief.created_at,
-            );
-        }
+        let portfolio = self.store.latest_portfolio_content()?;
+        let brief_ids = |list: &str| -> Vec<String> {
+            portfolio
+                .as_ref()
+                .and_then(|p| p.data[list].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item["id"].as_str().map(str::to_owned))
+                .collect()
+        };
+        let (new_app_ids, synergy_ids) = (brief_ids("new_apps"), brief_ids("synergies"));
         // Ratings and task snapshots outlive a removed project. Its archived
         // card history is still the authority for first-seen dates and kinds.
-        let missing_projects: std::collections::BTreeSet<&str> = reactions
+        let missing_projects: std::collections::BTreeSet<String> = reactions
             .iter()
             .filter_map(|feedback| feedback.project_id.as_deref())
             .chain(tasks.iter().flat_map(|task| {
@@ -3659,40 +3846,55 @@ impl Watchtower {
                     .flatten()
                     .filter_map(Value::as_str)
             }))
-            .filter(|id| !projects.iter().any(|project| project["id"] == *id))
+            .filter(|id| !registered.iter().any(|project| project.id == *id))
+            .map(str::to_owned)
             .collect();
-        for id in missing_projects {
-            for (at, data) in self.store.card_history(id)? {
-                remember_items(&mut item_history, Kind::Card, &data, Some(id), &at);
+        // Historical identities keep their first appearance and last authored
+        // version, for the items the window shows a date or older task source for.
+        // Versions count in this order: watched projects, briefs, removed projects.
+        let wanted: std::collections::HashSet<String> = reactions
+            .iter()
+            .map(|feedback| feedback.item_id.clone())
+            .chain(
+                tasks
+                    .iter()
+                    .map(|task| task["source_id"].as_str().unwrap_or("").to_owned()),
+            )
+            .chain(new_app_ids.iter().chain(&synergy_ids).cloned())
+            .collect();
+        let mut first_seen_at = std::collections::HashMap::<&str, &str>::new();
+        let mut last_seen = std::collections::HashMap::<&str, (Kind, i64)>::new();
+        let segments = registered
+            .iter()
+            .map(|p| (Kind::Card, documents.cards(&p.id)))
+            .chain([(Kind::Portfolio, documents.briefs.as_slice())])
+            .chain(
+                missing_projects
+                    .iter()
+                    .map(|id| (Kind::Card, documents.cards(id))),
+            );
+        for (kind, versions) in segments {
+            for version in versions {
+                for (_, id) in &version.digest.items {
+                    if wanted.contains(id) {
+                        first_seen_at.entry(id).or_insert(&version.created_at);
+                        last_seen.insert(id, (kind, version.row));
+                    }
+                }
             }
         }
-        let new_app_ids: Vec<&str> = portfolio
-            .as_ref()
-            .and_then(|p| p.data["new_apps"].as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item["id"].as_str())
-            .collect();
-        let first_seen = |id: &str| {
-            item_history
-                .get(id)
-                .map(|entry| entry["first_seen"].clone())
-                .unwrap_or(Value::Null)
-        };
+        let first_seen = |id: &str| first_seen_at.get(id).map_or(Value::Null, |at| json!(at));
         let new_app_first_seen: Map<String, Value> = new_app_ids
             .iter()
-            .map(|id| ((*id).to_owned(), first_seen(id)))
+            .map(|id| (id.clone(), first_seen(id)))
             .collect();
-        let synergy_first_seen: Map<String, Value> = portfolio
-            .as_ref()
-            .and_then(|brief| brief.data["synergies"].as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item["id"].as_str())
-            .map(|id| (id.to_owned(), first_seen(id)))
+        let synergy_first_seen: Map<String, Value> = synergy_ids
+            .iter()
+            .map(|id| (id.clone(), first_seen(id)))
             .collect();
         for task in &mut tasks {
-            let source = task["source_id"].as_str().unwrap_or("");
+            let source = task["source_id"].as_str().unwrap_or("").to_owned();
+            let source = source.as_str();
             let snapshot = task
                 .get("source_snapshot")
                 .filter(|snapshot| !snapshot.is_null())
@@ -3702,11 +3904,16 @@ impl Watchtower {
                         .iter()
                         .find(|feedback| feedback.item_id == source)
                         .and_then(|feedback| feedback.item.clone())
-                })
-                .or_else(|| item_history.get(source).map(|entry| entry["item"].clone()));
-            let snapshot = match snapshot {
-                Some(snapshot) => Some(snapshot),
-                None => self.find_item(source)?.map(|(_, item)| item),
+                });
+            let snapshot = match (snapshot, last_seen.get(source)) {
+                (Some(snapshot), _) => Some(snapshot),
+                (None, Some((kind, row))) => Some(
+                    self.store
+                        .document_data(*kind == Kind::Portfolio, *row)?
+                        .and_then(|doc| document_item(*kind, &doc, source))
+                        .unwrap_or(Value::Null),
+                ),
+                (None, None) => self.find_item(source)?.map(|(_, item)| item),
             };
             let date = snapshot
                 .as_ref()
@@ -4098,4 +4305,30 @@ fn task_text(payload: &Value, field: &str, required: bool, max: usize) -> Result
         )));
     }
     Ok(text.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skipping_digest_matches_a_full_parse() {
+        let documents = [
+            r#"{"headline":"H","phase":"build","suggestions":[{"id":"sg-1","title":"x","nested":{"a":[1,2.5,null]}},{"title":"no id"},{"id":7}],"waiting_on_you":[{"id":"q-1"}],"other":[{"id":"o-1"}]}"#,
+            r#"  {"waiting_on_you":null,"suggestions":[]}"#,
+            r#"{"suggestions":"not a list","headline":{"odd":true}}"#,
+            r#"{"suggestions":[1,"two",{"id":"sg-2"}]}"#,
+            r#"{"headline":"first","headline":"second","suggestions":[{"id":"a","id":"b"}]}"#,
+            r#"{"focus":[{"id":"fc-1"}],"new_apps":[{"id":"ap-1"},{"id":"ap-2"}],"synergies":[{"id":"sy-1"}],"park_or_revive":[{"id":"vd-1"}],"patterns":[{"id":"pt-1"}]}"#,
+            r#"["headline","phase"]"#,
+            r#"{"headline":"cut"#,
+            "",
+            "null",
+        ];
+        for kind in [Kind::Card, Kind::Portfolio] {
+            for text in documents {
+                assert_eq!(digest(kind, text), full_digest(kind, text), "{text}");
+            }
+        }
+    }
 }
