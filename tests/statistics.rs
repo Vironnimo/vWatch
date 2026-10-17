@@ -229,6 +229,11 @@ fn refreshes_keep_the_code_count_until_the_working_tree_changes() {
     std::fs::write(repo.join("app.py"), "print('one')\nprint('two')\n").unwrap();
     svc.refresh_facts(None, false).unwrap();
     assert_eq!(code(&svc), 2);
+    // hotspots report their own 90-day window, not the activity window
+    let facts = svc.store().facts("demo").unwrap().unwrap().data;
+    let stats = svc.statistics(Some("demo"), None, None).unwrap();
+    assert_eq!(stats["projects"][0]["activity"]["hotspots_from"], facts["activity"]["hotspots_from"]);
+    assert_ne!(stats["projects"][0]["activity"]["hotspots_from"], facts["activity"]["from"]);
 }
 
 #[test]

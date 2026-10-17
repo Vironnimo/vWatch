@@ -217,7 +217,7 @@ impl Watchtower {
                 "comparison_note":if comparable {"Comparable observed working-tree measurements."} else {"Two complete measurements with the same branch, folder and counting method are required; gaps prevent comparison."},
                 "samples":in_period.into_iter().map(sample_view).collect::<Vec<_>>(),
                 "activity":{"origin":"reconstructed","complete":complete_activity,"coverage_from":merged.first().map(|r|r.0.to_string()),"coverage_through":merged.last().map(|r|r.1.to_string()),"coverage":merged.iter().map(|r|json!({"from":r.0.to_string(),"through":r.1.to_string()})).collect::<Vec<_>>(),"branch":last.map(|s|&s["facts"]["branch"]),"days":days,"totals":activity_counts,
-                    "hotspots":activity.map(|a|&a["hotspots"]),"hotspots_from":activity.map(|a|&a["from"]),"hotspots_through":activity.map(|a|&a["through"])},
+                    "hotspots":activity.map(|a|&a["hotspots"]),"hotspots_from":activity.map(|a|if a["hotspots_from"].is_null(){&a["from"]}else{&a["hotspots_from"]}),"hotspots_through":activity.map(|a|&a["through"])},
                 "confirmed_completions":completed}));
         }
         let code: u64 = totals.values().sum();

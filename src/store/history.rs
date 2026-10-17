@@ -372,7 +372,7 @@ impl Store {
                 .iter()
                 .map(|id| read.query_row([id], sample_point))
                 .collect::<Result<Vec<_>>>()?;
-            let hotspots = db.query_row("SELECT json_object('hotspots',a.data->'$.hotspots','from',a.data->'$.from','through',a.data->'$.through')
+            let hotspots = db.query_row("SELECT json_object('hotspots',a.data->'$.hotspots','from',a.data->'$.from','hotspots_from',a.data->'$.hotspots_from','through',a.data->'$.through')
                 FROM fact_samples s JOIN fact_payloads a ON a.id=s.activity_payload
                 WHERE s.project_id=?1 AND a.data->>'$.ok'=1 ORDER BY s.at DESC,s.id DESC LIMIT 1", [project], |r| r.get(0))
                 .optional()?.map(super::json);
