@@ -28,7 +28,8 @@ test('Today presents owner decisions and waiting work before suggestions and cha
   assert.ok(focus < changes);
   assert.doesNotMatch(html, /class="tile"|class="spark"|class="prog"|data-mod="projects"|data-mod="pulse"|data-mod="kpis"/);
   assert.doesNotMatch(html, /Task 3/);
-  for (const route of ['board', 'ideas', 'handbook']) assert.ok(html.includes(`data-nav="${route}"`));
+  // the header already navigates; Today holds no second set of area links
+  assert.doesNotMatch(html, /data-nav=|overview-links/);
 });
 
 test('Projects preserve the project voice and factual headline and leave statistics in detail views', async () => {

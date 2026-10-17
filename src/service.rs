@@ -2733,7 +2733,7 @@ impl Watchtower {
             {
                 Err(
                     WatchtowerError::new("invalid_pref", "Invalid style. Nothing was changed.")
-                        .hint("Use handover, board, handbook, ideas or statistics."),
+                        .hint("Use handover, board, ideas or statistics."),
                 )
             }
             "hidden_modules"

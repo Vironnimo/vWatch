@@ -79,7 +79,7 @@ The screen/event-handler pass covers behavior outside those endpoints:
 
 | Screen or handler | CLI access | Boundary |
 |---|---|---|
-| Today, projects, ideas, handbook and project drawer | `overview`, `projects show`, `card show`, `facts show`, `ideas list`, `feedback`, `tasks list` | Stored content is available; layout and opening a drawer are presentation |
+| Today, projects, ideas and project page | `overview`, `projects show`, `card show`, `facts show`, `ideas list`, `feedback`, `tasks list` | Stored content is available; layout, opening a project page and the idea round's order are presentation; the round's ratings use `feedback set` |
 | Search and project navigation | `projects list --query`, project/card views | Search accepts ID, name, path or card text; CLI does not manipulate UI focus |
 | Decision round and focus completion | Card/brief views plus feedback commands | Ratings/replies represent the owner's request, never an invented agent decision |
 | Week review, overnight activity and space overview | `portfolio show`, `overview`, `facts show` | Same stored brief and measured facts; no cleanup operation |
@@ -89,7 +89,7 @@ The screen/event-handler pass covers behavior outside those endpoints:
 
 The CLI also exposes agent-only operations: measured refreshes, guarded card/brief writes, schema reads, run tracking, task reports, document history, trash restoration, saved output, jobs, usage and recovery activity.
 
-The navigation selects purposes rather than competing dashboard designs: "Heute" (`handover`), "Projekte" (`board`), "Ideen" (`ideas`), "Handbuch" (`handbook`) and "Statistik" (`statistics`). Existing style values remain valid. The morning page prioritizes owner decisions, blocked tasks and results for confirmation, followed by focus and unread reports. Project voices stay visible in the projects area and drawer. Routine local Git work no longer drives attention priority; concrete Git states and unknown measurements replace backup claims. Commit curves and agent progress percentages remain available only in project details, with percentages labeled as agent assessments. The drawer groups work, start/handbook material and history/facts; owner status and goals open for editing on request, and search selects and highlights the matching section.
+The navigation selects purposes rather than competing dashboard designs: "Heute" (`handover`), "Projekte" (`board`), "Ideen" (`ideas`) and "Statistik" (`statistics`). The former handbook area is now part of each project page; the stored `handbook` style remains valid and opens "Projekte". The morning page prioritizes owner decisions, blocked tasks and results for confirmation, followed by focus and unread reports. Project voices stay visible in the projects area and on project pages. Routine local Git work no longer drives attention priority; concrete Git states and unknown measurements replace backup claims. Commit curves and agent progress percentages remain available only in project details, with percentages labeled as agent assessments. A project page replaces the former drawer: a compact project list stays beside one continuous page of work, start/handbook material and history/facts with a jump bar; owner status and goals open for editing on request, and search selects and highlights the matching section. Opening a project records a visit as the drawer did; re-rendering after a refresh does not.
 
 The legacy preference name `hidden_modules` and CLI flag `--hidden-modules` now mean collapsed sections: their headers remain visible and can reopen them directly. Existing saved values require no migration. The window's recent-event list sorts by event date descending, then card update timestamp descending for same-day ties, preserving authored order within one card. The timestamp orders reports; it does not invent event times.
 
@@ -136,7 +136,7 @@ Card and brief writes return concise readable receipts: saved version or replay/
 
 Portfolio context carries each card's version and actionable finding evidence (details, sources, question options and completion criteria). Measurement validity, errors and collection time remain visible; missing branch counts remain null. Per-project `review_week_evidence` separates strictly week-bounded changes/milestones from current card summaries. The review's commit count is selected relative to the stored measurement's calendar week and remains null when that sample cannot establish the completed week's count. These are additive JSON fields except for correcting previously fabricated zero or misdated counts.
 
-Agent estimates of task duration or effort are removed from reentry, suggestions, focus, synergies, new apps and idea assessments. Neither schema advertises or requires `effort`; legacy payload fields follow normal unknown-field handling (accepted, dropped and warned). Old stored documents/history are not rewritten. The window ignores legacy estimates in all styles and the drawer; the portfolio's suggestion projection omits them. The operating Skill forbids estimates in prose too. Observable completion criteria, owner-set deadlines and measured activity remain unchanged.
+Agent estimates of task duration or effort are removed from reentry, suggestions, focus, synergies, new apps and idea assessments. Neither schema advertises or requires `effort`; legacy payload fields follow normal unknown-field handling (accepted, dropped and warned). Old stored documents/history are not rewritten. The window ignores legacy estimates in all styles and on project pages; the portfolio's suggestion projection omits them. The operating Skill forbids estimates in prose too. Observable completion criteria, owner-set deadlines and measured activity remain unchanged.
 
 Document validation enforces the published nullable types: omission applies defaults on full writes or retains fields in merges; explicit null is accepted only for nullable fields. Duplicate explicit item IDs reject the write instead of silently acquiring a different identity. Missing-field detection examines every list item. Portfolio merge errors identify inherited brief fields as such. These changes do not rewrite stored documents; a malformed inherited field requires reconciliation before the next save.
 
@@ -144,7 +144,7 @@ Run status is a compact, persistent toolbar disclosure beside Git fact freshness
 
 The ideas collection combines project suggestions, new app ideas, synergies and owner ideas. Its filters are new, positively rated, deferred, assigned, completed/closed, rejected and all. An expired deferral returns to new; rating, agent assessment and assignment remain separate decisions. Rated proposals and recognized task sources remain accessible after leaving a current report. Removed owner ideas stay absent until restored, even when old feedback or tasks retain them. Open input forms survive filtering and background rewrites.
 
-Ideas sort by first saved appearance of their stable ID, newest first; project drawers use the same ordering. Window state exposes each project's `suggestion_first_seen` and top-level `new_app_first_seen` and `synergy_first_seen` mappings for current IDs. Owner ideas use `added_at`. Historical versions establish these timestamps without changing agent documents or schemas. Rewording, reordering, temporary removal and later restoration retain the original appearance date. Unknown dates sort last, and ties preserve authored order. No date is inferred from the latest card rewrite or supplied by the agent.
+Ideas sort by first saved appearance of their stable ID, newest first; project pages use the same ordering. Window state exposes each project's `suggestion_first_seen` and top-level `new_app_first_seen` and `synergy_first_seen` mappings for current IDs. Owner ideas use `added_at`. Historical versions establish these timestamps without changing agent documents or schemas. Rewording, reordering, temporary removal and later restoration retain the original appearance date. Unknown dates sort last, and ties preserve authored order. No date is inferred from the latest card rewrite or supplied by the agent.
 
 `overview`/window state adds the following owner-facing metadata without changing card or portfolio schemas:
 
@@ -270,7 +270,7 @@ cargo test --no-default-features
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --all-targets -- -D warnings
-node --test tests/ui.cjs tests/ui-drawer.cjs tests/ui-handoff.cjs tests/ui-ideas.cjs tests/ui-overview.cjs
+node --test tests/ui.cjs tests/ui-project.cjs tests/ui-handoff.cjs tests/ui-ideas.cjs tests/ui-overview.cjs
 cargo fmt --check
 ```
 

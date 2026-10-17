@@ -10,7 +10,7 @@ const expose = `globalThis.ui = {
   draft: (id, text) => { drafts[id] = text; },
   note: id => { noteFor = id; },
   answer: id => { answering = id; },
-  render, blockIdeas, blockRecent, openDrawer, taskPrompt, assignTask, copyTask, changeTaskStatus, toggleModule,
+  render, blockIdeas, blockRecent, openProject, closeProject, startIdeaRound, ideaRoundStep, taskPrompt, assignTask, copyTask, changeTaskStatus, toggleModule,
   openSnooze, saveSnooze, rated, saveWarning, risk, markChangesRead,
   openPanel, closePanel, editProject, cancelProjectEdit, pickProjectFolder, saveProjectEdit,
   removeProject, removeIdea
@@ -62,6 +62,7 @@ async function app(invoke = () => ({}), extraExpose = '') {
       addEventListener() {}, scrollTo() {},
       __TAURI__: { core: { invoke: async (command, args) => {
         calls.push({ command, args });
+        if (command === 'set_pref') state.prefs[args.key] = args.value;
         return command === 'state' ? structuredClone(state) : invoke(command, args, state);
       } } },
     },

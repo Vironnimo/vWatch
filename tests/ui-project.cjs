@@ -2,22 +2,24 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { drawerHtml, selectDrawerTab, openDrawerTarget, closeDrawer, searchEntries, pickResult, openSearch, renderSearchResults,
+const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, searchEntries, pickResult, openSearch, renderSearchResults,
   search: query => { searchQ = query; return searchResults(); },
-  ownerEditing: id => drawerEditors.has(id),
+  ownerEditing: id => projectEditors.has(id),
   allRatings: () => showRated,
 });`;
 
 function target(a, anchor) {
-  const n = a.node(`#drawer-root [data-search-anchor="${anchor}"]`);
+  const n = a.node(`#project-page [data-search-anchor="${anchor}"]`);
   n.classList = { add(value) { n.highlight = value; } };
   n.scrollIntoView = options => { n.scrolled = options; };
   return n;
 }
-const panel = (html, tab) => html.match(new RegExp(`<section id="drawer-panel-${tab}"[^>]*>`))[0];
+const page = a => a.node('#project-page').innerHTML;
+// one part of the project page, from its heading to the next part
+const group = (html, key) => html.slice(html.indexOf(`id="project-group-${key}"`)).split('<section id="project-group-')[0];
 const click = (a, selector, dataset = {}) => a.dispatch('click', { target: { closest: value => value === selector ? { dataset } : null } });
 
-test('the project introduction preserves its voice while detail sections and owner fields start compact', async () => {
+test('a project opens as a page beside the project list, with work, handbook and history on one page', async () => {
   const a = await app(undefined, expose), p = a.state.projects[0];
   p.card.one_liner = 'A useful project';
   p.card.personality = 'I have something to say';
@@ -25,42 +27,61 @@ test('the project introduction preserves its voice while detail sections and own
   p.card.handbook = { run: [{ what: 'Start', how: 'cargo run' }] };
   p.facts = { is_git: true, commits: {}, remotes: [], weekly: [] };
   await a.ui.load(false);
-  a.ui.openDrawer('sample');
-  const html = a.node('#drawer-root').innerHTML;
+  a.ui.openProject('sample');
+  assert.deepEqual(a.calls.filter(c => c.command === 'set_pref').map(c => [c.args.key, c.args.value]), [['style', 'board']]);
+  assert.equal(a.calls.filter(c => c.command === 'open_project').length, 1);
+  const view = a.node('#view').innerHTML, html = page(a);
+  assert.match(view, /class="project-list"[^]*data-open="sample" aria-current="page"/);
+  assert.match(view, /data-project-overview/);
+  assert.doesNotMatch(view, /class="tile"/);
   assert.match(html, /A useful project/);
   assert.match(html, /I have something to say/);
-  assert.ok(html.indexOf('Aktueller Stand') < html.indexOf('drawer-tabs'));
-  assert.ok(html.indexOf('Nächster Schritt') < html.indexOf('drawer-tabs'));
-  assert.doesNotMatch(panel(html, 'work'), /hidden/);
-  assert.match(panel(html, 'handbook'), / hidden/);
-  assert.match(panel(html, 'history'), / hidden/);
+  assert.ok(html.indexOf('Aktueller Stand') < html.indexOf('project-jump'));
+  assert.ok(html.indexOf('Nächster Schritt') < html.indexOf('project-jump'));
+  for (const key of ['work', 'handbook', 'history']) assert.match(html, new RegExp(`<section id="project-group-${key}" class="project-group"`));
+  assert.doesNotMatch(html, /<section id="project-group-[a-z]+"[^>]*hidden/);
   assert.match(html, /id="project-owner-fields" hidden/);
   assert.match(html, /Status und Ziel bearbeiten/);
-  assert.ok(html.indexOf('Agent-Einschätzung: 72 %') > html.indexOf('id="drawer-panel-history"'));
-  assert.match(html, /<details class="commit-history"[^>]*><summary>Commit-Aktivität ansehen/);
-  assert.ok(html.indexOf('cargo run') > html.indexOf('id="drawer-panel-handbook"'));
+  assert.match(group(html, 'history'), /Agent-Einschätzung: 72 %/);
+  assert.match(group(html, 'history'), /<details class="commit-history"[^>]*><summary>Commit-Aktivität ansehen/);
+  assert.match(group(html, 'handbook'), /cargo run/);
+  assert.doesNotMatch(group(html, 'work'), /cargo run/);
 });
 
-test('project section and explicit editing remain open across refresh without losing drafts', async () => {
+test('owner fields stay open across refresh without losing drafts, and the overview returns explicitly', async () => {
   const a = await app(undefined, expose);
-  a.ui.openDrawer('sample');
-  click(a, '[data-drawer-edit]');
+  a.ui.openProject('sample');
+  click(a, '[data-project-intent-edit]');
   a.dispatch('input', { target: { id: 'goal-text', value: 'Ship a reviewed release', matches: () => false } });
   a.dispatch('input', { target: { id: 'status-note', value: 'Keep the local workflow', matches: () => false } });
-  a.ui.selectDrawerTab('handbook');
   await a.ui.load(false);
-  let html = a.node('#drawer-root').innerHTML;
-  assert.doesNotMatch(panel(html, 'handbook'), /hidden/);
+  let html = page(a);
   assert.match(html, /value="Ship a reviewed release"/);
   assert.match(html, /value="Keep the local workflow"/);
   assert.equal(a.ui.ownerEditing('sample'), true);
   assert.doesNotMatch(html, /id="project-owner-fields" hidden/);
-  a.ui.closeDrawer(); a.ui.openDrawer('sample');
-  html = a.node('#drawer-root').innerHTML;
-  assert.doesNotMatch(panel(html, 'handbook'), /hidden/);
   assert.equal(a.calls.filter(c => ['set_status', 'set_goal'].includes(c.command)).length, 0);
-  a.dispatch('keydown', { key: 'ArrowRight', preventDefault() {}, target: { dataset: { drawerTab: 'handbook' } } });
-  assert.doesNotMatch(panel(a.node('#drawer-root').innerHTML, 'history'), /hidden/);
+  const visits = a.calls.filter(c => c.command === 'open_project').length;
+  await a.ui.load(false);
+  assert.equal(a.calls.filter(c => c.command === 'open_project').length, visits, 'a refresh is not a visit');
+  click(a, '[data-project-overview]');
+  assert.match(a.node('#view').innerHTML, /class="tile"/);
+  assert.doesNotMatch(a.node('#view').innerHTML, /id="project-page"/);
+  a.ui.openProject('sample');
+  a.dispatch('keydown', { key: 'Escape', preventDefault() {}, target: { id: '', dataset: {}, closest: () => null } });
+  assert.doesNotMatch(a.node('#view').innerHTML, /id="project-page"/);
+});
+
+test('status buttons change the project intent, while task cards with a status do not', async () => {
+  const a = await app(undefined, expose);
+  a.state.tasks = [{ id: 3, source_id: 's1', projects: ['sample'], title: 'Review exports', status: 'review' }];
+  await a.ui.load(false);
+  a.ui.openProject('sample');
+  a.dispatch('click', { target: { closest: selector => selector === '[data-status]' ? { dataset: { status: 'review' } } : null } });
+  assert.equal(a.calls.filter(c => c.command === 'set_status').length, 0);
+  a.dispatch('click', { target: { closest: selector => selector === '.seg [data-status]' ? { dataset: { status: 'parked' } } : null } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(a.calls.filter(c => c.command === 'set_status').map(c => c.args.status), ['parked']);
 });
 
 test('search routes to the exact command, reply, task and owner idea instead of the top of a project', async () => {
@@ -80,15 +101,15 @@ test('search routes to the exact command, reply, task and owner idea instead of 
   assert.equal(a.document.activeElement, command);
   assert.equal(command.highlight, 'search-hit');
   assert.equal(command.scrolled.block, 'center');
-  assert.doesNotMatch(panel(a.node('#drawer-root').innerHTML, 'handbook'), /hidden/);
+  assert.match(group(page(a), 'handbook'), /data-search-anchor="hb-run:1"/);
   assert.equal(a.ui.search('stable channel')[0].anchor, 'question:q2');
   assert.equal(a.ui.search('archive compatibility')[0].anchor, 'answer:old_question');
   assert.equal(a.ui.search('archive compatibility')[0].tab, 'history');
-  assert.match(a.node('#drawer-root').innerHTML, /data-search-anchor="answer:old_question"/);
+  assert.match(page(a), /data-search-anchor="answer:old_question"/);
   assert.equal(a.ui.search('Roundtrip')[0].anchor, 'task:9');
   assert.equal(a.ui.search('offline sketchbook')[0].ideaId, 'idea:4');
   assert.equal(a.ui.search('Earlier archive')[0].anchor, 'recent:0');
-  assert.match(a.node('#drawer-root').innerHTML, /data-search-anchor="recent:1"[^]*data-search-anchor="recent:0"/);
+  assert.match(page(a), /data-search-anchor="recent:1"[^]*data-search-anchor="recent:0"/);
 });
 
 test('opening a hidden suggestion from search reveals only that destination and keeps rating filters intact', async () => {
@@ -100,23 +121,23 @@ test('opening a hidden suggestion from search reveals only that destination and 
   const evidence = { open: false };
   suggestion.parentElement = parentDetails;
   suggestion.querySelectorAll = () => [evidence];
-  a.ui.openDrawerTarget('sample', 'work', 'suggestion:s1');
-  assert.match(a.node('#drawer-root').innerHTML, /data-search-anchor="suggestion:s1"/);
+  a.ui.openProjectTarget('sample', 'work', 'suggestion:s1');
+  assert.match(page(a), /data-search-anchor="suggestion:s1"/);
   assert.equal(parentDetails.open, true);
   assert.equal(evidence.open, true);
   assert.equal(a.ui.allRatings(), false);
   await a.ui.load(false);
-  assert.match(a.node('#drawer-root').innerHTML, /data-search-anchor="suggestion:s1"/);
-  a.ui.closeDrawer(); a.ui.openDrawer('sample');
-  assert.doesNotMatch(a.node('#drawer-root').innerHTML, /data-search-anchor="suggestion:s1"/);
+  assert.match(page(a), /data-search-anchor="suggestion:s1"/);
+  a.ui.closeProject(); a.ui.openProject('sample');
+  assert.doesNotMatch(page(a), /data-search-anchor="suggestion:s1"/);
 });
 
 test('projects without reports still expose an editable owner intent, folder and measured facts', async () => {
   const a = await app(undefined, expose);
   a.state.projects[0].card = null;
   await a.ui.load(false);
-  a.ui.openDrawer('sample');
-  const html = a.node('#drawer-root').innerHTML;
+  a.ui.openProject('sample');
+  const html = page(a);
   assert.match(html, /Noch keine Einschätzung/);
   assert.match(html, /Status und Ziel bearbeiten/);
   assert.match(html, /data-search-anchor="path"/);
@@ -144,7 +165,7 @@ test('a visible search result keeps its identity when a background refresh inser
   assert.equal(a.node('#search-root .sresults').innerHTML, originalResults);
   const destination = target(a, 'purpose');
   a.ui.pickResult({ dataset: { sres: '1' } });
-  assert.match(a.node('#drawer-root').innerHTML, /aria-label="Beta"/);
+  assert.match(page(a), /aria-label="Beta"/);
   assert.equal(a.document.activeElement, destination);
   a.ui.openSearch();
   assert.match(a.node('#search-root .sresults').innerHTML, /data-sres="0"[^]*Earlier/);
@@ -167,20 +188,20 @@ test('a visible handbook hit follows its content through insertions and reorderi
   a.ui.pickResult({ dataset: { sres: '1' } });
   assert.equal(a.document.activeElement, shiftedBeta);
 
-  a.ui.closeDrawer(); a.ui.openSearch();
+  a.ui.closeProject(); a.ui.openSearch();
   card.handbook.run = [beta, inserted, alpha];
   await a.ui.load(false);
   const reorderedBeta = target(a, 'hb-run:0');
   a.ui.pickResult({ dataset: { sres: '2' } });
   assert.equal(a.document.activeElement, reorderedBeta);
 
-  a.ui.closeDrawer(); a.ui.openSearch();
+  a.ui.closeProject(); a.ui.openSearch();
   card.handbook.run = [inserted, alpha];
   await a.ui.load(false);
   const visitsBefore = a.calls.filter(c => c.command === 'open_project').length;
   a.ui.pickResult({ dataset: { sres: '0' } });
   assert.equal(a.calls.filter(c => c.command === 'open_project').length, visitsBefore);
-  assert.equal(a.node('#drawer-root').innerHTML, '');
+  assert.doesNotMatch(a.node('#view').innerHTML, /id="project-page"/);
   assert.match(a.node('#toast').innerHTML, /Treffer nicht mehr aktuell/);
 
   card.handbook.run = [beta];
@@ -190,4 +211,12 @@ test('a visible handbook hit follows its content through insertions and reorderi
   a.ui.pickResult({ dataset: { sres: '0' } });
   assert.equal(a.calls.filter(c => c.command === 'open_project').length, visitsBefore);
   assert.match(a.node('#toast').innerHTML, /nicht mehr eindeutig/);
+});
+
+test('an older stored Handbuch preference opens Projects without rewriting the preference', async () => {
+  const a = await app(undefined, expose);
+  a.state.prefs.style = 'handbook';
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /class="tile"/);
+  assert.equal(a.calls.filter(c => c.command === 'set_pref').length, 0);
 });

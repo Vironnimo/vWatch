@@ -297,7 +297,7 @@ enum SettingsCmd {
     /// Set display preferences only when the owner asks; preserves omitted values
     #[command(alias = "set")]
     Update {
-        /// Initial view: handover (Heute), board (Projekte), ideas, handbook or statistics. Omit to keep it.
+        /// Initial view: handover (Heute), board (Projekte), ideas or statistics; handbook opens Projekte. Omit to keep it.
         #[arg(long, value_parser = ["handover", "board", "ideas", "handbook", "statistics"], ignore_case = true)]
         style: Option<String>,
         /// Comma-separated section IDs to collapse; empty expands all. Omit to keep them.
@@ -1183,7 +1183,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             {
                 if style.is_none() && hidden_modules.is_none() {
                     return Err(WatchtowerError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
-                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas, --style handbook or --style statistics, or pass --hidden-modules with comma-separated module IDs."));
+                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas or --style statistics, or pass --hidden-modules with comma-separated module IDs."));
                 }
                 let mut updates = Vec::new();
                 if let Some(style) = style {

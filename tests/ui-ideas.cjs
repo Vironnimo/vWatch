@@ -233,3 +233,31 @@ test('newly saved own ideas become visible from any collection filter and failed
   assert.match(html, /data-idea-filter="later" aria-pressed="true"/);
   assert.match(a.node('#toast').innerHTML, /Storage failed/);
 });
+
+test('the idea round rates only new ideas one at a time, carries an optional reason and can be skipped', async () => {
+  const a = await app((command, args) => command === 'set_feedback' ? { note: args.note } : {}, expose);
+  a.state.prefs.style = 'ideas';
+  a.state.projects[0].card.suggestions = ['one', 'two', 'three', 'four', 'rated'].map(id => ({ id, title: `Title ${id}`, why: `Why ${id}` }));
+  a.state.projects[0].suggestion_first_seen = { one: '2026-10-07T09:00:00Z', two: '2026-10-06T09:00:00Z', three: '2026-10-05T09:00:00Z', four: '2026-10-04T09:00:00Z' };
+  a.state.feedback.rated = { value: 'down' };
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /data-iround-start>4 neue Ideen nacheinander bewerten/);
+  assert.match(a.node('.switch [data-style="ideas"]').innerHTML, /class="nav-count"[^>]*>4</);
+  a.ui.startIdeaRound();
+  assert.match(a.node('#round-root').innerHTML, /Title one[^]*Why one/);
+  assert.match(a.node('#round-root').innerHTML, /1 von 4/);
+  a.dispatch('input', { target: { id: 'idea-round-note', value: 'Not for this project', dataset: { iroundNote: 'one' }, matches: () => false } });
+  a.dispatch('keydown', { key: '3', preventDefault() {}, target: { id: '', dataset: {} } });
+  await new Promise(resolve => setImmediate(resolve));
+  const saved = a.calls.filter(c => c.command === 'set_feedback');
+  assert.deepEqual(saved.map(c => [c.args.item_id, c.args.value, c.args.note]), [['one', 'down', 'Not for this project']]);
+  assert.match(a.node('#round-root').innerHTML, /Title two/);
+  await a.ui.ideaRoundStep('skip');
+  assert.match(a.node('#round-root').innerHTML, /Title three/);
+  // typing a digit into the reason never rates the idea
+  a.dispatch('keydown', { key: '1', preventDefault() { throw new Error('rated while typing'); }, target: { id: 'idea-round-note', dataset: {} } });
+  await a.ui.ideaRoundStep('up');
+  await a.ui.ideaRoundStep('later');
+  assert.match(a.node('#round-root').innerHTML, /Geschafft[^]*1 gut, 1 später, 1 Quatsch, 1 übersprungen/);
+  assert.deepEqual(a.calls.filter(c => c.command === 'set_feedback').map(c => c.args.value), ['down', 'up', 'later']);
+});

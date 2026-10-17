@@ -34,10 +34,9 @@
   const ideaEditing = new Map(); // retain an open response even if an agent rewrites its source
   const restoringIdeaProjects = new Set();
   const projectDrafts = {}; // unsaved status note and goal fields per project
-  let openId = null;      // project whose drawer is open
-  const drawerTabs = {};  // selected project section survives refreshes and reopening
-  const drawerEditors = new Set();
-  let drawerSearch = null; // the exact search destination, retained during data refresh
+  let openId = null;      // project whose page is open under "Projekte"
+  const projectEditors = new Set(); // projects whose status and goal fields are open
+  let projectSearch = null; // the exact search destination, retained during data refresh
   let since = null;       // { id, data }: what happened since the owner last opened that project
   let panelOpen = false;  // settings panel
   let settings = null;    // autostart, agent access, paths
@@ -673,6 +672,7 @@
   function renderIdeas() {
     const entries = ideaCollection(), matching = entries.filter(e => ideaFilter === 'all' || ideaBucket(e) === ideaFilter);
     const pinned = entries.filter(e => !matching.includes(e) && [noteFor, snoozeFor].includes(e.s.id));
+    const freshCount = entries.filter(e => ideaBucket(e) === 'new').length;
     const tabs = Object.entries(IDEA_FILTERS).map(([filter, label]) => {
       const count = filter === 'all' ? entries.length : entries.filter(e => ideaBucket(e) === filter).length;
       return `<button class="idea-filter" type="button" data-idea-filter="${filter}" aria-pressed="${ideaFilter === filter}" aria-controls="idea-collection">${label} <span>${count}</span></button>`;
@@ -687,7 +687,7 @@
       all: 'Eigene Ideen, Projektvorschläge, neue Apps und Querverbindungen. Neueste zuerst.',
     };
     const empty = { new: 'Gerade keine offenen Ideen. Deine gemerkten Vorschläge findest du in den anderen Ansichten.', up: 'Noch keine Idee gut gefunden.', later: 'Keine Ideen zurückgestellt.', assigned: 'Noch keine Idee beauftragt.', done: 'Noch keine abgeschlossenen Ideen.', down: 'Keine Ideen abgelehnt.', all: 'Noch keine Ideen. Halte deine erste Idee fest.' };
-    return `<div class="ideas-page"><header class="ideas-heading"><h1>Ideen</h1><p>Entdecken, festhalten und weiterverfolgen.</p></header>${ideaAddForm()}<nav class="idea-filters" aria-label="Ideen filtern">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>Offene Eingabe</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
+    return `<div class="ideas-page"><header class="ideas-heading"><h1>Ideen</h1><p>Entdecken, festhalten und weiterverfolgen.</p></header>${ideaAddForm()}${freshCount ? `<div class="idea-round-start"><button class="btn primary" type="button" data-iround-start>${freshCount === 1 ? 'Neue Idee bewerten' : `${freshCount} neue Ideen nacheinander bewerten`}</button><span class="faint">Gut, später oder Quatsch, je eine Taste. Die Agents lernen aus deiner Wahl.</span></div>` : ''}<nav class="idea-filters" aria-label="Ideen filtern">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>Offene Eingabe</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
   }
   function setIdeaFilter(filter) {
     if (!Object.hasOwn(IDEA_FILTERS, filter)) return;
@@ -791,23 +791,34 @@
   function renderHandover() {
     const n = visible().length;
     const greeting = (S.portfolio && S.portfolio.greeting) || `Guten Morgen. ${n} ${n === 1 ? 'Projekt' : 'Projekte'} im Blick.`;
-    const newIdeas = ideaCollection().filter(e => ideaBucket(e) === 'new').length;
     return `<div class="handover">
       <div class="greet"><div class="kicker">Heute · ${n} ${n === 1 ? 'Projekt' : 'Projekte'}</div><h2>${esc(greeting)}</h2></div>
       ${blockAttention()}${blockFocus()}${blockChanges()}
       ${missingCardsNote()}
-      <div class="overview-links"><button type="button" data-nav="board"><b>${n} ${n === 1 ? 'Projekt' : 'Projekte'}</b><span>Stand, Projektstimmen und offene Arbeit</span></button><button type="button" data-nav="ideas"><b>${newIdeas ? `${newIdeas} ${newIdeas === 1 ? 'Idee' : 'Ideen'} entdecken` : 'Deine Ideensammlung'}</b><span>Neue Vorschläge, gut Gefundenes und eigene Ideen</span></button><button type="button" data-nav="handbook"><b>Handbuch</b><span>Projekte starten und wieder einsteigen</span></button></div>
     </div>`;
   }
 
-  // ---------- Projects: voices and records, with measured detail on demand ----------
+  // ---------- Projects: an overview, then one project page with the project list beside it ----------
   function renderBoard() {
-    if (!visible().length) return renderEmpty() + blockTasks();
+    if (!visible().length && !(openId && byId(openId))) return renderEmpty() + blockTasks();
+    if (openId && byId(openId)) return `<div class="project-layout">${projectList()}<div id="project-page" class="project-page"></div></div>`;
     return `<div class="project-overview">${blockProjects()}${blockTasks()}<details class="reference-fold" ${foldAttrs('history')}><summary>Verlauf und Einordnung <span class="faint">Projektmeldungen, Rückblick und Zusammenhänge</span></summary>${blockRecent()}${blockWeek()}${blockAcross()}</details><details class="reference-fold" ${foldAttrs('facts')}><summary>Gemessene Git-Fakten <span class="faint">Arbeitsstände, letzte Aktivität und Speicherplatz</span></summary>${blockSafety()}${blockNight()}${blockSpace()}</details></div>`;
   }
+  // the same ranking as the overview, so switching projects keeps the most urgent ones on top
+  function projectList() {
+    const list = byAttention(visible());
+    if (!list.some(p => p.id === openId) && byId(openId)) list.push(byId(openId));
+    const item = p => {
+      const tasks = projectTasks(p), waiting = p.card ? openQs(p.card).length : 0;
+      const asks = waiting + tasks.filter(t => ['blocked', 'review'].includes(t.status)).length;
+      const marks = `${asks ? `<span class="mark ask" title="${asks} ${asks === 1 ? 'Punkt wartet' : 'Punkte warten'} auf dich">${asks}</span>` : ''}${safety(p).ci === 'red' ? '<span class="mark bad" title="CI rot">CI</span>' : ''}${projectUnread(p) ? '<span class="mark new" title="ungelesen"></span>' : ''}`;
+      const state = p.status !== 'active' ? STATUS[p.status] : p.card ? PHASE[p.card.phase] || p.card.phase : 'ohne Karte';
+      return `<button type="button" class="plist-item" data-open="${esc(p.id)}" aria-current="${p.id === openId ? 'page' : 'false'}">${dot(p.id)}<span class="n">${esc(p.name)}</span><span class="marks">${marks}</span><span class="s">${esc(state)} · ${esc(ago(lastWork(p)))}</span></button>`;
+    };
+    return `<nav class="project-list" aria-label="Projekte"><button type="button" class="plist-back" data-project-overview>← Alle Projekte</button>${list.map(item).join('')}</nav>`;
+  }
 
-  // ---------- handbook ----------
-  // how to start a project, how it is built, where things are: for coming back after a long time
+  // ---------- handbook: how to start a project, how it is built, where things are ----------
   const HB_LISTS = ['run', 'places', 'read_first', 'needs', 'terms'];
   const hbEmpty = h => !h || (!h.architecture && !h.installed && !HB_LISTS.some(k => (h[k] || []).length));
   // one line per command; lines break only between words, so `-Open` or `build-release.ps1` stay whole
@@ -823,7 +834,7 @@
       ? `<button class="linkish" type="button" data-external="${esc(r.how)}" aria-label="${esc(r.what)} öffnen">öffnen</button>`
       : `<button class="linkish" type="button" data-copy="${esc(r.how)}" aria-label="${esc(r.what)} kopieren">kopieren</button>`;
     return {
-      // label on top, the command below at full width, one line per command; copying takes it as written
+      // what it does on the left, the command at full width beside it, one line per command; copying takes it as written
       run: inst + ((h.run || []).length ? `<div class="hb-runs">${h.run.map((r, i) => `<div class="hb-run"${anchor(`hb-run:${i}`)}><div class="w">${esc(r.what)}${r.folder && r.folder !== '.' ? `<span class="faint mono hb-in">in ${esc(r.folder)}</span>` : ''}</div><div class="cmd"><code class="mono">${cmdHtml(r.how)}</code>${act(r)}</div></div>`).join('')}</div>` : ''),
       arch: h.architecture ? `<p class="hb-arch"${anchor('hb-architecture')}>${esc(h.architecture)}</p>` : '',
       places: kv(h.places, 'path', 'what', 'mono', 'hb-place'),
@@ -835,24 +846,8 @@
   const hbSec = (title, body) => body ? `<div class="hb-sec"><h3>${esc(title)}</h3>${body}</div>` : '';
   function handbookBody(h, searchable = false) {
     const x = hbParts(h, searchable);
-    return hbSec('So startest du es', x.run) + hbSec('Wie es gebaut ist', x.arch) + hbSec('Wo was liegt', x.places)
-      + hbSec('Zuerst lesen', x.read) + hbSec('Braucht', x.needs) + hbSec('Begriffe', x.terms);
-  }
-
-  function renderHandbook() {
-    const list = [...visible()].sort((a, b) => a.name.localeCompare(b.name, 'de'));
-    const sheet = p => {
-      const c = p.card, x = hbParts(c && c.handbook);
-      const missing = c && hbEmpty(c.handbook) ? '<div class="faint hb-sec" style="font-size:13px">Noch kein Handbuch. Der nächste Agent-Lauf schreibt es.</div>' : '';
-      return `<article class="sheet">
-        <div class="h">${plink(p.id)}<span class="pills">${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}</span></div>
-        ${c ? `<div class="one">${esc(c.one_liner)}</div>${c.stack ? `<div class="stackline mono">${esc(c.stack)}</div>` : ''}` : '<div class="faint one">Noch keine Karte.</div>'}
-        ${goalLine(p)}${missing}${hbSec('So startest du es', x.run)}${hbSec('Zuerst lesen', x.read)}
-        ${c ? `<div class="state"><span class="faint">Stand:</span> ${esc(c.headline)} <span class="faint">· zuletzt ${ago(lastWork(p))}</span></div>` : ''}
-        <div class="path"><button class="linkish mono" type="button" data-external="${esc(p.path)}" title="Im Explorer öffnen">${esc(p.path)}</button></div>
-      </article>`;
-    };
-    return `<div class="handbook-view">${dmod('Handbuch', `<div class="sheets">${list.map(sheet).join('')}</div>`, 'Alle Projekte zum Nachschlagen: wofür, womit, wie starten. Der Name öffnet den Steckbrief mit dem ganzen Handbuch')}</div>`;
+    return hbSec('So startest du es', x.run) + hbSec('Zuerst lesen', x.read) + hbSec('Wie es gebaut ist', x.arch)
+      + hbSec('Wo was liegt', x.places) + hbSec('Braucht', x.needs) + hbSec('Begriffe', x.terms);
   }
 
   // what happened since the owner last opened this project, when that was a while ago
@@ -869,22 +864,22 @@
     s.milestones.forEach(m => lines.push(`<li><b>Meilenstein:</b> ${esc(m.title)} <span class="faint mono">${fmtShort(m.date)}</span></li>`));
     s.recent_changes.forEach(ch => lines.push(`<li>${esc(ch.title)} <span class="faint mono">${fmtShort(ch.date)}</span></li>`));
     const body = lines.length ? `<ul class="bullets">${lines.join('')}</ul>` : '<div class="muted">Keine weiteren Ereignisse im gespeicherten Verlauf.</div>';
-    return `<details class="since" data-drawer-detail="since"><summary><b>Seit deinem letzten Besuch</b><span class="faint"> · ${when} · ${counts}</span></summary>${body}</details>`;
+    return `<details class="since" ${foldAttrs(`since:${p.id}`)}><summary><b>Seit deinem letzten Besuch</b><span class="faint"> · ${when} · ${counts}</span></summary>${body}</details>`;
   }
 
-  // ---------- drawer ----------
+  // ---------- project page ----------
+  const PROJECT_GROUPS = [['work', 'Weiterarbeiten'], ['handbook', 'Starten & Handbuch'], ['history', 'Verlauf & Fakten']];
   const pastReplies = p => Object.entries(S.feedback || {}).filter(([id, f]) => f.project_id === p.id
     && f.item?.kind === 'question' && ['answered', 'done'].includes(f.value)
     && !(p.card?.waiting_on_you || []).some(w => w.id === id))
     .sort((a, b) => String(b[1].at || '').localeCompare(String(a[1].at || '')));
-  function drawerHtml(p) {
+  function projectPageHtml(p) {
     const c = p.card, f = p.facts || {}, s = safety(p);
     const commits = f.commits || {};
-    const tab = drawerTabs[p.id] || 'work';
     const anchor = name => `data-search-anchor="${esc(name)}" tabindex="-1"`;
     const section = (key, title, body, sub) => body ? `<div ${anchor(key)}>${dmod(title, body, sub)}</div>` : '';
-    const editing = drawerEditors.has(p.id);
-    const statusBar = `<div class="project-intent" ${anchor('owner')}><div class="intent-summary"><span>Deine Absicht: <b>${esc(STATUS[p.status] || p.status)}</b></span><button class="linkish" type="button" data-drawer-edit aria-expanded="${editing}" aria-controls="project-owner-fields">${editing ? 'Bearbeiten schließen' : 'Status und Ziel bearbeiten'}</button></div>${p.status_note ? `<p class="muted">${esc(p.status_note)}</p>` : ''}${goalLine(p)}
+    const editing = projectEditors.has(p.id);
+    const statusBar = `<div class="project-intent" ${anchor('owner')}><div class="intent-summary"><span>Deine Absicht: <b>${esc(STATUS[p.status] || p.status)}</b></span><button class="linkish" type="button" data-project-intent-edit aria-expanded="${editing}" aria-controls="project-owner-fields">${editing ? 'Bearbeiten schließen' : 'Status und Ziel bearbeiten'}</button></div>${p.status_note ? `<p class="muted">${esc(p.status_note)}</p>` : ''}${goalLine(p)}
       <div id="project-owner-fields"${editing ? '' : ' hidden'}><div class="statusbar"><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="Notiz an die Agents, z. B. warum geparkt" value="${esc(projectValue(p, 'status_note'))}" aria-label="Notiz an die Agents"></div><div class="statusbar goalbar"><span class="faint">Dein Ziel:</span><input id="goal-text" type="text" placeholder="z. B. v1.0 veröffentlichen, nur noch Bugfixes" value="${esc(projectValue(p, 'goal'))}" aria-label="Dein Ziel"><input id="goal-due" type="date" value="${esc(projectValue(p, 'goal_due'))}" aria-label="Bis wann" title="Bis wann (optional)"></div><p class="faint edit-hint">Änderungen werden beim Verlassen des Feldes gespeichert.</p></div></div>`;
     const factsKv = f.is_git ? `<dl class="kv">
       <dt>Commits</dt><dd class="mono">${num(commits.total)} gesamt · 7 T: ${num(commits.last_7d)} · 30 T: ${num(commits.last_30d)} · seit ${commits.first ? fmtDate(commits.first) : '—'}</dd>
@@ -899,12 +894,12 @@
       <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
     const r = c && c.reentry || {};
-    let body = `<button class="close" data-close type="button">Schließen</button>
-      <header class="project-summary"><h2 class="pname" ${anchor('name')}>${dot(p.id)}${esc(p.name)} ${phasePill(p)}${projectUnread(p) ? '<span class="pill new">ungelesen</span>' : ''}</h2>
-      ${c ? `<div class="one" ${anchor('purpose')}>${esc(c.one_liner)}</div><div class="project-current" ${anchor('headline')}><span class="faint">Aktueller Stand</span><p>${esc(c.headline)}</p>${cardFreshness(p)}</div>` : ''}
-      ${r.next_step ? `<div class="project-next" ${anchor('reentry')}><span class="faint">Nächster Schritt</span><p>${esc(r.next_step)}</p>${r.why ? `<div class="muted">${esc(r.why)}</div>` : ''}${r.done_when ? `<div class="muted">Fertig, wenn: ${esc(r.done_when)}</div>` : ''}${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>` : ''}
+    const head = `<header class="project-summary"><h2 class="pname" ${anchor('name')}>${dot(p.id)}${esc(p.name)} ${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}${projectUnread(p) ? '<span class="pill new">ungelesen</span>' : ''}</h2>
+      ${c ? `<div class="one" ${anchor('purpose')}>${esc(c.one_liner)}</div>` : ''}
+      <div class="project-brief">${c ? `<div class="project-current" ${anchor('headline')}><span class="faint">Aktueller Stand</span><p>${esc(c.headline)}</p>${cardFreshness(p)}</div>` : ''}
+      ${r.next_step ? `<div class="project-next" ${anchor('reentry')}><span class="faint">Nächster Schritt</span><p>${esc(r.next_step)}</p>${r.why ? `<div class="muted">${esc(r.why)}</div>` : ''}${r.done_when ? `<div class="muted">Fertig, wenn: ${esc(r.done_when)}</div>` : ''}${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>` : ''}</div>
       ${c && c.personality ? `<div class="say" ${anchor('voice')}>„${esc(c.personality)}“</div>` : ''}</header>
-      <div class="drawer-tabs" role="tablist" aria-label="Projektbereiche">${[['work', 'Weiterarbeiten'], ['handbook', 'Starten & Handbuch'], ['history', 'Verlauf & Fakten']].map(([key, title]) => `<button type="button" role="tab" id="drawer-tab-${key}" data-drawer-tab="${key}" aria-selected="${tab === key}" aria-controls="drawer-panel-${key}">${title}</button>`).join('')}</div>`;
+      <nav class="project-jump" aria-label="Abschnitte">${PROJECT_GROUPS.map(([key, title]) => `<button type="button" data-jump="${key}">${title}</button>`).join('')}</nav>`;
     let work = statusBar, handbook = '', history = sinceHtml(p);
     if (!c) {
       work += '<p class="note">Noch keine Einschätzung. Der nächste Agent-Lauf schreibt sie. Die gemessenen Git-Fakten findest du unter „Verlauf & Fakten“.</p>';
@@ -912,21 +907,21 @@
     } else {
       const v = c.vision || {};
       const suggestions = newestIdeas(c.suggestions.map(s => ({ s, firstSeen: (p.suggestion_first_seen || {})[s.id] }))).map(({ s }) => {
-        const content = ideaCard(s, [], p.id, null, { collection: drawerSearch?.id === p.id && drawerSearch.anchor === `suggestion:${s.id}` });
+        const content = ideaCard(s, [], p.id, null, { collection: projectSearch?.id === p.id && projectSearch.anchor === `suggestion:${s.id}` });
         return content ? `<div ${anchor(`suggestion:${s.id}`)}>${content}</div>` : '';
       }).join('');
       const hist = (p.history || []).filter((h, i, a) => i === a.length - 1 || h.headline !== a[i + 1].headline);
       const stampOf = at => new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
       const histRow = (h, i, a) => `<li><span class="when">${stampOf(h.at)}</span><span class="rail"></span><span class="what">${esc(h.headline)}${a[i + 1] && a[i + 1].phase !== h.phase ? ` <span class="pill ${esc(h.phase)}">${esc(PHASE[h.phase] || h.phase)}</span>` : ''}</span></li>`;
-      const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
+      const chronicle = hist.length > 1 ? `<ol class="timeline chron">${hist.slice(0, 8).map((h, i) => histRow(h, i, hist)).join('')}</ol>${hist.length > 8 ? `<details ${foldAttrs(`chronicle:${p.id}`)}><summary class="more">+ ${hist.length - 8} ältere</summary><ol class="timeline chron">${hist.slice(8).map((h, i) => histRow(h, i + 8, hist)).join('')}</ol></details>` : ''}` : '';
       work += section('questions', 'Wartet auf dich', c.waiting_on_you.length ? `<ul class="qs">${c.waiting_on_you.map(w => question(w, true).replace('<li ', `<li ${anchor(`question:${w.id}`)} `)).join('')}</ul>` : '')
         + section('open-ends', 'Offene Enden', c.open_ends.length ? `<div class="list">${c.open_ends.map((o, i) => `<div class="row" ${anchor(`open:${i}`)}><div class="t">${esc(o.title)}</div><span class="tag">${esc(KIND[o.kind] || o.kind)}</span>${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ''}${o.source ? `<div class="d mono">${esc(o.source)}</div>` : ''}<div class="d">${taskBtn(`open:${p.id}:${o.title}`, { projects: [p.id], title: o.title, why: o.detail, evidence: o.source })}</div></div>`).join('')}</div>` : '')
         + section('suggestions', 'Vorschläge', suggestions ? `<div class="cards2">${suggestions}</div>` : '')
         + section('decisions', 'Bewusst so entschieden', (c.decisions || []).length ? `<ul class="bullets">${c.decisions.map((n, i) => `<li ${anchor(`decision:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '', 'Aus den Unterlagen des Projekts')
         + section('connections', 'Querverbindungen', c.cross_project_hints.length ? `<ul class="bullets">${c.cross_project_hints.map((n, i) => `<li ${anchor(`connection:${i}`)}>${esc(n)}</li>`).join('')}</ul>` : '');
-      handbook = `<div class="stack" ${anchor('stack')}>${esc(c.stack || '')}</div>`
+      handbook = (c.stack ? `<div class="stack" ${anchor('stack')}>${esc(c.stack)}</div>` : '')
         + (hbEmpty(c.handbook) ? '<p class="muted">Noch kein Handbuch. Der nächste Agent-Lauf schreibt es.</p>' : handbookBody(c.handbook, true))
-        + section('features', 'Was es heute kann', c.features.length ? `<div class="feat">${c.features.map((x, i) => `<span ${anchor(`feature:${i}`)}>${esc(x)}</span>`).join('')}</div>` : '');
+        + (c.features.length ? hbSec('Was es heute kann', `<div class="feat">${c.features.map((x, i) => `<span ${anchor(`feature:${i}`)}>${esc(x)}</span>`).join('')}</div>`) : '');
       history += section('recent', 'Zuletzt passiert', c.recent_changes.length ? `<div class="list">${c.recent_changes.map((ch, i) => ({ ch, i })).sort((a, b) => b.ch.date.localeCompare(a.ch.date)).map(({ ch, i }) => `<div class="row" ${anchor(`recent:${i}`)}><div class="t">${esc(ch.title)}</div><div class="faint mono">${fmtShort(ch.date)}</div>${ch.detail ? `<div class="d">${esc(ch.detail)}</div>` : ''}</div>`).join('')}</div>` : '')
         + section('vision', 'Vision und Fortschritt', v.statement || v.progress_note || v.progress_pct != null ? `<div>${v.statement ? `<p>${esc(v.statement)}</p>` : ''}${v.progress_pct != null ? `<div class="faint">Agent-Einschätzung: ${Number(v.progress_pct)} %</div>` : ''}${v.progress_note ? `<p class="muted">${esc(v.progress_note)}</p>` : ''}</div>` : '')
         + section('milestones', 'Meilensteine', c.milestones.length ? `<ol class="timeline">${c.milestones.map((m, i) => `<li ${anchor(`milestone:${i}`)}><span class="when">${fmtDate(m.date)}</span><span class="rail"></span><span class="what">${esc(m.title)}</span></li>`).join('')}</ol>` : '')
@@ -940,45 +935,41 @@
     history += `<button class="btn" type="button" data-project-statistics="${esc(p.id)}">Statistik und vollständigen Verlauf öffnen</button>`;
     history += section('past-replies', 'Deine früheren Antworten', replies.length ? `<ul class="bullets">${replies.map(([id, f]) => `<li ${anchor(`answer:${id}`)}><b>${esc(f.item.title || f.title)}</b><p>${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Von dir als erledigt markiert.'}${f.at ? ` <span class="faint">· ${fmtDate(f.at)}</span>` : ''}</p></li>`).join('')}</ul>` : '')
       + warningControls(p) + section('facts', 'Fakten aus Git', factsKv, p.facts_collected_at ? `gemessen vor ${minutesAgo(p.facts_collected_at)} Min` : null)
-      + (f.is_git ? `<details class="commit-history" data-drawer-detail="commits"><summary>Commit-Aktivität ansehen</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
-    body += [['work', work], ['handbook', handbook], ['history', history]].map(([key, html]) => `<section id="drawer-panel-${key}" class="drawer-panel" role="tabpanel" aria-labelledby="drawer-tab-${key}"${tab === key ? '' : ' hidden'}>${html}</section>`).join('');
-    return `<div class="scrim" data-close></div><aside class="drawer project-drawer" role="dialog" aria-modal="true" aria-label="${esc(p.name)}">${body}</aside>`;
+      + (f.is_git ? `<details class="commit-history" ${foldAttrs(`commits:${p.id}`)}><summary>Commit-Aktivität ansehen</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
+    const groups = { work, handbook, history };
+    return `<article class="project-detail" aria-label="${esc(p.name)}">${head}${PROJECT_GROUPS.map(([key, title]) => `<section id="project-group-${key}" class="project-group" ${anchor(`group:${key}`)}><h2 class="group-title">${title}</h2>${groups[key]}</section>`).join('')}</article>`;
   }
 
-  function openDrawer(id, keepScroll, searchTarget = null) {
-    const p = byId(id);
-    if (!p) return;
-    const focused = keepScroll ? inputFocus() : null;
-    const root = $('#drawer-root');
-    const prev = root.querySelector('.drawer');
-    const top = keepScroll && prev ? prev.scrollTop : 0;
-    const details = keepScroll && prev ? [...prev.querySelectorAll('details[open]')].map(el => el.dataset.drawerDetail || el.querySelector('summary')?.textContent).filter(Boolean) : [];
-    if (!keepScroll) {
-      since = null;
-      drawerSearch = searchTarget;
-      call('open_project', { id }).then(r => { if (openId === id && r.since) { since = { id, data: r.since }; openDrawer(id, true); } }).catch(() => {});
-    }
-    root.innerHTML = drawerHtml(p);
+  // Selecting a project records a visit; refreshing the page around it does not.
+  // From the project list, focus stays in the list so ↑/↓ keeps flipping through projects.
+  function openProject(id, searchTarget = null, fromList = false) {
+    if (!byId(id)) return;
+    const switching = openId !== id;
+    since = null;
+    projectSearch = searchTarget;
     openId = id;
-    const d = root.querySelector('.drawer');
-    if (details.length) for (const el of d.querySelectorAll('details')) {
-      if (details.includes(el.dataset.drawerDetail || el.querySelector('summary')?.textContent)) el.open = true;
-    }
-    d.scrollTop = top;
-    if (!keepScroll) root.querySelector('.close').focus();
-    else { restoreInputFocus(focused); if (drawerSearch && drawerSearch.id === id) revealDrawerTarget(drawerSearch.anchor, false); }
+    if (S.prefs.style !== 'board') setPref('style', 'board'); else render();
+    if (switching && !searchTarget) window.scrollTo(0, 0);
+    if (fromList) document.querySelector(`.project-list [data-open="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+    else if (!searchTarget) $('#project-page [data-search-anchor="name"]')?.focus({ preventScroll: true });
+    call('open_project', { id }).then(r => { if (openId === id && r.since) { since = { id, data: r.since }; renderProjectPage(); } }).catch(() => {});
   }
-  const closeDrawer = () => { $('#drawer-root').innerHTML = ''; openId = null; drawerSearch = null; };
-  function selectDrawerTab(tab) {
-    if (!openId || !['work', 'handbook', 'history'].includes(tab)) return;
-    drawerTabs[openId] = tab;
-    drawerSearch = null;
-    openDrawer(openId, true);
-    $('#drawer-root .drawer').scrollTop = 0;
-    $(`#drawer-tab-${tab}`).focus({ preventScroll: true });
+  function renderProjectPage() {
+    const p = openId && byId(openId), root = $('#project-page');
+    if (!p || !root || S.prefs.style !== 'board') return;
+    root.innerHTML = projectPageHtml(p);
+    if (projectSearch && projectSearch.id === p.id) revealProjectTarget(projectSearch.anchor, false);
   }
-  function revealDrawerTarget(anchor, focus = true) {
-    const target = $(`#drawer-root [data-search-anchor="${CSS.escape(anchor)}"]`);
+  function closeProject() {
+    if (!openId) return;
+    const id = openId;
+    openId = null; projectSearch = null; since = null;
+    render();
+    window.scrollTo(0, 0);
+    $(`[data-open="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  }
+  function revealProjectTarget(anchor, focus = true) {
+    const target = $(`#project-page [data-search-anchor="${CSS.escape(anchor)}"]`);
     if (!target) return;
     for (let parent = target.parentElement; parent; parent = parent.parentElement) {
       if (parent.tagName === 'DETAILS') parent.open = true;
@@ -987,22 +978,34 @@
     target.classList.add('search-hit');
     if (focus) { target.scrollIntoView({ block: 'center' }); target.focus({ preventScroll: true }); }
   }
-  function openDrawerTarget(id, tab = 'work', anchor = 'name') {
+  // `group` names the part of the page that holds the anchor; it is the fallback when the anchor is gone
+  function openProjectTarget(id, group = 'work', anchor = 'name') {
     if (!byId(id)) return;
-    drawerTabs[id] = ['work', 'handbook', 'history'].includes(tab) ? tab : 'work';
-    openDrawer(id, false, { id, anchor });
-    revealDrawerTarget(anchor);
+    openProject(id, { id, anchor });
+    if ($(`#project-page [data-search-anchor="${CSS.escape(anchor)}"]`)) revealProjectTarget(anchor);
+    else revealProjectTarget(`group:${PROJECT_GROUPS.some(([key]) => key === group) ? group : 'work'}`);
+  }
+  function jumpTo(group) {
+    const target = $(`#project-group-${group}`);
+    if (!target) return;
+    target.scrollIntoView({ block: 'start' });
+    target.focus({ preventScroll: true });
+  }
+  function moveInProjectList(from, step) {
+    const items = [...document.querySelectorAll('.project-list .plist-item')];
+    const i = items.indexOf(from);
+    if (i >= 0 && items.length) openProject(items[(i + step + items.length) % items.length].dataset.open, null, true);
   }
 
   // ---------- decision round: every open question, one at a time ----------
   function startRound() {
     const queue = [...visible()].filter(p => p.card).sort((a, b) => risk(b) - risk(a)).flatMap(p => openQs(p.card).map(w => w.id)).filter(Boolean);
     if (!queue.length) return;
-    closeDrawer();
+    closeIdeaRound();
     round = { queue, i: 0, stats: { answered: 0, done: 0, skipped: 0 }, busy: false };
     renderRound();
   }
-  const closeRound = () => { round = null; $('#round-root').innerHTML = ''; };
+  const closeRound = () => { if (!round) return; round = null; $('#round-root').innerHTML = ''; };
   function renderRound(keepFocus = false) {
     const root = $('#round-root');
     if (!round) { root.innerHTML = ''; return; }
@@ -1051,6 +1054,65 @@
     active.busy = false;
     if (saved) { active.stats[value === 'answered' ? 'answered' : 'done']++; active.i++; delete drafts[id]; }
     renderRound();
+  }
+
+  // ---------- idea round: every new idea, one at a time ----------
+  let ideaRound = null;   // { queue: idea ids, i, stats, busy }
+  const ideaRatings = () => [['up', 'Gut', 'Merken. Ein Auftrag entsteht erst, wenn du ihn übergibst'], ['later', 'Später', `Kommt in ${S.snooze_days || 7} Tagen wieder`], ['down', 'Quatsch', 'Die Agents bringen das nicht wieder']];
+  const freshIdea = id => { const entry = ideaCollection().find(e => e.s.id === id); return entry && ideaBucket(entry) === 'new' ? entry : null; };
+  function startIdeaRound() {
+    const queue = ideaCollection().filter(e => ideaBucket(e) === 'new').map(e => e.s.id);
+    if (!queue.length) return;
+    closeRound();
+    ideaRound = { queue, i: 0, stats: { up: 0, later: 0, down: 0, skipped: 0 }, busy: false };
+    renderIdeaRound();
+  }
+  function closeIdeaRound() {
+    if (!ideaRound) return;
+    ideaRound = null; $('#round-root').innerHTML = '';
+  }
+  function renderIdeaRound(keepFocus = false) {
+    const root = $('#round-root');
+    if (!ideaRound || ideaRound.busy) return;
+    const previousInput = $('#idea-round-note');
+    const hadFocus = previousInput && document.activeElement === previousInput;
+    while (ideaRound.i < ideaRound.queue.length && !freshIdea(ideaRound.queue[ideaRound.i])) ideaRound.i++;
+    const n = ideaRound.queue.length, st = ideaRound.stats;
+    let body;
+    if (ideaRound.i >= n) {
+      body = `<h3>Geschafft.</h3><p class="muted">${st.up} gut, ${st.later} später, ${st.down} Quatsch, ${st.skipped} übersprungen. Die Agents richten künftige Vorschläge danach.</p>
+        <div class="actions"><button class="btn primary" type="button" data-iround-close>Schließen</button></div>`;
+    } else {
+      const entry = freshIdea(ideaRound.queue[ideaRound.i]), s = entry.s, id = s.id;
+      const who = (entry.projects || []).filter(byId).map(pid => `<span class="rproj-name">${dot(pid)}${esc(byId(pid).name)}</span>`).join('');
+      const choices = ideaRatings().map(([value, label, effect], i) => `<button type="button" class="ropt" data-iround-rate="${value}"><span class="k mono">${i + 1}</span><span><b>${label}</b><span class="muted">${esc(effect)}</span></span></button>`).join('');
+      body = `<div class="rproj"><span class="faint">${esc(IDEA_KINDS[entry.kind] || '')}</span>${who}</div>
+        <h3>${esc(s.title)}</h3>${s.why || s.pitch ? `<p>${esc(s.why || s.pitch)}</p>` : ''}${s.because ? `<p class="muted"><b>Weil:</b> ${esc(s.because)}</p>` : ''}${entry.assessment ? `<p class="muted"><b>Agent-Einschätzung:</b> ${esc(entry.assessment.why)}</p>` : ''}${s.evidence ? `<div class="qsrc mono">${esc(s.evidence)}</div>` : ''}
+        <div class="ropts">${choices}</div>
+        <div class="inrow"><input type="text" id="idea-round-note" data-iround-note="${esc(id)}" value="${esc(drafts[id] || '')}" maxlength="300" placeholder="Warum? Optional, die Agents lernen daraus" aria-label="Warum (optional)"></div>
+        <div class="actions"><button class="btn" type="button" data-iround-skip>Überspringen</button></div>`;
+    }
+    root.innerHTML = `<div class="scrim" data-iround-close></div><div class="round" role="dialog" aria-modal="true" aria-label="Ideen bewerten">
+      <div class="rhead"><span class="faint">Ideen bewerten${ideaRound.i < n ? ` · ${ideaRound.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-iround-close>beenden</button></div>
+      <div class="rprog"><span style="width:${(Math.min(ideaRound.i, n) / n * 100).toFixed(1)}%"></span></div>${body}</div>`;
+    if (!keepFocus) root.querySelector(ideaRound.i < n ? '[data-iround-rate]' : '[data-iround-close].btn')?.focus();
+    else if (hadFocus) $('#idea-round-note')?.focus();
+  }
+  async function ideaRoundStep(value) {
+    const active = ideaRound;
+    if (!active || active.busy) return;
+    const id = active.queue[active.i];
+    if (!id || !freshIdea(id)) { renderIdeaRound(); return; }
+    if (value === 'skip') { active.stats.skipped++; active.i++; renderIdeaRound(); return; }
+    const note = (drafts[id] || '').trim();
+    active.busy = true;
+    document.querySelectorAll('#round-root button:not([data-iround-close]), #idea-round-note').forEach(el => { el.disabled = true; });
+    const saved = await react(id, value, note || undefined);
+    // A save may finish after the owner closed this round or started another one.
+    if (ideaRound !== active) return;
+    active.busy = false;
+    if (saved) { active.stats[value]++; active.i++; delete drafts[id]; }
+    renderIdeaRound();
   }
 
   // ---------- search ----------
@@ -1173,9 +1235,9 @@
     if (matches.length !== 1) { toast('Treffer nicht mehr aktuell oder nicht mehr eindeutig. Öffne die Suche erneut.'); return; }
     const result = matches[0];
     closeSearch();
-    if (result.ideaId) { closeDrawer(); openIdeaResult(result.ideaId); return; }
-    if (result.taskId != null) { closeDrawer(); openTaskResult(result.taskId); return; }
-    openDrawerTarget(result.id, result.tab, result.anchor);
+    if (result.ideaId) { openIdeaResult(result.ideaId); return; }
+    if (result.taskId != null) { openTaskResult(result.taskId); return; }
+    openProjectTarget(result.id, result.tab, result.anchor);
   }
 
   // ---------- statistics and durable content history ----------
@@ -1279,7 +1341,7 @@
     return `<div class="statistics-page"><header class="ideas-heading"><h1>Statistik & Verlauf</h1><p>Wie sich deine Projekte entwickeln – mit gespeicherten Messständen und nachvollziehbaren Änderungen.</p></header><nav class="idea-filters" aria-label="Statistikansicht"><button class="idea-filter" type="button" data-stats-tab="numbers" aria-pressed="${statsTab === 'numbers'}">Zahlen & Entwicklung</button><button class="idea-filter" type="button" data-stats-tab="history" aria-pressed="${statsTab === 'history'}">Änderungsverlauf</button></nav>${controls}${statsTab === 'numbers' ? `<div class="stat-presets">${[[7, '7 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([days, title]) => `<button class="linkish" type="button" data-stats-range="${days}">${title}</button>`).join('')}</div>` : ''}${body}</div>`;
   }
   async function openStatistics(project, tab = 'numbers') {
-    statsProject = project; statsTab = tab; invalidateStatistics(); openId = null; $('#drawer-root').innerHTML = '';
+    statsProject = project; statsTab = tab; invalidateStatistics();
     S.prefs.style = 'statistics'; render();
     try { await call('set_pref', { key: 'style', value: 'statistics' }); } catch (e) { toast(errText(e)); }
   }
@@ -1417,7 +1479,7 @@
     return `<div class="scrim" data-close-panel></div><aside class="drawer panel" role="dialog" aria-modal="true" aria-label="Einstellungen">
       <button class="close" data-close-panel type="button">Schließen</button>
       <h2 class="pname">Einstellungen</h2>
-      <section class="mod"><div class="mod-head"><div><h2>Projekte</h2><div class="sub">${S.projects.length ? `${S.projects.length} im Blick. Status und Notiz setzt du im Steckbrief eines Projekts.` : 'Noch keine.'}</div></div></div>
+      <section class="mod"><div class="mod-head"><div><h2>Projekte</h2><div class="sub">${S.projects.length ? `${S.projects.length} im Blick. Status und Notiz setzt du auf der Seite eines Projekts.` : 'Noch keine.'}</div></div></div>
         <div class="plist">${projects}</div>
         ${discBusyOrListing('panel') ? '' : '<div class="actions"><button class="btn" type="button" data-pick data-target="panel">Projekte hinzufügen …</button></div>'}
         ${discHtml('panel')}</section>
@@ -1442,7 +1504,6 @@
     restoreInputFocus(focused);
   }
   async function openPanel() {
-    closeDrawer();
     panelOpen = true;
     renderPanel(false);
     try { settings = await call('settings'); renderPanel(true); } catch (e) { toast(errText(e)); }
@@ -1465,12 +1526,15 @@
     $('#refresh').hidden = !S.projects.length;
     $('.switch').hidden = false;
     document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
-    const style = { board: renderBoard, ideas: renderIdeas, handbook: renderHandbook, statistics: renderStatistics }[S.prefs.style] || renderHandover;
+    const freshIdeas = ideaCollection().filter(e => ideaBucket(e) === 'new').length, ideasTab = $('.switch [data-style="ideas"]');
+    if (ideasTab) ideasTab.innerHTML = `Ideen${freshIdeas ? ` <span class="nav-count" title="${freshIdeas} neue Ideen ohne deine Bewertung">${freshIdeas}</span>` : ''}`;
+    const style = { board: renderBoard, ideas: renderIdeas, statistics: renderStatistics }[S.prefs.style] || renderHandover;
     $('#view').innerHTML = !S.projects.length && (!S.prefs.style || S.prefs.style === 'handover') ? renderEmpty() + blockAttention() : style();
     renderFoot();
-    if (openId) openDrawer(openId, true);
+    renderProjectPage();
     if (panelOpen) renderPanel(true);
     if (round) renderRound(true);
+    if (ideaRound) renderIdeaRound(true);
     renderTaskPreview();
     restoreInputFocus(focused);
   }
@@ -1488,8 +1552,12 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
   async function load(visit) {
-    try { S = await call('state', { visit }); if (S.prefs.style === 'statistics') invalidateStatistics(true); render(); }
-    catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
+    try {
+      S = await call('state', { visit });
+      if (S.prefs.style === 'handbook') S.prefs.style = 'board';
+      if (S.prefs.style === 'statistics') invalidateStatistics(true);
+      render();
+    } catch (e) { $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`; }
     if (!shown) { shown = true; call('ready').catch(() => {}); }
   }
   let refreshing = false;
@@ -1525,7 +1593,7 @@
       return true;
     } catch (e) { toast('Nicht gespeichert: ' + errText(e)); return false; }
   }
-  // the drawer renders after the page, so the last field is the one in front
+  // a dialog renders after the page, so the last field is the one in front
   const focusDraft = id => { const all = document.querySelectorAll(`[data-draft="${CSS.escape(id)}"]`); if (all.length) all[all.length - 1].focus(); };
   async function setFeedback(el, v) {
     const id = el.dataset.item;
@@ -1808,7 +1876,7 @@
     const nav = t.closest('[data-nav]');
     if (nav) { await setPref('style', nav.dataset.nav); window.scrollTo(0, 0); return; }
     const attention = t.closest('[data-attention-project]');
-    if (attention) { openDrawerTarget(attention.dataset.attentionProject, attention.dataset.attentionTab || 'work', attention.dataset.attentionAnchor); return; }
+    if (attention) { openProjectTarget(attention.dataset.attentionProject, attention.dataset.attentionTab || 'work', attention.dataset.attentionAnchor); return; }
     if (t.closest('[data-attention-all]')) { showAllAttention = !showAllAttention; render(); return; }
     if (t.closest('[data-task-inspection-close]')) { inspectedTask = null; render(); return; }
     if (taskPreview) {
@@ -1848,6 +1916,13 @@
     const read = t.closest('[data-changes-read]');
     if (read) { markChangesRead(read.dataset.changesRead); return; }
     if (t.closest('[data-round-start]')) { startRound(); return; }
+    if (t.closest('[data-iround-start]')) { startIdeaRound(); return; }
+    if (t.closest('[data-iround-close]')) { closeIdeaRound(); return; }
+    if (ideaRound) {
+      const rate = t.closest('[data-iround-rate]');
+      if (rate) { ideaRoundStep(rate.dataset.iroundRate); return; }
+      if (t.closest('[data-iround-skip]')) { ideaRoundStep('skip'); return; }
+    }
     if (t.closest('[data-round-close]')) { closeRound(); return; }
     if (round) {
       const ro = t.closest('[data-round-opt]');
@@ -1862,12 +1937,13 @@
     if (t.closest('[data-search-close]')) { closeSearch(); return; }
     const sr = t.closest('[data-sres]');
     if (sr) { pickResult(sr); return; }
-    const drawerTab = t.closest('[data-drawer-tab]');
-    if (drawerTab) { selectDrawerTab(drawerTab.dataset.drawerTab); return; }
-    if (t.closest('[data-drawer-edit]') && openId) {
-      if (drawerEditors.has(openId)) drawerEditors.delete(openId); else drawerEditors.add(openId);
-      openDrawer(openId, true);
-      $('#drawer-root [data-drawer-edit]').focus({ preventScroll: true });
+    const jump = t.closest('[data-jump]');
+    if (jump) { jumpTo(jump.dataset.jump); return; }
+    if (t.closest('[data-project-overview]')) { closeProject(); return; }
+    if (t.closest('[data-project-intent-edit]') && openId) {
+      if (projectEditors.has(openId)) projectEditors.delete(openId); else projectEditors.add(openId);
+      renderProjectPage();
+      $('#project-page [data-project-intent-edit]').focus({ preventScroll: true });
       return;
     }
     if (t.closest('[data-idea-add]')) { addIdea(); return; }
@@ -1901,7 +1977,7 @@
     if (ru) { react(ru.dataset.replyUndo, null); return; }
     const fd = t.closest('[data-focus-done]');
     if (fd) { const id = fd.dataset.focusDone; react(id, reply(id) ? null : 'done', null); return; }
-    const st = t.closest('[data-status]');
+    const st = t.closest('.seg [data-status]');
     if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return; }
     if (t.closest('[data-open-settings]')) { openPanel(); return; }
     if (t.closest('[data-close-panel]')) { closePanel(); return; }
@@ -1930,8 +2006,7 @@
     const ext = t.closest('[data-external]');
     if (ext) { call('open_external', { target: ext.dataset.external }).catch(err => toast(errText(err))); return; }
     const op = t.closest('[data-open]');
-    if (op) { openDrawer(op.dataset.open); return; }
-    if (t.closest('[data-close]')) { closeDrawer(); }
+    if (op) { openProject(op.dataset.open, null, op.classList.contains('plist-item')); }
   });
   document.addEventListener('change', async e => {
     if (e.target.matches('[data-disc]')) {
@@ -1957,7 +2032,10 @@
     }
   });
   document.addEventListener('input', e => { if (e.target.id === 'search-q') { searchQ = e.target.value; searchSel = 0; renderSearchResults(); } });
-  document.addEventListener('input', e => { if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value; });
+  document.addEventListener('input', e => {
+    if (e.target.matches('[data-draft]')) drafts[e.target.dataset.draft] = e.target.value;
+    if (e.target.dataset?.iroundNote) drafts[e.target.dataset.iroundNote] = e.target.value;
+  });
   document.addEventListener('input', e => {
     if (e.target.id === 'idea-text') ideaDraft = e.target.value;
     if (e.target.dataset?.ownerIdeaText) { const draft = ownerIdeaDrafts.get(Number(e.target.dataset.ownerIdeaText)); if (draft) draft.text = e.target.value; }
@@ -1975,13 +2053,16 @@
   }, true);
   document.addEventListener('keydown', e => {
     if (taskPreviewKey(e)) return;
-    if (e.target.dataset && e.target.dataset.drawerTab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-      e.preventDefault();
-      const tabs = ['work', 'handbook', 'history'], current = tabs.indexOf(e.target.dataset.drawerTab);
-      selectDrawerTab(tabs[e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (current + (e.key === 'ArrowRight' ? 1 : 2)) % 3]);
-      return;
+    if (e.target.classList?.contains('plist-item') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault(); moveInProjectList(e.target, e.key === 'ArrowDown' ? 1 : -1); return;
     }
     if (e.target.id === 'idea-text' && e.key === 'Enter') { e.preventDefault(); addIdea(); return; }
+    if (ideaRound) {
+      if (e.key === 'Escape') { e.preventDefault(); closeIdeaRound(); return; }
+      const value = e.target.id === 'idea-round-note' ? null : ({ 1: 'up', 2: 'later', 3: 'down' })[e.key];
+      if (value) { e.preventDefault(); ideaRoundStep(value); }
+      return;
+    }
     if (round) {
       if (e.key === 'Escape') { e.preventDefault(); closeRound(); return; }
       const inInput = e.target.id === 'round-answer';
@@ -2017,7 +2098,7 @@
     if (e.key === 'Escape') {
       if ($('#report-status').open) { e.preventDefault(); $('#report-status').open = false; $('#report-status-summary').focus(); }
       else if (panelOpen) closePanel();
-      else closeDrawer();
+      else if (S && S.prefs.style === 'board' && !typing()) closeProject();
     }
   });
   $('#refresh').addEventListener('click', refreshFacts);

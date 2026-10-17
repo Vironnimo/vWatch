@@ -20,7 +20,7 @@ test('legacy effort estimates stay invisible while recommendations and task acti
     assert.doesNotMatch(markup, /class="effort"/);
     assert.doesNotMatch(markup, />(?:half-day|hour|day|week|S|M|L)</);
   };
-  for (const style of ['handover', 'board', 'ideas', 'handbook']) {
+  for (const style of ['handover', 'board', 'ideas', 'statistics']) {
     a.state.prefs.style = style;
     await a.ui.load(false);
     const overview = a.node('#view').innerHTML;
@@ -39,13 +39,14 @@ test('legacy effort estimates stay invisible while recommendations and task acti
       for (const title of ['New app item', 'Synergy item', 'Parked idea', 'Fits the existing project']) assert.ok(overview.includes(title));
       for (const id of ['n1', 'y1', 's1', 'idea:7']) assert.ok(overview.includes(`data-task="${id}"`));
     }
-    a.ui.openDrawer('sample');
-    const drawer = a.node('#drawer-root').innerHTML;
-    noEstimates(drawer);
-    assert.match(drawer, /Continue the work/);
-    assert.match(drawer, /Observed need/);
-    assert.match(drawer, /data-task="reentry:sample"/);
-    assert.match(drawer, /data-task="s1"/);
+    a.ui.openProject('sample');
+    const projectPage = a.node('#project-page').innerHTML;
+    noEstimates(projectPage);
+    assert.match(projectPage, /Continue the work/);
+    assert.match(projectPage, /Observed need/);
+    assert.match(projectPage, /data-task="reentry:sample"/);
+    assert.match(projectPage, /data-task="s1"/);
+    a.ui.closeProject();
   }
   await a.ui.copyTask('reentry:sample');
   assert.match(a.copied.at(-1), /Fertig, wenn: The result works/);
@@ -118,11 +119,11 @@ test('ideas show the newest proposals globally and expand without losing ratings
   a.ui.openSnooze('cleanup');
   assert.match(a.ui.blockIdeas(), /Third suggestion/);
   assert.match(a.ui.blockIdeas(), /data-snooze-save/);
-  a.ui.openDrawer('sample');
-  const drawer = a.node('#drawer-root').innerHTML;
-  assert.ok(drawer.indexOf('Later feature') < drawer.indexOf('First priority'));
-  assert.ok(drawer.indexOf('Third suggestion') < drawer.indexOf('Unknown date idea'));
-  assert.equal(a.calls.filter(c => c.command === 'set_pref' || c.command === 'set_feedback').length, 0);
+  a.ui.openProject('sample');
+  const projectPage = a.node('#project-page').innerHTML;
+  assert.ok(projectPage.indexOf('Later feature') < projectPage.indexOf('First priority'));
+  assert.ok(projectPage.indexOf('Third suggestion') < projectPage.indexOf('Unknown date idea'));
+  assert.equal(a.calls.filter(c => c.command === 'set_feedback').length, 0);
 });
 
 test('idea timestamp ties and missing history preserve authored order without inventing dates', async () => {
@@ -289,15 +290,17 @@ test('refresh preserves unsent idea and project text', async () => {
     target: { id, value, matches: () => false },
   });
   input('idea-text', 'A useful new app');
-  a.ui.openDrawer('sample');
-  a.dispatch('click', { target: { closest: selector => selector === '[data-drawer-edit]' ? {} : null } });
+  a.ui.openProject('sample');
+  a.dispatch('click', { target: { closest: selector => selector === '[data-project-intent-edit]' ? {} : null } });
   input('goal-text', 'Ship next month');
   input('status-note', 'Only fix bugs');
   await a.ui.load(false);
+  assert.doesNotMatch(a.node('#project-page').innerHTML, /id="project-owner-fields" hidden/);
+  assert.match(a.node('#project-page').innerHTML, /value="Ship next month"/);
+  assert.match(a.node('#project-page').innerHTML, /value="Only fix bugs"/);
+  a.dispatch('click', { target: { closest: selector => selector === '.switch button' ? { dataset: { style: 'ideas' } } : null } });
+  await a.ui.load(false);
   assert.match(a.node('#view').innerHTML, /value="A useful new app"/);
-  assert.doesNotMatch(a.node('#drawer-root').innerHTML, /id="project-owner-fields" hidden/);
-  assert.match(a.node('#drawer-root').innerHTML, /value="Ship next month"/);
-  assert.match(a.node('#drawer-root').innerHTML, /value="Only fix bugs"/);
 });
 
 function editProjectField(a, field, value) {
@@ -572,10 +575,10 @@ test('tracked results await owner confirmation and survive replacement of the so
   assert.match(a.node('#view').innerHTML, /cargo test passed/);
   assert.match(a.node('#view').innerHTML, /data-task-status="done"/);
   await a.ui.changeTaskStatus(4, 'done');
-  a.ui.openDrawer('sample');
-  assert.match(a.node('#drawer-root').innerHTML, /abgeschlossene Aufträge/);
-  assert.match(a.node('#drawer-root').innerHTML, /Original request/);
-  assert.match(a.node('#drawer-root').innerHTML, /Wieder öffnen/);
+  a.ui.openProject('sample');
+  assert.match(a.node('#project-page').innerHTML, /abgeschlossene Aufträge/);
+  assert.match(a.node('#project-page').innerHTML, /Original request/);
+  assert.match(a.node('#project-page').innerHTML, /Wieder öffnen/);
   await a.ui.changeTaskStatus(4, 'assigned', 1);
   assert.equal(a.state.tasks[0].status, 'assigned');
 });
@@ -633,8 +636,8 @@ test('routine Git stays neutral while acknowledging a collision reduces attentio
   assert.equal(a.ui.risk(p), before);
   assert.match(a.node('#view').innerHTML, /bewusst ohne Remote/);
   assert.match(a.node('#view').innerHTML, /2 Dateien, \+0\/−0/);
-  a.ui.openDrawer('sample');
-  assert.match(a.node('#drawer-root').innerHTML, /Intentionally local/);
+  a.ui.openProject('sample');
+  assert.match(a.node('#project-page').innerHTML, /Intentionally local/);
   await a.ui.saveWarning('sample', 'no_remote', true);
   assert.equal(a.ui.risk(p), before);
   p.facts.collisions = [{ a: { kind: 'main' }, b: { kind: 'worktree', name: 'feature' }, count: 1, files: ['src/lib.rs'] }];
@@ -644,12 +647,12 @@ test('routine Git stays neutral while acknowledging a collision reduces attentio
   a.dispatch('input', { target: { value: 'Coordinated edits', dataset: { warningNote: 'sample:worktrees' }, matches: () => false } });
   await a.ui.saveWarning('sample', 'worktrees');
   assert.equal(a.ui.risk(p), before);
-  assert.match(a.node('#drawer-root').innerHTML, /src\/lib\.rs/);
-  assert.match(a.node('#drawer-root').innerHTML, /Coordinated edits/);
+  assert.match(a.node('#project-page').innerHTML, /src\/lib\.rs/);
+  assert.match(a.node('#project-page').innerHTML, /Coordinated edits/);
   p.warnings.push({ key: 'ci_red', title: 'CI ist fehlgeschlagen', can_acknowledge: false });
   await a.ui.load(false);
-  assert.match(a.node('#drawer-root').innerHTML, /CI ist fehlgeschlagen/);
-  assert.doesNotMatch(a.node('#drawer-root').innerHTML, /data-warning-open="ci_red"/);
+  assert.match(a.node('#project-page').innerHTML, /CI ist fehlgeschlagen/);
+  assert.doesNotMatch(a.node('#project-page').innerHTML, /data-warning-open="ci_red"/);
 });
 
 test('read acknowledgement uses the displayed token and is never automatic', async () => {
@@ -678,7 +681,7 @@ test('report checks stay compact, concrete and distinct from Git freshness in ev
       projects: [{ id: 'sample', status: 'current', initial_version: 4, card_version: 5 },
         { id: 'other', name: 'Other project', status: 'current', initial_version: 3, card_version: 3 }],
       portfolio: { status: 'current', initial_version: 8, version: 9 } } };
-  for (const style of ['handover', 'board', 'handbook']) {
+  for (const style of ['handover', 'board', 'ideas']) {
     a.state.prefs.style = style;
     await a.ui.load(false);
     assert.equal(a.node('#report-status-summary').textContent, 'Berichte geprüft');
@@ -711,7 +714,7 @@ test('incomplete report checks and waiting replies stay visible with actionable 
   a.state.run_status = { state: 'incomplete', pending_owner_replies: 2, repair_task: 'Continue this run',
     latest: { started_at: '2026-10-07T07:00:00Z', counts: { total: 2, current: 1 },
       projects: [{ id: 'sample', status: 'pending', reason: 'no_card' }], portfolio: { status: 'pending', reason: 'missing' } } };
-  for (const style of ['handover', 'board', 'handbook']) {
+  for (const style of ['handover', 'board', 'ideas']) {
     a.state.prefs.style = style;
     await a.ui.load(false);
     assert.equal(a.node('#report-status-summary').textContent, 'Prüfung unvollständig · 2 Antworten offen');
@@ -788,8 +791,8 @@ test('project recent activity is newest first and keeps the authored order withi
     { date: '2026-10-07', title: 'Latest project event second' },
   ];
   await a.ui.load(false);
-  a.ui.openDrawer('sample');
-  const html = a.node('#drawer-root').innerHTML;
+  a.ui.openProject('sample');
+  const html = a.node('#project-page').innerHTML;
   assert.ok(html.indexOf('Latest project event first') < html.indexOf('Latest project event second'));
   assert.ok(html.indexOf('Latest project event second') < html.indexOf('Earlier project event'));
   assert.equal(a.state.projects[0].card.recent_changes[0].title, 'Earlier project event');
