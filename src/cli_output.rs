@@ -187,6 +187,60 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                 0,
             );
         }
+        "questions" => {
+            let questions = list(&data["questions"]);
+            line(
+                &mut out,
+                0,
+                &format!(
+                    "{} open question{} for the owner{}, longest waiting first.",
+                    questions.len(),
+                    if questions.len() == 1 { "" } else { "s" },
+                    data["project"]
+                        .as_str()
+                        .map(|p| format!(" in {p}"))
+                        .unwrap_or_default()
+                ),
+            );
+            if let Some(n) = data["snoozed"].as_u64().filter(|n| *n > 0) {
+                line(
+                    &mut out,
+                    0,
+                    &format!("Note: {n} snoozed questions are left out until their return date."),
+                );
+            }
+            for q in questions {
+                line(
+                    &mut out,
+                    0,
+                    &format!(
+                        "- {} | {} | shown {} days | {}",
+                        text(&q["id"]),
+                        text(&q["project"]),
+                        q["days"].as_i64().map_or("?".to_owned(), |d| d.to_string()),
+                        text(&q["title"])
+                    ),
+                );
+                let recommended = q["recommended"].as_u64();
+                for (i, option) in list(&q["options"]).iter().enumerate() {
+                    let mark = if recommended == Some(i as u64 + 1) {
+                        " (recommended)"
+                    } else {
+                        ""
+                    };
+                    let effect = option["effect"]
+                        .as_str()
+                        .filter(|e| !e.is_empty())
+                        .map(|e| format!(": {}", escaped(e)))
+                        .unwrap_or_default();
+                    line(
+                        &mut out,
+                        1,
+                        &format!("{}. {}{mark}{effect}", i + 1, text(&option["answer"])),
+                    );
+                }
+            }
+        }
         "proposals" => {
             line(
                 &mut out,
@@ -387,6 +441,8 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                 0,
                 if command == "context" {
                     "Project context for writing its card."
+                } else if data.get("owner_ideas").is_none() {
+                    "Full project details from the portfolio context."
                 } else {
                     "Portfolio context for writing the brief."
                 },
@@ -398,6 +454,14 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     0,
                     "Note: archived and removed projects are excluded from the portfolio.",
                 );
+                let summaries: Vec<&str> = list(&data["projects"])
+                    .iter()
+                    .filter(|p| p["card"]["detail"] == "summary")
+                    .filter_map(|p| p["id"].as_str())
+                    .collect();
+                if let Some(first) = summaries.first() {
+                    line(&mut out, 0, &format!("Note: {} projects unchanged since the previous brief are summaries (detail: summary). For the full card details of one, run `watchtower portfolio context --project {first}`; repeat --project for several.", summaries.len()));
+                }
                 tree_except(
                     &mut out,
                     &portfolio_context_view(data),
@@ -491,24 +555,44 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                 }
                 fields(&mut out, data, &["warnings"], 0);
                 let items = list(&data["items"]);
+                let counts: Vec<String> = ["new", "kept", "edited", "restored"]
+                    .iter()
+                    .map(|change| {
+                        (
+                            change,
+                            items.iter().filter(|i| i["change"] == *change).count(),
+                        )
+                    })
+                    .filter(|(_, n)| *n > 0)
+                    .map(|(change, n)| format!("{n} {change}"))
+                    .collect();
                 line(
                     &mut out,
                     0,
-                    &format!("Items: {} (ID | kind | title)", items.len()),
+                    &format!(
+                        "Items: {}{} (ID | kind | title | change)",
+                        items.len(),
+                        if counts.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", {}", counts.join(", "))
+                        }
+                    ),
                 );
                 for item in items {
                     line(
                         &mut out,
                         1,
                         &format!(
-                            "- {} | {} | {}",
+                            "- {} | {} | {} | {}",
                             if item["id"].is_null() && data["dry_run"] == true {
                                 "assigned on save".to_owned()
                             } else {
                                 text(&item["id"])
                             },
                             text(&item["kind"]),
-                            text(&item["title"])
+                            text(&item["title"]),
+                            text(&item["change"])
                         ),
                     );
                 }

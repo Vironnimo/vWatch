@@ -15,7 +15,7 @@ fn card_token(svc: &Watchtower, id: &str) -> String {
 }
 
 fn portfolio_token(svc: &Watchtower) -> String {
-    svc.portfolio_context().unwrap()["context_token"]
+    svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .expect("portfolio context carries a token")
         .to_owned()
@@ -279,11 +279,11 @@ fn portfolio_context_ignores_repeat_visits_but_guards_the_previous_brief_boundar
     rejected_portfolio_leaves_state(&svc, &unseen);
 
     let opened = portfolio_token(&svc);
-    let first_opened = svc.portfolio_context().unwrap()["owner_last_opened"].clone();
+    let first_opened = svc.portfolio_context(&[]).unwrap()["owner_last_opened"].clone();
     clock.advance(chrono::Duration::hours(5));
     svc.state(true).unwrap();
     assert_ne!(
-        svc.portfolio_context().unwrap()["owner_last_opened"],
+        svc.portfolio_context(&[]).unwrap()["owner_last_opened"],
         first_opened
     );
     assert_eq!(portfolio_token(&svc), opened);

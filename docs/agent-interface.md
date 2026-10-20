@@ -113,6 +113,7 @@ Counts below are protocol design targets confirmed by command/contract tests, no
 | Rename/reconnect a known project | `projects update <id> ...` | 1 |
 | Find and rename a project | `projects list --query <text>` → `projects update <id> ...` | 2; selection is needed only when the ID is unknown |
 | Register several selected folders | `projects add <path>...` | 1 |
+| List questions awaiting the owner | `questions`; `--project <id>` for one project | 1 |
 | Answer a known question | `feedback set <item-id> --value answered --note ...` | 1 |
 | Write one current card | `context <id>` → study evidence → `card put <id> --context-token ...` | 2 |
 | Daily run with N due cards and a due brief | `runs start` → N context/save pairs → portfolio context/save → `runs finish` | `2N + 4` |
@@ -412,3 +413,19 @@ Final verification passed: 147 Rust tests with desktop features and 147 without,
 The owner requested that feature and product ideas have their own place alongside actionable recommendations. Validation passed 166 Rust tests with desktop features, 166 without them, strict Clippy for all targets and 86 Node UI tests. The real release CLI on a separate copy of the owner database returned 16 ideas and 44 recommendations as disjoint, complete sets, with readable paging and classification requests in both contexts. The native test window displayed both categories and the recommendation-only rating round. No test ratings or assignments were written to the owner database.
 
 The Skill checker reported: `watchtower: description 218 characters, body 179 lines, 3 other files (365 reference lines); no findings`. Nabu's existing private package was updated in `agent:nabu` with no sharing grants; its independent recovery and input-format notes were retained. This verifies application behavior and instruction consistency, not future model ideation quality; a fresh-agent daily-run evaluation remains a separate check. Existing items retain their IDs and initial dates, and missing categories request review on the next run.
+
+## Lean contexts, kept items and idea reviews, 2026-10-20
+
+After completing production run 18, the agent reported its friction: the portfolio context was 142,734 characters of text (20 pages), mostly full card details of projects the previous brief already covered (81k JSON characters) and full retained proposals (37k). Keeping an unchanged list item required copying its whole text; an invented ID for a new brief pattern was accepted silently; receipts did not say which items were new; quiet projects never became due, so their ideas aged; open questions could only be found by reading every card. The owner asked to fix these points and to improve idea quality.
+
+This reverses the 2026-10-08 decision against broad context compression, at the owner's request, without dropping evidence: a card the previous brief already built on (not outdated, `changed_since_brief` empty) appears as a summary with item IDs and titles, and `portfolio context --project <id>` (repeatable) returns full rows under the same context token. Weekly-review evidence appears only while the review is due. Retained proposals in both contexts are one-line reminders; `proposals` has their text. On a copy of the owner database the portfolio text fell from 142,734 to 96,209 characters with four projects still outdated, and the vBot context from 40,533 to 35,949; once a run has saved its changed cards, more projects become summaries.
+
+- An item sent as `{"id": ...}` alone takes its latest saved wording from any version of the same document, so unchanged and retained items cost one line. An unknown ID alone or one of another kind rejects the write; an unknown ID with content is saved as new with a warning.
+- Save and dry-run receipts give each item's change: `new`, `kept`, `edited` or `restored`.
+- Persistence rows add `unchanged_days`, the days since an item's current wording appeared; the Skill's seven-day rule uses it so a reworded question is not reworded again the next day.
+- Due reason `idea_review`: two active projects per day, in rotation over registration order, whose card is at least seven days old and otherwise current. The rotation needs no stored state and is stable within a day, so saving one card never makes another due; a run started before midnight ignores the next day's rotation.
+- `questions` lists open owner questions across cards with options and the recommended answer; snoozed questions are counted.
+- Card field `usage` (summary, last use, evidence) records how the owner actually uses a project, shown as "Im Alltag" on the project page and part of the brief's basis. The Skill allows reading that project's data and logs outside the repository for usage traces, without copying personal content, and starts ideation from actual use with explicit lenses (before and after, making the app unnecessary, borrowing from other projects or proven products, extreme use, removal, unused capabilities). New app ideas start from the owner's days rather than the existing apps.
+
+Validation: 169 Rust tests in both configurations, strict Clippy for all targets, formatting and 86 Node UI tests passed. The real CLI on a scratch copy of the owner database produced the summaries, per-project detail, keep-by-ID receipts (21 kept, 1 new), the unknown-ID warning and error, and the questions list. These deterministic checks do not measure idea quality; that needs a fresh-agent daily run.
+

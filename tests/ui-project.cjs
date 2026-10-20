@@ -25,6 +25,7 @@ test('a project opens as a page beside the project list, with work, handbook and
   p.card.personality = 'I have something to say';
   p.card.vision = { statement: 'Reach a useful release', progress_pct: 72, progress_note: 'Two milestones remain' };
   p.card.handbook = { run: [{ what: 'Start', how: 'cargo run' }] };
+  p.card.usage = { summary: 'Runs every morning from the scheduler', last_used: '2026-10-19', evidence: 'logs/run.log' };
   p.facts = { is_git: true, commits: {}, remotes: [], weekly: [] };
   await a.ui.load(false);
   a.ui.openProject('sample');
@@ -38,6 +39,8 @@ test('a project opens as a page beside the project list, with work, handbook and
   assert.match(html, /I have something to say/);
   assert.ok(html.indexOf('Aktueller Stand') < html.indexOf('project-jump'));
   assert.ok(html.indexOf('Nächster Schritt') < html.indexOf('project-jump'));
+  assert.ok(html.indexOf('Im Alltag') < html.indexOf('project-jump'));
+  assert.match(html, /Runs every morning from the scheduler[^]*zuletzt genutzt 19\.10\.2026/);
   for (const key of ['work', 'handbook', 'history']) assert.match(html, new RegExp(`<section id="project-group-${key}" class="project-group"`));
   assert.doesNotMatch(html, /<section id="project-group-[a-z]+"[^>]*hidden/);
   assert.match(html, /id="project-owner-fields" hidden/);

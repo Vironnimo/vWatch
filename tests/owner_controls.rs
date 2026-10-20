@@ -157,7 +157,7 @@ fn warning_acknowledgments_require_a_reason_and_can_be_withdrawn() {
         "Lokale Tests genügen"
     );
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["warning_acknowledgements"][0]["note"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["warning_acknowledgements"][0]["note"],
         "Lokale Tests genügen"
     );
     svc.put_card("demo", json!({"headline": "Alles ruhig"}), true, false)

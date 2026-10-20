@@ -4,6 +4,7 @@
 //! interpretation, the context an agent reads before writing a card, card and
 //! portfolio writes, feedback, and the complete state the window renders.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -31,6 +32,10 @@ fn document_request(value: &Value) -> String {
 pub const STATUSES: &[&str] = &["active", "parked", "done", "archived"];
 /// Items shown at least this many days are listed for the brief as long-standing.
 const LONG_STANDING_DAYS: i64 = 7;
+/// A quiet active project's ideas are reviewed when its card is at least this old.
+const IDEA_REVIEW_DAYS: i64 = 7;
+/// Active projects whose ideas come up for review each day, in rotation.
+const IDEA_REVIEWS_PER_DAY: usize = 2;
 
 /// A retained proposal as agents read it, with the same category as the window.
 fn without_effort(mut proposal: Value) -> Value {
@@ -44,6 +49,12 @@ fn without_effort(mut proposal: Value) -> Value {
         item.insert("category".into(), json!(category));
     }
     proposal
+}
+/// A retained proposal as a one-line reminder; `watchtower proposals` has its full text,
+/// and sending only its id in the document it belongs to restores it.
+fn proposal_summary(proposal: Value) -> Value {
+    let p = without_effort(proposal);
+    json!({"id": p["id"], "scope": p["scope"], "kind": p["kind"], "category": p["category"], "title": p["item"]["title"], "first_seen": p["first_seen"]})
 }
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
 pub const RATINGS: &[&str] = &["up", "later", "down"];
@@ -66,6 +77,7 @@ const BRIEF_FIELDS: &[&str] = &[
     "decisions",
     "suggestions",
     "cross_project_hints",
+    "usage",
 ];
 const COMMITS_SINCE_LIMIT: usize = 150;
 const REFRESH_WORKERS: usize = 4;
@@ -712,8 +724,8 @@ fn mark_inherited(problems: &[String], sent: Option<&[String]>, document: &str) 
         .join("; ")
 }
 
-/// A dry run's items: new items show `id: null`, because their id is only assigned when saved.
-fn dry_items(kind: Kind, sent: &Value, clean: &Value) -> Vec<Value> {
+/// A dry run's items: ids Watchtower generated show `id: null`, because they are only assigned when saved.
+fn dry_items(kind: Kind, sent: &Value, receipts: &[Value]) -> Vec<Value> {
     let given: Vec<&Value> = kind
         .items()
         .iter()
@@ -725,16 +737,121 @@ fn dry_items(kind: Kind, sent: &Value, clean: &Value) -> Vec<Value> {
                 .map(|i| &i["id"])
         })
         .collect();
-    let mut seen = Vec::new();
-    item_ids(kind, clean)
-        .into_iter()
+    receipts
+        .iter()
+        .cloned()
         .map(|mut item| {
-            let kept = given.contains(&&item["id"]) && !seen.contains(&item["id"]);
-            seen.push(item["id"].clone());
-            if !kept {
+            if !given.contains(&&item["id"]) {
                 item["id"] = Value::Null;
             }
             item
+        })
+        .collect()
+}
+
+/// Items sent as `{"id": ...}` alone keep their latest saved wording.
+/// The active projects whose ideas are reviewed today: a daily rotation over
+/// registration order, stable within the day so saving one card never makes another due.
+fn idea_review_rotation(projects: &[crate::store::Project], today: NaiveDate) -> Vec<String> {
+    let active: Vec<&str> = projects
+        .iter()
+        .filter(|p| p.status == "active")
+        .map(|p| p.id.as_str())
+        .collect();
+    let start = today.num_days_from_ce().unsigned_abs() as usize * IDEA_REVIEWS_PER_DAY;
+    (0..IDEA_REVIEWS_PER_DAY.min(active.len()))
+        .map(|i| active[(start + i) % active.len()].to_owned())
+        .collect()
+}
+
+fn keep_items(
+    kind: Kind,
+    payload: &mut Value,
+    saved: &HashMap<String, (&'static str, Value)>,
+) -> Result<()> {
+    let missing = cards::expand_kept_items(kind, payload, |list, id| {
+        let (_, _, item_kind) = kind.items().iter().find(|(l, _, _)| *l == list)?;
+        saved
+            .get(id)
+            .filter(|(kind, _)| kind == item_kind)
+            .map(|(_, item)| item.clone())
+    });
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let (code, name) = match kind {
+        Kind::Card => ("invalid_card", "card"),
+        Kind::Portfolio => ("invalid_portfolio", "brief"),
+    };
+    Err(WatchtowerError::new(code, format!("The {name} was not saved: {} keeps an item by its id alone, but no saved version of this {name} has that item in that list.", missing.join(", ")))
+        .hint(format!("Send that item's full content, or leave it out. An item sent as {{\"id\": ...}} alone must use an id from the context's previous {name} or its item history.")))
+}
+
+/// Ids the agent supplied that no saved version of this document used: they start a new item.
+fn unknown_item_ids(
+    kind: Kind,
+    payload: &Value,
+    saved: &HashMap<String, (&'static str, Value)>,
+) -> Vec<String> {
+    if saved.is_empty() {
+        return Vec::new();
+    }
+    let name = match kind {
+        Kind::Card => "card",
+        Kind::Portfolio => "brief",
+    };
+    kind.items()
+        .iter()
+        .flat_map(|(list, _, _)| {
+            payload[*list]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .filter_map(move |(index, item)| {
+                    let id = item["id"].as_str()?;
+                    (!saved.contains_key(id)).then(|| format!(
+                        "{list}[{index}].id '{id}' appears in no saved version of this {name}, so it is saved as a new item. To keep an earlier item, use its id from the context; for a new item, omit id."
+                    ))
+                })
+        })
+        .collect()
+}
+
+/// The saved items with whether each is new, kept unchanged, edited or restored from an earlier version.
+fn item_receipts(
+    kind: Kind,
+    previous: Option<&Value>,
+    saved: &HashMap<String, (&'static str, Value)>,
+    clean: &Value,
+) -> Vec<Value> {
+    let previous = previous
+        .map(|p| cards::validate(kind, p, &top_fields(p)).map_or_else(|_| p.clone(), |(c, _)| c));
+    kind.items()
+        .iter()
+        .flat_map(|(list, _, item_kind)| {
+            let before = previous.as_ref().map(|p| p[*list].clone()).unwrap_or(Value::Null);
+            clean[*list]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |item| {
+                    let earlier = before
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|old| old["id"] == item["id"]);
+                    let change = match earlier {
+                        Some(old) if *old == item => "kept",
+                        Some(_) => "edited",
+                        None if item["id"].as_str().is_some_and(|id| saved.contains_key(id)) => {
+                            "restored"
+                        }
+                        None => "new",
+                    };
+                    json!({"id": item["id"], "kind": item_kind, "title": title_of(&item), "change": change})
+                })
         })
         .collect()
 }
@@ -1667,7 +1784,9 @@ impl Watchtower {
             None => false,
         };
         let reactions = self.store.feedback()?;
-        for p in self.store.projects()? {
+        let registered = self.store.projects()?;
+        let reviewed_today = idea_review_rotation(&registered, self.today());
+        for p in registered {
             if p.status == "archived" {
                 continue;
             }
@@ -1713,6 +1832,12 @@ impl Watchtower {
                 Some(_) if answered => Some("answered"),
                 Some(_) if status_changed => Some("status_changed"),
                 Some(c) if (now - parse(&c.created_at)).num_days() >= max_age_days => Some("stale"),
+                Some(c)
+                    if reviewed_today.contains(&p.id)
+                        && (now - parse(&c.created_at)).num_days() >= IDEA_REVIEW_DAYS =>
+                {
+                    Some("idea_review")
+                }
                 Some(_) => None,
             };
             // cards written before Watchtower added a field lack it; the next card fills it
@@ -1888,7 +2013,7 @@ impl Watchtower {
             None => Vec::new(),
         };
         let risk_streaks = self.project_streaks(id, Some(&stored))?;
-        let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() { " Use --merge only when sending changed top-level fields; send each changed list in full." } else { " Send a complete card." });
+        let next = format!("Study the repository read-only and write the card to a UTF-8 file. Save project {id} with card put, supplying --file with that file and --context-token with this context's token.{}", if card.is_some() {  " Use --merge only when sending changed top-level fields; send each changed list in full, where an unchanged or retained item can be just {\"id\": ...}." } else { " Send a complete card." });
         Ok(json!({
             "today": self.today().to_string(),
             "project": pick(&project_json(&project), &["id", "name", "path", "status", "status_note", "goal", "goal_due"]),
@@ -1896,7 +2021,7 @@ impl Watchtower {
             "new_fields": card.as_ref().map(|c| Kind::Card.missing_fields(&c.data)),
             "previous_card": card.map(|c| json!({"version": c.version, "created_at": c.created_at, "card": Kind::Card.current_view(&c.data)})),
             "since_previous_card": since,
-            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["scope"]==id && p["in_report"]==false).map(without_effort).collect::<Vec<_>>(),
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["scope"]==id && p["in_report"]==false).map(proposal_summary).collect::<Vec<_>>(),
             "risk_streaks": risk_streaks,
             "item_persistence": item_persistence,
             "feedback": feedback,
@@ -1959,6 +2084,9 @@ impl Watchtower {
             return Err(error);
         }
         let previous = self.store.latest_card(id)?;
+        let saved = self.saved_items(Some(id))?;
+        let mut payload = payload;
+        keep_items(Kind::Card, &mut payload, &saved)?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|c| &c.data), sent.as_deref());
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
@@ -1996,6 +2124,7 @@ impl Watchtower {
             .filter(|f| lacking.contains(f))
             .collect();
         let mut warnings = warnings;
+        warnings.extend(unknown_item_ids(Kind::Card, &payload, &saved));
         // the owner copies `how` as it stands, so it must not be a sentence, a URL behind a command or a shortcut to click
         let prose: Vec<&str> = clean["handbook"]["run"]
             .as_array()
@@ -2016,9 +2145,15 @@ impl Watchtower {
                 unfilled.join(", ")
             ));
         }
+        let receipts = item_receipts(
+            Kind::Card,
+            previous.as_ref().map(|c| &c.data),
+            &saved,
+            &clean,
+        );
         if dry_run {
             self.check_context(Some(id), context_token, true)?;
-            let items = dry_items(Kind::Card, &payload, &clean);
+            let items = dry_items(Kind::Card, &payload, &receipts);
             return Ok(
                 json!({"saved": false, "dry_run": true, "project": id, "changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": items}),
             );
@@ -2049,7 +2184,7 @@ impl Watchtower {
         let (version, token, replayed) = Self::guarded_version(write, Kind::Card, Some(id))?;
         Ok(extend(
             self.document_saved(Some(id), version, &token, replayed),
-            json!({"card":clean,"changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": item_ids(Kind::Card, &clean)}),
+            json!({"card":clean,"changed_fields": changed, "unfilled_fields": unfilled, "warnings": warnings, "items": receipts}),
         ))
     }
 
@@ -2260,11 +2395,16 @@ impl Watchtower {
         )
     }
 
-    pub fn portfolio_context(&self) -> Result<Value> {
-        self.context_with_token(None, || self.portfolio_context_data())
+    /// The context for the brief. Projects unchanged since the previous brief come as
+    /// summaries; `detail` returns only the named projects, in full.
+    pub fn portfolio_context(&self, detail: &[String]) -> Result<Value> {
+        for id in detail {
+            self.project(id)?;
+        }
+        self.context_with_token(None, || self.portfolio_context_data(detail))
     }
 
-    fn portfolio_context_data(&self) -> Result<Value> {
+    fn portfolio_context_data(&self, detail: &[String]) -> Result<Value> {
         let mut rows = Vec::new();
         let mut open_questions = Vec::new();
         let previous = self.store.latest_portfolio()?;
@@ -2272,8 +2412,11 @@ impl Watchtower {
         let (week, from, to) = self.review_week();
         let week_from = from.to_string();
         let week_to = to.to_string();
+        let reviewed = previous
+            .as_ref()
+            .is_some_and(|p| p.data["week_review"]["week"] == week.as_str());
         for p in self.store.projects()? {
-            if p.status == "archived" {
+            if p.status == "archived" || (!detail.is_empty() && !detail.contains(&p.id)) {
                 continue;
             }
             let stored = self.store.facts(&p.id)?;
@@ -2300,10 +2443,32 @@ impl Watchtower {
                 "milestones": dated_between(&card.data["milestones"], &week_from, &week_to),
             }));
             let card_data = card.as_ref().map(|card| card.data.clone());
+            // a card the previous brief already built on needs only a reminder of its content
+            let summary = detail.is_empty()
+                && !card_outdated
+                && changed.as_array().is_some_and(Vec::is_empty);
             let card_json = card.map(|card| {
                 let c = &Kind::Card.current_view(&card.data);
                 let picked = |key: &str, fields: &[&str]| -> Vec<Value> { c[key].as_array().into_iter().flatten().map(|x| pick(x, fields)).collect() };
+                if summary {
+                    return json!({
+                        "detail": "summary",
+                        "version": card.version, "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
+                        "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
+                        "next_step": c["reentry"]["next_step"],
+                        "usage": c["usage"]["summary"],
+                        "waiting_on_you": picked("waiting_on_you", &["id", "title"]),
+                        "open_ends": picked("open_ends", &["kind", "title", "age_days"]),
+                        "health_notes": c["health_notes"],
+                        "decisions": c["decisions"],
+                        "suggestions": picked("suggestions", &["id", "category", "title"]),
+                        "cross_project_hints": c["cross_project_hints"],
+                        "recent_changes": dated_since(&c["recent_changes"], &week_from),
+                        "milestones": dated_since(&c["milestones"], &week_from),
+                    });
+                }
                 json!({
+                    "detail": "full",
                     "version": card.version, "created_at": card.created_at, "outdated": card_outdated, "changed_since_brief": changed,
                     "one_liner": c["one_liner"], "phase": c["phase"], "headline": c["headline"],
                     "reentry": c["reentry"],
@@ -2313,6 +2478,7 @@ impl Watchtower {
                     "decisions": c["decisions"],
                     "suggestions": picked("suggestions", &["id", "category", "type", "title", "why", "evidence", "done_when"]),
                     "cross_project_hints": c["cross_project_hints"],
+                    "usage": c["usage"],
                     "recent_changes": dated_since(&c["recent_changes"], &week_from),
                     "milestones": dated_since(&c["milestones"], &week_from),
                 })
@@ -2367,18 +2533,26 @@ impl Watchtower {
                     "extra_worktrees": f["worktrees"]["count"],
                 },
                 "card": card_json,
-                "review_week_evidence": review_evidence,
+            }));
+            if !reviewed {
+                if let Some(row) = rows.last_mut() {
+                    row["review_week_evidence"] = json!(review_evidence);
+                }
+            }
+        }
+        if !detail.is_empty() {
+            return Ok(json!({
+                "today": self.today().to_string(),
+                "projects": rows,
+                "next": "Use these details while preparing the brief from the full portfolio context, then save it with portfolio put, supplying --file and --context-token.",
             }));
         }
         let unchecked = self.unchecked_ideas(previous.as_ref().map(|p| &p.data))?;
-        let reviewed = previous
-            .as_ref()
-            .is_some_and(|p| p.data["week_review"]["week"] == week.as_str());
         Ok(json!({
             "today": self.today().to_string(),
             "review_week": {"week": week, "from": from.to_string(), "to": to.to_string(), "due": !reviewed},
             "owner_ideas": self.store.ideas()?.iter().map(|i| extend(idea_json(i), json!({"checked": !unchecked.contains(&i.id)}))).collect::<Vec<_>>(),
-            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["in_report"]==false && (p["scope"]=="@portfolio" || rows.iter().any(|r|r["id"]==p["scope"]))).map(without_effort).collect::<Vec<_>>(),
+            "retained_proposals":self.store.proposals()?.into_iter().filter(|p|p["in_report"]==false && (p["scope"]=="@portfolio" || rows.iter().any(|r|r["id"]==p["scope"]))).map(proposal_summary).collect::<Vec<_>>(),
             "brief_persistence": self.brief_persistence(previous.as_ref(), &reactions)?,
             "owner_response": self.owner_response(&reactions, &open_questions),
             "projects": rows,
@@ -2419,6 +2593,9 @@ impl Watchtower {
             return Err(error);
         }
         let previous = self.store.latest_portfolio()?;
+        let saved = self.saved_items(None)?;
+        let mut payload = payload;
+        keep_items(Kind::Portfolio, &mut payload, &saved)?;
         let sent = sent_fields(&payload, merge);
         let kept = kept_fields(previous.as_ref().map(|p| &p.data), sent.as_deref());
         let payload = Self::merged(
@@ -2482,6 +2659,8 @@ impl Watchtower {
             return Err(WatchtowerError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
                 .hint("Use the ids from `owner_ideas` in `watchtower portfolio context`; the owner may have removed an idea since."));
         }
+        let mut warnings = warnings;
+        warnings.extend(unknown_item_ids(Kind::Portfolio, &payload, &saved));
         let mut clean = clean;
         // a brief written later in the week keeps the week's review
         let (week, _, _) = self.review_week();
@@ -2494,10 +2673,16 @@ impl Watchtower {
                 clean["week_review"] = kept.clone();
             }
         }
+        let receipts = item_receipts(
+            Kind::Portfolio,
+            previous.as_ref().map(|p| &p.data),
+            &saved,
+            &clean,
+        );
         if dry_run {
             self.check_context(None, context_token, true)?;
             return Ok(
-                json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &clean)}),
+                json!({"saved": false, "dry_run": true, "warnings": warnings, "items": dry_items(Kind::Portfolio, &payload, &receipts)}),
             );
         }
         let write = self.store.add_portfolio_guarded(
@@ -2510,7 +2695,7 @@ impl Watchtower {
         let (version, token, replayed) = Self::guarded_version(write, Kind::Portfolio, None)?;
         Ok(extend(
             self.document_saved(None, version, &token, replayed),
-            json!({"portfolio":clean,"warnings": warnings, "items": item_ids(Kind::Portfolio, &clean)}),
+            json!({"portfolio":clean,"warnings": warnings, "items": receipts}),
         ))
     }
 
@@ -3435,6 +3620,10 @@ impl Watchtower {
                 .into_iter()
                 .flatten()
                 .find(|entry| entry["id"] == id)
+                // a rotation that moved on after midnight does not extend a started run
+                .filter(|entry| {
+                    entry["reason"] != "idea_review" || initial["reason"] == "idea_review"
+                })
             {
                 item["status"] = json!("pending");
                 item["reason"] = reason["reason"].clone();

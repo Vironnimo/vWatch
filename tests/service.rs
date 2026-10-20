@@ -29,7 +29,7 @@ fn morning_run_cycle() {
         json!({"id": "demo", "name": "demo", "reason": "changed", "changes": ["commits"]})
     );
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["card"]["outdated"],
         true
     );
     let ctx = svc.context("demo").unwrap();
@@ -48,7 +48,10 @@ fn morning_run_cycle() {
         .as_object_mut()
         .unwrap()
         .remove("done_when");
-    older["suggestions"][0].as_object_mut().unwrap().remove("category");
+    older["suggestions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("category");
     svc.store().rewrite_latest_card("demo", &older).unwrap();
     let entry = json!({"id": "demo", "name": "demo", "reason": "new_fields", "new_fields": ["suggestions[].category", "suggestions[].done_when", "handbook"]});
     assert_eq!(svc.due(14, true).unwrap()["projects"][0], entry);
@@ -265,6 +268,117 @@ fn merge_keeps_unsent_fields_and_rated_ids() {
     assert_eq!(
         svc.store().card_version("demo", 2).unwrap().unwrap().data,
         legacy
+    );
+}
+
+#[test]
+fn kept_items_need_only_their_id_and_receipts_name_each_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    let two = json!([
+        {"type": "feature", "title": "Dark Mode", "why": "Weil nachts.", "evidence": "ui/app.css"},
+        {"type": "cleanup", "title": "Logs kürzen", "why": "Sie wachsen."}
+    ]);
+    let saved = svc
+        .put_card("demo", card_with(json!({"suggestions": two})), false, false)
+        .unwrap();
+    let changes = |saved: &Value| {
+        saved["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["change"].clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(changes(&saved), [json!("new"), json!("new")]);
+    let (dark, logs) = (
+        saved["items"][0]["id"].clone(),
+        saved["items"][1]["id"].clone(),
+    );
+    let original = svc.card("demo").unwrap()["card"]["suggestions"][0].clone();
+
+    // An id alone keeps the saved wording; a sent item with its id is an edit.
+    let edited = json!({"suggestions": [{"id": dark}, {"id": logs, "type": "cleanup", "title": "Logs rotieren", "why": "Sie wachsen."}]});
+    let dry = svc.put_card("demo", edited.clone(), true, true).unwrap();
+    assert_eq!(changes(&dry), [json!("kept"), json!("edited")]);
+    let saved = svc.put_card("demo", edited, true, false).unwrap();
+    assert_eq!(changes(&saved), [json!("kept"), json!("edited")]);
+    assert_eq!(
+        svc.card("demo").unwrap()["card"]["suggestions"][0],
+        original
+    );
+
+    // An item left out of the current card can come back by its id.
+    svc.put_card("demo", json!({"suggestions": [{"id": logs}]}), true, false)
+        .unwrap();
+    let saved = svc
+        .put_card(
+            "demo",
+            json!({"suggestions": [{"id": logs}, {"id": dark}]}),
+            true,
+            false,
+        )
+        .unwrap();
+    assert_eq!(changes(&saved), [json!("kept"), json!("restored")]);
+    assert_eq!(
+        svc.card("demo").unwrap()["card"]["suggestions"][1],
+        original
+    );
+
+    // An id no saved version has is refused when it stands alone and reported when it carries content.
+    let error = svc
+        .put_card(
+            "demo",
+            json!({"suggestions": [{"id": "sg-invented"}]}),
+            true,
+            false,
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_card");
+    assert!(
+        error.message.contains("suggestions[0].id"),
+        "{}",
+        error.message
+    );
+    let question = json!({"waiting_on_you": [{"title": "Welches Format?"}]});
+    let asked = svc.put_card("demo", question, true, false).unwrap();
+    let qid = asked["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "question")
+        .unwrap()["id"]
+        .clone();
+    let error = svc
+        .put_card("demo", json!({"suggestions": [{"id": qid}]}), true, false)
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_card");
+    let invented = json!({"suggestions": [{"id": "sg-invented", "type": "feature", "title": "Export", "why": "Gewünscht."}]});
+    let saved = svc.put_card("demo", invented, true, false).unwrap();
+    assert!(
+        saved["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("sg-invented")),
+        "{saved}"
+    );
+
+    // The brief keeps its items the same way.
+    let brief =
+        json!({"greeting": "Moin", "patterns": [{"title": "Muster", "why": "Überall gleich."}]});
+    let saved = svc.put_portfolio(brief, false, false).unwrap();
+    assert_eq!(changes(&saved), [json!("new")]);
+    let pattern = saved["items"][0]["id"].clone();
+    let kept = svc
+        .put_portfolio(json!({"patterns": [{"id": pattern}]}), true, false)
+        .unwrap();
+    assert_eq!(changes(&kept), [json!("kept")]);
+    assert_eq!(
+        svc.portfolio().unwrap()["portfolio"]["patterns"][0]["why"],
+        "Überall gleich."
     );
 }
 
@@ -512,10 +626,19 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     svc.put_portfolio(brief, false, false).unwrap();
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
     let mut old = svc.portfolio().unwrap()["portfolio"].clone();
-    old["synergies"][0].as_object_mut().unwrap().remove("category");
+    old["synergies"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("category");
     svc.store().rewrite_latest_portfolio(&old).unwrap();
-    assert_eq!(svc.due(14, false).unwrap()["portfolio"]["reason"], "new_fields");
-    assert_eq!(svc.portfolio_context().unwrap()["new_fields"], json!(["synergies[].category"]));
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "new_fields"
+    );
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["new_fields"],
+        json!(["synergies[].category"])
+    );
     old["synergies"][0]["category"] = json!("idea");
     svc.put_portfolio(old, false, false).unwrap();
     // a card change the brief does not build on leaves it current; one it builds on makes it due
@@ -535,7 +658,7 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
         "cards_changed"
     );
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["card"]["changed_since_brief"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["card"]["changed_since_brief"],
         json!(["headline"])
     );
     clock.advance(Duration::days(1));
@@ -595,7 +718,7 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
         svc.due(14, true).unwrap()["portfolio"]["reason"],
         "owner_idea"
     );
-    let ctx = svc.portfolio_context().unwrap();
+    let ctx = svc.portfolio_context(&[]).unwrap();
     assert_eq!(
         (
             ctx["owner_ideas"][0]["text"].as_str(),
@@ -653,7 +776,7 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     brief["week_review"] = json!({"week": "2026-W39", "done": ["Release 1.0"], "stalled": [], "time_note": "Fast alles ging in demo."});
     svc.put_portfolio(brief, false, false).unwrap();
     assert_eq!(svc.due(14, true).unwrap()["portfolio"]["due"], false);
-    let ctx = svc.portfolio_context().unwrap();
+    let ctx = svc.portfolio_context(&[]).unwrap();
     assert_eq!(
         (
             ctx["owner_ideas"][0]["checked"].as_bool(),
@@ -670,13 +793,16 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     );
     clock.advance(Duration::days(7));
     assert_eq!(
-        svc.portfolio_context().unwrap()["review_week"]["week"],
+        svc.portfolio_context(&[]).unwrap()["review_week"]["week"],
         "2026-W40"
     );
-    assert_eq!(svc.portfolio_context().unwrap()["review_week"]["due"], true);
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["review_week"]["due"],
+        true
+    );
 
     // A cached measurement from inside the review week cannot supply its final count.
-    let ctx = svc.portfolio_context().unwrap();
+    let ctx = svc.portfolio_context(&[]).unwrap();
     assert!(ctx["projects"][0]["facts"]["commits_review_week"].is_null());
     assert_eq!(
         ctx["projects"][0]["facts"]["collected_at"],
@@ -684,7 +810,7 @@ fn parked_ideas_and_the_week_review_reach_the_brief() {
     );
     svc.refresh_facts(None, false).unwrap();
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["facts"]["commits_review_week"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["facts"]["commits_review_week"],
         1
     );
 
@@ -710,7 +836,7 @@ fn portfolio_context_exposes_action_evidence_and_measurement_limits() {
     )
     .unwrap();
     let stored_card = svc.card("demo").unwrap();
-    let context = svc.portfolio_context().unwrap();
+    let context = svc.portfolio_context(&[]).unwrap();
     let project = &context["projects"][0];
     assert_eq!(project["card"]["version"], stored_card["version"]);
     for field in ["open_ends", "waiting_on_you", "suggestions"] {
@@ -721,13 +847,39 @@ fn portfolio_context_exposes_action_evidence_and_measurement_limits() {
     assert_eq!(project["facts"]["collected_at"], svc.now());
     assert_eq!(project["facts"]["unmerged_branches"], 0);
     assert_eq!(project["facts"]["extra_worktrees"], 0);
+    assert_eq!(project["card"]["detail"], "full");
+
+    // Once a brief built on the card, the card is a summary until it changes; detail returns it in full.
+    svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let context = svc.portfolio_context(&[]).unwrap();
+    let summary = &context["projects"][0]["card"];
+    assert_eq!(summary["detail"], "summary");
+    assert_eq!(summary["suggestions"][0]["title"], "Export umsetzen");
+    assert!(summary["suggestions"][0].get("evidence").is_none());
+    assert_eq!(summary["waiting_on_you"][0]["title"], "Welches Format?");
+    assert!(summary["waiting_on_you"][0].get("options").is_none());
+    let detail = svc.portfolio_context(&["demo".to_owned()]).unwrap();
+    assert_eq!(detail["projects"][0]["card"]["detail"], "full");
+    assert_eq!(
+        detail["projects"][0]["card"]["suggestions"],
+        stored_card["card"]["suggestions"]
+    );
+    assert_eq!(detail["context_token"], context["context_token"]);
+    assert!(detail.get("previous_portfolio").is_none());
+    assert_eq!(
+        svc.portfolio_context(&["missing".to_owned()])
+            .unwrap_err()
+            .code,
+        "project_not_found"
+    );
 
     // A failed read must not masquerade as zero unfinished branches or worktrees.
     let plain = tmp.path().join("plain");
     std::fs::create_dir(&plain).unwrap();
     svc.update_project("demo", None, Some(plain.to_str().unwrap()))
         .unwrap();
-    let context = svc.portfolio_context().unwrap();
+    let context = svc.portfolio_context(&[]).unwrap();
     let measured = &context["projects"][0]["facts"];
     assert_eq!(measured["ok"], false);
     assert_eq!(measured["error"], "not_a_git_repository");
@@ -793,7 +945,7 @@ fn current_contexts_hide_legacy_estimates_without_rewriting_evidence_or_history(
     );
     assert!(card_context["feedback"][0]["item"].get("effort").is_none());
     assert_eq!(card_context["feedback"][0]["note"], "Bitte behalten");
-    let portfolio_context = svc.portfolio_context().unwrap();
+    let portfolio_context = svc.portfolio_context(&[]).unwrap();
     assert!(portfolio_context["projects"][0]["card"]["reentry"]
         .get("effort")
         .is_none());
@@ -964,7 +1116,7 @@ fn status_and_registration_rules() {
         true
     );
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["card"]["outdated"],
         true
     );
     // a goal reaches the agents and makes the card due like a status change
@@ -1100,7 +1252,7 @@ fn project_updates_keep_identity_history_and_owner_state() {
         .as_str()
         .unwrap()
         .to_owned();
-    let old_brief_token = svc.portfolio_context().unwrap()["context_token"]
+    let old_brief_token = svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -1757,6 +1909,50 @@ fn state_dates_and_task_sources_match_a_walk_over_every_saved_version() {
 }
 
 #[test]
+fn quiet_active_projects_take_turns_for_an_idea_review() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    for name in ["alpha", "beta", "gamma", "delta"] {
+        let repo = common::make_repo(tmp.path(), name, &["2026-09-29T10:00:00"]);
+        svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+        svc.put_card(name, card(), false, false).unwrap();
+    }
+    svc.set_status("delta", "parked", None).unwrap();
+    svc.put_card("delta", card(), false, false).unwrap();
+    let reviews = |svc: &watchtower::Watchtower| -> Vec<String> {
+        svc.due(14, false).unwrap()["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["reason"] == "idea_review")
+            .map(|p| p["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert!(reviews(&svc).is_empty(), "fresh cards wait");
+
+    // A week later two active projects are due for new ideas; saving them makes no other one due that day.
+    clock.advance(Duration::days(7));
+    let first = reviews(&svc);
+    assert_eq!(first.len(), 2);
+    assert!(
+        !first.contains(&"delta".to_owned()),
+        "parked projects are left alone"
+    );
+    for id in &first {
+        svc.put_card(id, card(), false, false).unwrap();
+    }
+    assert!(reviews(&svc).is_empty());
+
+    // The rotation moves on the next day to the project still waiting.
+    clock.advance(Duration::days(1));
+    let next = reviews(&svc);
+    assert!(
+        !next.is_empty() && next.iter().all(|id| !first.contains(id)),
+        "{next:?}"
+    );
+}
+
+#[test]
 fn a_ci_turning_red_or_green_makes_the_card_due() {
     use std::sync::{Arc, Mutex};
     let tmp = tempfile::tempdir().unwrap();
@@ -1803,7 +1999,7 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
         true
     );
     assert_eq!(
-        svc.portfolio_context().unwrap()["projects"][0]["card"]["outdated"],
+        svc.portfolio_context(&[]).unwrap()["projects"][0]["card"]["outdated"],
         true
     );
     svc.put_card("demo", card(), false, false).unwrap();
@@ -1945,7 +2141,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
         .unwrap()
         .to_owned();
     svc.set_feedback(&fid, Some("done"), None).unwrap();
-    let pctx = svc.portfolio_context().unwrap();
+    let pctx = svc.portfolio_context(&[]).unwrap();
     assert!(pctx["feedback"]
         .as_array()
         .unwrap()
@@ -1987,13 +2183,25 @@ fn contexts_report_how_long_risks_and_items_have_lasted() {
     std::fs::write(repo.join("draft.txt"), "one\n").unwrap();
     svc.refresh_facts(None, false).unwrap();
     let question = json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}, {"answer": "JSON"}], "recommended": 2}]);
-    svc.put_card("demo", card_with(json!({"waiting_on_you": question})), false, false)
-        .unwrap();
+    svc.put_card(
+        "demo",
+        card_with(json!({"waiting_on_you": question})),
+        false,
+        false,
+    )
+    .unwrap();
     let id = svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    assert_eq!(svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["recommended"], 2);
+    assert_eq!(
+        svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["recommended"],
+        2
+    );
+    assert_eq!(
+        svc.questions(None).unwrap()["questions"][0]["id"],
+        id.as_str()
+    );
 
     clock.advance(Duration::days(3));
     std::fs::write(repo.join("draft.txt"), "one\ntwo\nthree\n").unwrap();
@@ -2014,9 +2222,21 @@ fn contexts_report_how_long_risks_and_items_have_lasted() {
     assert_eq!(streak["trend"], "growing");
     let items = context["item_persistence"].as_array().unwrap();
     let asked = items.iter().find(|i| i["id"] == id.as_str()).unwrap();
-    assert_eq!((asked["kind"].as_str(), asked["days"].as_i64(), asked["versions"].as_i64()), (Some("question"), Some(3), Some(2)));
+    assert_eq!(
+        (
+            asked["kind"].as_str(),
+            asked["days"].as_i64(),
+            asked["versions"].as_i64()
+        ),
+        (Some("question"), Some(3), Some(2))
+    );
+    // the question was reworded today, so its current wording is new
+    assert_eq!(asked["unchanged_days"], 0);
     let open_end = items.iter().find(|i| i["kind"] == "open_end").unwrap();
-    assert_eq!((open_end["days"].as_i64(), open_end["versions"].as_i64()), (Some(0), Some(1)));
+    assert_eq!(
+        (open_end["days"].as_i64(), open_end["versions"].as_i64()),
+        (Some(0), Some(1))
+    );
 
     // Committing ends the run; the brief sees long-standing items and the owner's silence.
     git(&repo, &["add", "."]);
@@ -2024,9 +2244,21 @@ fn contexts_report_how_long_risks_and_items_have_lasted() {
     clock.advance(Duration::days(5));
     svc.refresh_facts(None, false).unwrap();
     assert_eq!(svc.context("demo").unwrap()["risk_streaks"], json!([]));
-    let brief = svc.portfolio_context().unwrap();
+    let brief = svc.portfolio_context(&[]).unwrap();
     let standing = &brief["projects"][0]["long_standing_items"];
-    assert!(standing.as_array().unwrap().iter().any(|i| i["id"] == id.as_str() && i["days"] == 8));
+    assert!(standing
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["id"] == id.as_str() && i["days"] == 8 && i["unchanged_days"] == 5));
+    let open = svc.questions(Some("demo")).unwrap();
+    assert_eq!(
+        (
+            open["questions"][0]["id"].as_str(),
+            open["questions"][0]["days"].as_i64()
+        ),
+        (Some(id.as_str()), Some(8))
+    );
     assert_eq!(brief["owner_response"]["open_questions"], 1);
     assert_eq!(brief["owner_response"]["oldest_open_question_days"], 8);
     assert_eq!(brief["owner_response"]["reactions_last_14_days"], 0);
@@ -2038,20 +2270,42 @@ fn questions_can_wait_and_cards_keep_decisions_short() {
     let (svc, _) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
-    let wrong = json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}], "recommended": 2}]);
+    let wrong =
+        json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}], "recommended": 2}]);
     let error = svc
-        .put_card("demo", card_with(json!({"waiting_on_you": wrong})), false, false)
+        .put_card(
+            "demo",
+            card_with(json!({"waiting_on_you": wrong})),
+            false,
+            false,
+        )
         .unwrap_err();
     assert_eq!(error.code, "invalid_card");
-    assert!(error.message.contains("waiting_on_you[0].recommended"), "{}", error.message);
-    let four = json!((0..4).map(|i| json!({"title": format!("Frage {i}?")})).collect::<Vec<_>>());
+    assert!(
+        error.message.contains("waiting_on_you[0].recommended"),
+        "{}",
+        error.message
+    );
+    let four = json!((0..4)
+        .map(|i| json!({"title": format!("Frage {i}?")}))
+        .collect::<Vec<_>>());
     let error = svc
-        .put_card("demo", card_with(json!({"waiting_on_you": four})), false, false)
+        .put_card(
+            "demo",
+            card_with(json!({"waiting_on_you": four})),
+            false,
+            false,
+        )
         .unwrap_err();
     assert!(error.message.contains("limit is 3"), "{}", error.message);
 
-    svc.put_card("demo", card_with(json!({"waiting_on_you": [{"title": "Welches Format?"}]})), false, false)
-        .unwrap();
+    svc.put_card(
+        "demo",
+        card_with(json!({"waiting_on_you": [{"title": "Welches Format?"}]})),
+        false,
+        false,
+    )
+    .unwrap();
     let id = svc.card("demo").unwrap()["card"]["waiting_on_you"][0]["id"]
         .as_str()
         .unwrap()
@@ -2060,6 +2314,14 @@ fn questions_can_wait_and_cards_keep_decisions_short() {
         .unwrap();
     let state = svc.state(false).unwrap();
     assert_eq!(state["feedback"][&id]["snoozed_until"], "2026-10-07");
+    let open = svc.questions(None).unwrap();
+    assert_eq!(
+        (
+            open["questions"].as_array().unwrap().len(),
+            open["snoozed"].as_i64()
+        ),
+        (0, Some(1))
+    );
     // Postponing is not an answer, so the card does not become due for it.
     assert_eq!(svc.due(30, false).unwrap()["projects"], json!([]));
 }

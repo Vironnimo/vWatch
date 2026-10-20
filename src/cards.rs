@@ -163,6 +163,12 @@ const VISION: &[Field] = &[
 ];
 /// How an agent handed the task would know it is finished.
 const DONE_WHEN: Ty = sentence(20);
+/// How the owner actually uses the project today, as found in its traces.
+const USAGE: &[Field] = &[
+    f("summary", Ty::Nullable(&SENTENCE), Null),
+    f("last_used", Ty::Nullable(&Ty::Date), Null),
+    f("evidence", TEXT, Text("")),
+];
 const REENTRY: &[Field] = &[
     f("next_step", words(20), Required),
     f("why", SENTENCE, Text("")),
@@ -225,6 +231,7 @@ const CARD: &[Field] = &[
     f("recent_changes", Ty::List(&Ty::Obj(CHANGE), None), Empty),
     f("milestones", Ty::List(&Ty::Obj(MILESTONE), None), Empty),
     f("features", Ty::List(&words(8), None), Empty),
+    f("usage", Ty::Obj(USAGE), Filled),
     f("open_ends", Ty::List(&Ty::Obj(OPEN_END), None), Empty),
     f(
         "waiting_on_you",
@@ -693,6 +700,38 @@ fn new_id(prefix: &str) -> String {
     let digest = Sha1::digest(format!("{nanos}:{n}:{}", std::process::id()).as_bytes());
     let hex: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
     format!("{prefix}-{hex}")
+}
+
+/// Replaces each list item that consists only of `{"id": ...}` with the item `lookup`
+/// finds for that list and id, so agents keep an unchanged item without copying it.
+/// Returns the paths of ids that `lookup` cannot resolve.
+pub fn expand_kept_items(
+    kind: Kind,
+    payload: &mut Value,
+    lookup: impl Fn(&str, &str) -> Option<Value>,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    for (list, _, _) in kind.items() {
+        let Some(items) = payload.get_mut(*list).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for (index, item) in items.iter_mut().enumerate() {
+            let Some(id) = item
+                .as_object()
+                .filter(|fields| fields.len() == 1)
+                .and_then(|fields| fields.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            match lookup(list, &id) {
+                Some(kept) => *item = kept,
+                None => missing.push(format!("{list}[{index}].id '{id}'")),
+            }
+        }
+    }
+    missing
 }
 
 /// The JSON schema of a document, generated from the same description validation uses.

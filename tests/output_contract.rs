@@ -339,7 +339,7 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
     svc.put_card("demo", common::card(), false, false).unwrap();
     svc.put_portfolio(serde_json::json!({"greeting": "Moin."}), false, false)
         .unwrap();
-    let token = svc.portfolio_context().unwrap()["context_token"]
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -383,7 +383,10 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
     }
     assert!(pages > 0);
     assert_eq!(
-        svc.portfolio().unwrap()["portfolio"]["patterns"].as_array().unwrap().len(),
+        svc.portfolio().unwrap()["portfolio"]["patterns"]
+            .as_array()
+            .unwrap()
+            .len(),
         100
     );
 }
@@ -498,11 +501,11 @@ fn portfolio_save_receipt_distinguishes_preview_save_merge_and_replay() {
     );
     assert_eq!(status, 0, "{preview}");
     assert!(preview.starts_with("Portfolio brief is valid. Dry run: nothing was saved."));
-    assert!(preview.contains("assigned on save | pattern | Muster 0"));
+    assert!(preview.contains("assigned on save | pattern | Muster 0 | new"));
     assert!(!preview.contains("OmittedEvidence"));
     assert_eq!(svc.portfolio().unwrap_err().code, "no_portfolio");
 
-    let token = svc.portfolio_context().unwrap()["context_token"]
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -541,7 +544,7 @@ fn portfolio_save_receipt_distinguishes_preview_save_merge_and_replay() {
     assert!(shown.contains("OmittedEvidence"));
     assert!(continuation(&shown).is_some());
 
-    let token = svc.portfolio_context().unwrap()["context_token"]
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -558,6 +561,10 @@ fn portfolio_save_receipt_distinguishes_preview_save_merge_and_replay() {
         ],
     );
     assert_eq!(status, 0, "{merged}");
+    assert!(
+        merged.contains(" kept (ID | kind | title | change)"),
+        "{merged}"
+    );
     assert!(merged.starts_with("Portfolio brief saved as version 2."));
     assert!(merged.contains("ignored unknown field: colour"));
     assert!(merged
@@ -674,4 +681,51 @@ fn repeated_task_report_names_the_owner_confirmed_result() {
     );
     assert!(text.find("Revision:").unwrap() < text.find("History:").unwrap());
     assert_eq!(svc.tasks(None).unwrap(), before);
+}
+
+#[test]
+fn open_questions_and_unchanged_projects_read_briefly() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(temp.path());
+    let home = temp.path().join("data");
+    std::fs::create_dir(&home).unwrap();
+    let (svc, _) = common::service(&home);
+    svc.add_project(repo.to_str().unwrap(), Some("demo"), Some("Demo"))
+        .unwrap();
+    let question = serde_json::json!([{"title": "Welches Format?", "options": [{"answer": "CSV"}, {"answer": "JSON", "effect": "Programme lesen es direkt."}], "recommended": 2}]);
+    svc.put_card(
+        "demo",
+        common::card_with(serde_json::json!({"waiting_on_you": question})),
+        false,
+        false,
+    )
+    .unwrap();
+    let (code, open) = run(&home, &["questions"]);
+    assert_eq!(code, 0, "{open}");
+    assert!(open.starts_with("1 open question for the owner"), "{open}");
+    assert!(
+        open.contains("| demo | shown ") && open.contains(" days | Welches Format?"),
+        "{open}"
+    );
+    assert!(
+        open.contains("2. JSON (recommended): Programme lesen es direkt."),
+        "{open}"
+    );
+    assert!(!open.contains("Next:"), "only the owner can answer: {open}");
+
+    svc.put_portfolio(serde_json::json!({"greeting": "Moin"}), false, false)
+        .unwrap();
+    let (code, context) = run(&home, &["portfolio", "context"]);
+    assert_eq!(code, 0, "{context}");
+    assert!(
+        context.contains("Note: 1 projects unchanged since the previous brief are summaries"),
+        "{context}"
+    );
+    let (code, detail) = run(&home, &["portfolio", "context", "--project", "demo"]);
+    assert_eq!(code, 0, "{detail}");
+    assert!(
+        detail.starts_with("Full project details from the portfolio context."),
+        "{detail}"
+    );
+    assert!(detail.contains("Programme lesen es direkt."), "{detail}");
 }

@@ -64,7 +64,7 @@ fn fixture(home: &Path, repo: &Path, command: &str) -> HashMap<String, String> {
         json!({"status":"done", "result":"Export opens successfully", "evidence":"Export file checked"}).to_string(),
     ).unwrap();
     let context = if command.contains("portfolio ") {
-        service.portfolio_context().unwrap()
+        service.portfolio_context(&[]).unwrap()
     } else {
         service.context("demo").unwrap()
     };

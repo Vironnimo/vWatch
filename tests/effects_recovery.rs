@@ -184,7 +184,7 @@ fn identical_concurrent_card_requests_write_one_version_and_both_succeed() {
 fn portfolio_replays_require_the_same_request_and_owner_context() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
-    let token = svc.portfolio_context().unwrap()["context_token"]
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .unwrap()
         .to_owned();

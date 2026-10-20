@@ -372,7 +372,7 @@ fn owner_edits_undo_and_removal_are_journaled_and_newer_idea_edits_are_guarded()
     assert_eq!(edit["idea"]["revision"], 2);
     assert!(svc.update_idea(id, "Falscher alter Stand", 1).is_err());
     assert_eq!(
-        svc.portfolio_context().unwrap()["owner_ideas"][0]["checked"],
+        svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
         false
     );
     let token = edit["undo"]

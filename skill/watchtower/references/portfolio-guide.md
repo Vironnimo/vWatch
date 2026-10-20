@@ -6,6 +6,8 @@ This guide covers the cross-project brief: today's focus, shared findings, the u
 
 Run `watchtower portfolio context` and follow every output page before writing. Keep its context token. The context includes compact cards and facts, tracked tasks, warning acknowledgements, reactions, parked ideas, the previous brief and `owner_last_opened`.
 
+A card the previous brief already built on appears as a summary (`detail: summary`): headline, next step, usage and the titles and IDs of its items. For details such as a suggestion's evidence or a question's options, run `watchtower portfolio context --project <project-id>`, repeating `--project` for several; it returns those projects in full with the same token. `retained_proposals` lists titles; `watchtower proposals` shows their full text.
+
 - If `owner_last_opened` predates the previous brief or is absent, carry forward still-important focus items: the user has not opened Watchtower since that brief. Opening alone does not prove it was read. Otherwise retain items only while they remain true and among the highest priorities.
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Fill each `new_fields` path; for `synergies[].category`, review the retained proposals and set their categories explicitly while keeping IDs.
@@ -26,13 +28,15 @@ Choose where each proposal belongs: one project's `suggestions`; a connection ac
 
 Evaluate the user's unmet need before choosing a project or implementation. Existing project boundaries are not fixed: consider the wider workflow and gaps between the apps. A missing integration, shared format or identifier is design work, not evidence against an idea's usefulness. Separate uncertain benefit from unresolved implementation; for a promising idea, name the assumption and a concrete way to check it instead of silently discarding it.
 
+For `new_apps`, start from the user's days rather than the existing apps. The cards' `usage`, features and recent work show what the user actually does. Useful lenses: a step the user repeats by hand across several apps; a tool the user keeps rebuilding piecemeal inside different projects; a need outside coding that the projects reveal, such as data the user collects or plans they keep; a data flow that ends between two apps; a well-known product category that would serve the user better as a private, local version. An app idea names the situation it serves and its first useful version.
+
 Compare candidates with retained ideas rather than treating occupied slots as unavailable. Record worthwhile ideas in Watchtower, not only in chat. Keep discarded candidates and their reasons for the run reply, not as a checklist in the brief.
 
 ## Field meanings
 
 Only `greeting` is required by the schema. Fill other fields when findings warrant them; use empty lists for no findings and null only for `week_review`. `watchtower schema portfolio` gives exact shapes and limits when needed. Project references use the stable IDs from context.
 
-Every text has at most 600 characters. Limits below are words; a word is a space-separated piece containing a letter or digit. `evidence` has no word limit. Retained items keep their IDs in `focus`, `patterns`, `synergies`, `new_apps` and `park_or_revive`; omit `id` for a new item.
+Every text has at most 600 characters. Limits below are words; a word is a space-separated piece containing a letter or digit. `evidence` has no word limit. Retained items keep their IDs in `focus`, `patterns`, `synergies`, `new_apps` and `park_or_revive`; omit `id` for a new item. To keep an item unchanged, send only `{"id": "<its id>"}`; the saved wording is reused, also for a retained proposal. Never invent an ID: an unknown one is saved as a new item with a warning.
 
 | Field | Content |
 |---|---|
@@ -50,7 +54,7 @@ Every text has at most 600 characters. Limits below are words; a word is a space
 
 For `idea_checks`, `build` means worth a standalone app, `fold_in` means existing projects fit better, `later` means sound but not timely, and `drop` means not worth pursuing. Cite a concrete need, overlap or goal conflict in `why`. The user parked ideas to receive an honest assessment, not automatic approval.
 
-For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). Use each project's `review_week_evidence`: its changes and milestones fall within that week's inclusive dates. `done` holds up to 6 strings of 10 words drawn from those entries. `stalled` holds up to 6 strings of 10 words about work demonstrably unfinished during that week; today's open ends do not prove past state. `time_note` has at most 30 words comparing `commits_review_week` with the priorities; null means the stored measurement cannot establish that week's final count. Keep lists empty when no dated evidence supports an entry. A retained review describes its historical week, not today's remaining work.
+For `week_review`, copy `review_week.week` exactly (`YYYY-Www`). Use each project's `review_week_evidence`, present while the review is due: its changes and milestones fall within that week's inclusive dates. `done` holds up to 6 strings of 10 words drawn from those entries. `stalled` holds up to 6 strings of 10 words about work demonstrably unfinished during that week; today's open ends do not prove past state. `time_note` has at most 30 words comparing `commits_review_week` with the priorities; null means the stored measurement cannot establish that week's final count. Keep lists empty when no dated evidence supports an entry. A retained review describes its historical week, not today's remaining work.
 
 ## Retain intent, not stale wording
 
@@ -64,4 +68,4 @@ Write the brief as UTF-8 JSON in your own temporary folder. Replace `<context-to
 watchtower portfolio put --context-token <context-token> --file "<brief-file>"
 ```
 
-Read the receipt's save state and warnings. With `--merge`, a provided list or object replaces that whole field. On a schema error, fix the named fields.
+Read the receipt's save state, warnings and each item's change (`new`, `kept`, `edited`, `restored`). With `--merge`, a provided list or object replaces that whole field. On a schema error, fix the named fields.

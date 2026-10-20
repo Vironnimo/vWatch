@@ -42,7 +42,7 @@ fn handoff_keeps_its_snapshot_until_the_owner_confirms_the_result() {
         .unwrap();
     assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
     assert_eq!(svc.context("demo").unwrap()["tasks"][0]["id"], id);
-    assert_eq!(svc.portfolio_context().unwrap()["tasks"][0]["id"], id);
+    assert_eq!(svc.portfolio_context(&[]).unwrap()["tasks"][0]["id"], id);
     assert_eq!(
         svc.tasks(Some("demo")).unwrap()["tasks"][0]["title"],
         "Export reparieren"

@@ -357,7 +357,7 @@
     const reasonText = value => {
       if (Array.isArray(value)) return value.map(reasonText).join(', ');
       if (value && typeof value === 'object') return reasonText(value.message || value.code);
-      const labels = { no_card: 'Einschätzung fehlt', changed: 'Projekt hat sich geändert', ci_changed: 'CI hat sich geändert', answered: 'Deine Antwort fehlt noch im Bericht', status_changed: 'Deine Vorgaben haben sich geändert', new_fields: 'Einschätzung muss ergänzt werden', stale: 'Einschätzung ist veraltet', missing: 'Projektüberblick fehlt', new_day: 'Projektüberblick für heute fehlt', owner_idea: 'Deine neue Idee muss eingeschätzt werden', cards_changed: 'Projektberichte wurden aktualisiert', cards_will_change: 'Offene Projektberichte müssen zuerst aktualisiert werden', facts_unreadable: 'Fakten konnten nicht gelesen werden', facts_missing: 'Fakten fehlen', path_missing: 'Projektordner fehlt', not_a_git_repository: 'Kein Git-Repository', git_status_failed: 'Git-Status konnte nicht gelesen werden', agent_failed: 'Agent konnte die Prüfung nicht abschließen', project_removed: 'Projekt nicht mehr beobachtet', project_archived: 'Projekt archiviert' };
+      const labels = { no_card: 'Einschätzung fehlt', changed: 'Projekt hat sich geändert', ci_changed: 'CI hat sich geändert', answered: 'Deine Antwort fehlt noch im Bericht', status_changed: 'Deine Vorgaben haben sich geändert', new_fields: 'Einschätzung muss ergänzt werden', stale: 'Einschätzung ist veraltet', idea_review: 'Ideen werden neu durchdacht', missing: 'Projektüberblick fehlt', new_day: 'Projektüberblick für heute fehlt', owner_idea: 'Deine neue Idee muss eingeschätzt werden', cards_changed: 'Projektberichte wurden aktualisiert', cards_will_change: 'Offene Projektberichte müssen zuerst aktualisiert werden', facts_unreadable: 'Fakten konnten nicht gelesen werden', facts_missing: 'Fakten fehlen', path_missing: 'Projektordner fehlt', not_a_git_repository: 'Kein Git-Repository', git_status_failed: 'Git-Status konnte nicht gelesen werden', agent_failed: 'Agent konnte die Prüfung nicht abschließen', project_removed: 'Projekt nicht mehr beobachtet', project_archived: 'Projekt archiviert' };
       return labels[value] || (typeof value === 'string' && !/^[a-z]+(?:_[a-z]+)+$/.test(value) ? value : 'Weitere Prüfung nötig');
     };
     const name = p => byId(p.id) ? plink(p.id) : esc(p.name || p.id);
@@ -961,10 +961,13 @@
       <dt>CI</dt><dd>${esc((CI[s.ci] || CI.unknown)[0])}${f.ci && f.ci.title ? ` · ${esc(f.ci.workflow || '')}: ${esc(f.ci.title)}` : ''}${f.ci && f.ci.url ? ` · <button class="linkish" type="button" data-external="${esc(f.ci.url)}">Lauf öffnen</button>` : ''}</dd>
       </dl>` : `<p class="muted">${f.error === 'path_missing' ? 'Der Ordner existiert nicht mehr.' : 'Kein Git-Repository, daher keine Git-Fakten.'}</p>`;
     const r = c && c.reentry || {};
+    const u = c && c.usage || {};
+    const usage = u.summary ? `<div class="project-usage" ${anchor('usage')}><span class="faint">Im Alltag</span><p>${esc(u.summary)}${u.last_used ? ` <span class="muted">· zuletzt genutzt ${fmtDate(u.last_used)}</span>` : ''}</p>${u.evidence ? `<div class="muted">${esc(u.evidence)}</div>` : ''}</div>` : '';
     const head = `<header class="project-summary"><h2 class="pname" ${anchor('name')}>${dot(p.id)}${esc(p.name)} ${p.status !== 'active' ? `<span class="pill unknown">${esc(STATUS[p.status])}</span>` : phasePill(p)}${projectUnread(p) ? '<span class="pill new">ungelesen</span>' : ''}</h2>
       ${c ? `<div class="one" ${anchor('purpose')}>${esc(c.one_liner)}</div>` : ''}
       <div class="project-brief">${c ? `<div class="project-current" ${anchor('headline')}><span class="faint">Aktueller Stand</span><p>${esc(c.headline)}</p>${cardFreshness(p)}</div>` : ''}
       ${r.next_step ? `<div class="project-next" ${anchor('reentry')}><span class="faint">Nächster Schritt</span><p>${esc(r.next_step)}</p>${r.why ? `<div class="muted">${esc(r.why)}</div>` : ''}${r.done_when ? `<div class="muted">Fertig, wenn: ${esc(r.done_when)}</div>` : ''}${taskBtn(`reentry:${p.id}`, { projects: [p.id], title: r.next_step, why: r.why, done_when: r.done_when })}</div>` : ''}</div>
+      ${usage}
       ${c && c.personality ? `<div class="say" ${anchor('voice')}>„${esc(c.personality)}“</div>` : ''}</header>
       <nav class="project-jump" aria-label="Abschnitte">${PROJECT_GROUPS.map(([key, title]) => `<button type="button" data-jump="${key}">${title}</button>`).join('')}</nav>`;
     let work = statusBar, handbook = '', history = sinceHtml(p);
@@ -1204,6 +1207,7 @@
       add('Kurz gesagt', c.one_liner, 'work', 'purpose'); add('Stack', c.stack, 'handbook', 'stack'); add('Aktueller Stand', c.headline, 'work', 'headline');
       add('Projektstimme', c.personality, 'work', 'voice');
       add('Nächster Schritt', c.reentry && [c.reentry.next_step, c.reentry.why, c.reentry.done_when].filter(Boolean).join(' · '), 'work', 'reentry');
+      add('Im Alltag', c.usage && [c.usage.summary, c.usage.evidence].filter(Boolean).join(' · '), 'work', 'usage');
       if (c.vision) add('Vision und Fortschritt', [c.vision.statement, c.vision.progress_note].filter(Boolean).join(' · '), 'history', 'vision');
       c.features.forEach((x, i) => add('Kann', x, 'handbook', `feature:${i}`, x));
       c.recent_changes.forEach((x, i) => add('Zuletzt passiert', x.detail ? `${x.title} – ${x.detail}` : x.title, 'history', `recent:${i}`, x));

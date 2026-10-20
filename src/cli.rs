@@ -177,6 +177,12 @@ enum Cmd {
         #[arg(long, value_parser = ["idea", "recommendation"])]
         category: Option<String>,
     },
+    /// Read the questions agents left for the owner that still await an answer, longest waiting first
+    Questions {
+        /// Project ID. Omit for all projects.
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Undo one recorded owner change if its result has not changed again
     Undo { token: String },
 }
@@ -571,8 +577,14 @@ enum PortfolioCmd {
         #[arg(long)]
         to: i64,
     },
-    /// All projects side by side, the previous brief and all ratings
-    Context,
+    /// All projects side by side, the previous brief and all ratings; projects
+    /// unchanged since the previous brief appear as summaries
+    Context {
+        /// Project ID whose full card details to return instead of the whole context. Repeat for several.
+        /// Omit for the whole context.
+        #[arg(long)]
+        project: Vec<String>,
+    },
     /// Save a new brief
     #[command(aliases = ["set", "update"])]
     Put {
@@ -661,6 +673,7 @@ impl Cmd {
                 HistoryCmd::Show { .. } => "history.show",
             },
             Cmd::Proposals { .. } => "proposals",
+            Cmd::Questions { .. } => "questions",
             Cmd::Undo { .. } => "undo",
             Cmd::Projects { action } => match action {
                 ProjectsCmd::List { .. } => "projects.list",
@@ -692,7 +705,7 @@ impl Cmd {
             },
             Cmd::Portfolio { action } => match action {
                 PortfolioCmd::Compare { .. } => "portfolio.compare",
-                PortfolioCmd::Context => "portfolio.context",
+                PortfolioCmd::Context { .. } => "portfolio.context",
                 PortfolioCmd::Put { .. } => "portfolio.put",
                 PortfolioCmd::Show { .. } => "portfolio.show",
                 PortfolioCmd::History => "portfolio.history",
@@ -912,6 +925,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             from,
             until,
         } => svc.statistics(project.as_deref(), from.as_deref(), until.as_deref())?,
+        Cmd::Questions { project } => svc.questions(project.as_deref())?,
         Cmd::Proposals { project, category } => {
             svc.proposals(project.as_deref(), category.as_deref())?
         }
@@ -1050,7 +1064,7 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
         },
         Cmd::Portfolio { action } => match action {
             PortfolioCmd::Compare { from, to } => svc.compare_documents(None, from, to)?,
-            PortfolioCmd::Context => svc.portfolio_context()?,
+            PortfolioCmd::Context { project } => svc.portfolio_context(&project)?,
             PortfolioCmd::Put { doc } => svc.put_portfolio_guarded(
                 read_document(&doc, stdin)?,
                 doc.merge,

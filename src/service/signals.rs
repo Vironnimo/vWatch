@@ -24,8 +24,19 @@ pub(crate) struct Seen {
     kind: &'static str,
     first: String,
     last: String,
+    /// When the item's current wording first appeared.
+    worded: String,
     versions: u32,
     item: Value,
+}
+
+/// An item's wording without its identity, to notice rewordings.
+fn wording(item: &Value) -> String {
+    let mut content = item.clone();
+    if let Some(fields) = content.as_object_mut() {
+        fields.remove("id");
+    }
+    content.to_string()
 }
 
 /// Item appearances per document scope, extended incrementally by saved row id.
@@ -160,9 +171,13 @@ impl Watchtower {
                         kind,
                         first: at.clone(),
                         last: at.clone(),
+                        worded: at.clone(),
                         versions: 0,
                         item: Value::Null,
                     });
+                    if !entry.item.is_null() && wording(&entry.item) != wording(item) {
+                        entry.worded = at.clone();
+                    }
                     entry.last = at.clone();
                     entry.versions += 1;
                     entry.item = item.clone();
@@ -171,6 +186,20 @@ impl Watchtower {
             *after = row;
         }
         Ok(seen.clone())
+    }
+
+    /// The latest saved wording of every item with an id in one card scope or the brief,
+    /// with its item kind: what an agent can keep by sending only the id.
+    pub(crate) fn saved_items(
+        &self,
+        project: Option<&str>,
+    ) -> Result<HashMap<String, (&'static str, Value)>> {
+        Ok(self
+            .item_index(project)?
+            .into_iter()
+            .filter(|(key, s)| s.item["id"].as_str() == Some(key.as_str()))
+            .map(|(key, s)| (key, (s.kind, s.item)))
+            .collect())
     }
 
     fn days_since(&self, at: &str) -> i64 {
@@ -196,7 +225,8 @@ impl Watchtower {
                     .map(|f| json!({"value": f.value, "at": f.at}));
                 let mut row = json!({
                     "kind": kind, "id": item["id"], "title": item["title"],
-                    "first_seen": s.first, "days": self.days_since(&s.first), "versions": s.versions,
+                    "first_seen": s.first, "days": self.days_since(&s.first),
+                    "unchanged_days": self.days_since(&s.worded), "versions": s.versions,
                 });
                 if item["project"].is_string() {
                     row["project"] = item["project"].clone();
@@ -243,18 +273,27 @@ impl Watchtower {
                     .any(|f| Some(f.item_id.as_str()) == s.item["id"].as_str() && f.value == "done")
             })
             .map(|s| {
-                (&s.last, json!({
-                    "id": s.item["id"], "title": s.item["title"], "project": s.item["project"],
-                    "first_seen": s.first, "last_seen": s.last, "briefs": s.versions,
-                }))
+                (
+                    &s.last,
+                    json!({
+                        "id": s.item["id"], "title": s.item["title"], "project": s.item["project"],
+                        "first_seen": s.first, "last_seen": s.last, "briefs": s.versions,
+                    }),
+                )
             })
             .collect();
         dropped.sort_by(|a, b| b.0.cmp(a.0));
-        Ok(json!({"items": items, "dropped_focus": dropped.into_iter().map(|(_, v)| v).collect::<Vec<_>>()}))
+        Ok(
+            json!({"items": items, "dropped_focus": dropped.into_iter().map(|(_, v)| v).collect::<Vec<_>>()}),
+        )
     }
 
     /// Measured risks of a project with how long they have lasted.
-    pub(crate) fn project_streaks(&self, project: &str, stored: Option<&StoredFacts>) -> Result<Vec<Value>> {
+    pub(crate) fn project_streaks(
+        &self,
+        project: &str,
+        stored: Option<&StoredFacts>,
+    ) -> Result<Vec<Value>> {
         let Some(stored) = stored else {
             return Ok(Vec::new());
         };
@@ -265,6 +304,52 @@ impl Watchtower {
             &stored.collected_at,
             (self.clock)(),
         ))
+    }
+
+    /// Questions for the owner on current cards that await an answer, longest shown first.
+    /// Answered or done questions are left out; snoozed ones are only counted.
+    pub fn questions(&self, project: Option<&str>) -> Result<Value> {
+        if let Some(id) = project {
+            self.project(id)?;
+        }
+        let reactions = self.store.feedback()?;
+        let today = self.today().to_string();
+        let (mut open, mut snoozed) = (Vec::new(), 0);
+        for p in self.store.projects()? {
+            if p.status == "archived" || project.is_some_and(|id| id != p.id) {
+                continue;
+            }
+            let Some(card) = self.store.latest_card(&p.id)? else {
+                continue;
+            };
+            let shown = self.card_persistence(&p.id, &card.data, &reactions)?;
+            for q in card.data["waiting_on_you"].as_array().into_iter().flatten() {
+                let reaction = q["id"]
+                    .as_str()
+                    .and_then(|id| reactions.iter().find(|f| f.item_id == id));
+                if reaction.is_some_and(|f| matches!(f.value.as_str(), "answered" | "done")) {
+                    continue;
+                }
+                if reaction
+                    .and_then(snoozed_until)
+                    .is_some_and(|until| until > today)
+                {
+                    snoozed += 1;
+                    continue;
+                }
+                let days = shown
+                    .iter()
+                    .find(|row| row["kind"] == "question" && row["id"] == q["id"])
+                    .map(|row| row["days"].clone());
+                open.push(json!({
+                    "id": q["id"], "project": p.id, "project_name": p.name, "days": days,
+                    "title": q["title"], "source": q["source"],
+                    "options": q["options"], "recommended": q["recommended"],
+                }));
+            }
+        }
+        open.sort_by_key(|q| std::cmp::Reverse(q["days"].as_i64().unwrap_or(0)));
+        Ok(json!({"project": project, "questions": open, "snoozed": snoozed}))
     }
 
     /// Whether the owner reacts at all: the context for how insistently to ask.
