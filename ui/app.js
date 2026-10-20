@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  const PALETTE = ['#e8870a', '#4fae7a', '#5b8def', '#c0674a', '#9a7bd0', '#d06a9c', '#3aa6b0', '#b3a23a', '#7f9c4a', '#c9853f'];
+  // ten hues spread around the wheel, readable on the light and the dark background
+  const PALETTE = ['#e8870a', '#2f7fe0', '#2a9d5c', '#d43f8d', '#8a5cd6', '#d9443a', '#14a3b8', '#c9a10c', '#8d6e55', '#6b7a90'];
   const PHASE = { active: 'aktiv', cooling: 'kühlt ab', dormant: 'schläft', done: 'fertig', maintenance: 'Wartung' };
   const STATUS = { active: 'aktiv', parked: 'geparkt', done: 'fertig', archived: 'archiviert' };
   const KIND = { worktree: 'Worktree', branch: 'Branch', uncommitted: 'nicht committet', unpushed: 'nicht gepusht', ci: 'CI', flagged: 'FLAGGED', todo: 'TODO', plan: 'Plan', other: 'Sonstiges' };
@@ -71,7 +72,22 @@
   const fmtShort = d => { const [, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}.${m}.`; };
   const num = n => Number(n || 0).toLocaleString('de-DE');
   const hash = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
-  const color = id => PALETTE[hash(id) % PALETTE.length];
+  // Each project keeps its hashed color unless an earlier project holds it; then it
+  // takes the next free one, so up to ten projects never share a color.
+  let colors = { key: null, map: new Map() };
+  function color(id) {
+    const ids = ((S && S.projects) || []).map(p => p.id), key = ids.join(' ');
+    if (colors.key !== key) {
+      const map = new Map(), used = new Set();
+      for (const pid of ids) {
+        let slot = hash(pid) % PALETTE.length;
+        for (let i = 0; i < PALETTE.length && used.has(slot); i++) slot = (slot + 1) % PALETTE.length;
+        used.add(slot); map.set(pid, PALETTE[slot]);
+      }
+      colors = { key, map };
+    }
+    return colors.map.get(id) || PALETTE[hash(id) % PALETTE.length];
+  }
   const dot = id => `<span class="dot" style="background:${color(id)}"></span>`;
   const byId = id => S.projects.find(p => p.id === id);
   const plink = id => { const p = byId(id); return p ? `<button class="plink" type="button" data-open="${esc(id)}">${dot(id)}${esc(p.name)}</button>` : esc(id); };
