@@ -51,6 +51,15 @@ windows-sys = { version = "0.59", features = [
 [dev-dependencies]
 tempfile = "3"
 
+# Full debug info made target\ grow by tens of gigabytes on Windows (PDBs and
+# rlibs). Line tables keep file:line in panics and backtraces; dependencies
+# carry none.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = true
 codegen-units = 1
