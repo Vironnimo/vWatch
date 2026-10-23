@@ -20,7 +20,7 @@ The default suite is `all` (Rust and UI). `--suite rust` or `--suite ui` narrows
 
 Rust tests build once with locked, offline dependencies in the primary checkout's shared `target/`. The runner discovers Cargo's test executables and libtest names, then executes each exact case in its own process. It uses at most four workers, one libtest thread per process, and a hard 30-second deadline per ordinary case. The one named aggregate `skill_commands::every_cli_recipe_in_the_operating_skill_runs_with_real_arguments` has a 120-second budget: it executes every documented CLI recipe, repeated fixture setup and the PowerShell forms sequentially inside one libtest case. This is a multi-command contract budget; individual test deadlines stay at 30 seconds. Tests cannot share process globals. Cargo build/discovery retains the developer's tool caches; test processes receive the isolated environment below. There are currently no Rust documentation tests; the runner covers libtest unit and integration tests. If executable documentation examples are added, extend the runner to include them.
 
-UI files run in separate Node processes with `--test-concurrency=1`, a 30-second native per-test timeout and a 120-second process deadline. At most four Rust cases/UI files run at once. Files matching `tests/ui*.cjs` are included except the shared `ui-helpers.cjs`. The UI fixtures use a fresh VM and state for each `app()` call; HOME isolation is per UI file, not per test. They do not start a browser or the installed application.
+UI files run in separate Node processes with `--experimental-vm-modules` for the native ES module VM loader, `--test-concurrency=1`, a 30-second native per-test timeout and a 120-second process deadline. At most four Rust cases/UI files run at once. Files matching `tests/ui*.cjs` are included except the shared `ui-helpers.cjs`. The UI fixtures use a fresh VM and state for each `app()` call; HOME isolation is per UI file, not per test. They do not start a browser or the installed application.
 
 Each run keeps logs and `report.json` in the current checkout's `.tmp/test-runs/<unique-run>/`. The report lists every selected case's outcome and duration. The console shows the 20 slowest cases. Rust durations include process startup/teardown; Node durations come from TAP's `duration_ms` and describe the test body. Do not compare those measurements as identical quantities. Build/discovery output is retained separately from test results. Failed test logs are linked in the console.
 
@@ -32,7 +32,7 @@ Every Rust case, UI file and Rust discovery process receives its own fixture dir
 
 - Empty HOME and USERPROFILE, isolated APPDATA and LOCALAPPDATA, and no XDG_CONFIG_HOME.
 - TEMP, TMP and TMPDIR under its fixture directory, plus a safe WATCHTOWER_HOME and the explicit WATCHTOWER_TEST_INSTANCE opt-in.
-- An empty GIT_CONFIG_GLOBAL, disabled system Git config and prompts, and GIT_CEILING_DIRECTORIES at the temporary-directory boundary. All inherited GIT_* variables, including author/committer identity and index/config overrides, are removed first.
+- An empty GIT_CONFIG_GLOBAL, disabled system Git config and prompts, and GIT_CEILING_DIRECTORIES at the case fixture boundary above HOME and TEMP. Git ignores a ceiling equal to its starting directory, so TEMP itself must remain below that boundary. All inherited GIT_* variables, including author/committer identity and index/config overrides, are removed first.
 - No inherited WATCHTOWER_* fault switches, NODE_OPTIONS, NODE_PATH or EMAIL.
 
 `tests/common/mod.rs::make_repo` configures test-only Git identity in each newly created repository and disables commit signing. Its `git_at` helper supplies explicit dates. Tests must not rely on the owner's Git config. Existing shared helpers use `tempfile` under the runner's per-case TEMP and explicitly pass database/repository paths.
@@ -42,6 +42,8 @@ On Windows a waiting launcher is assigned to a kill-on-close Job Object before s
 Ctrl+C cancels queued cases and signals active workers to terminate their process trees. The run exits with code 130, saves a failed report with explicit `cancelled` outcomes, and retains its fixtures. Cancellation never reports unfinished work as passed.
 
 Successful runs remove only their verified, uniquely created external fixture directory. Failed runs retain it for diagnosis and name it in `report.json`. Logs remain in `.tmp/` for both outcomes. Never remove an entire configured test root to clean up one run. The runner does not alter the owner's installed database, preferences, autostart, PATH or Git identity.
+
+`tests/test_development.py::TestRunner` exercises forbidden roots and inherited configuration, real detached Windows descendants under timeout/cancellation/leak detection, interrupted-run reports and cleanup of only a successful unique fixture. These synthetic jobs do not build or launch Watchtower. The install-path contract uses a real main/worktree pair and PowerShell with captured Cargo/copy operations; it stops before installation and verifies that both operations use the primary target even with inherited overrides.
 
 ## Test ownership and assertions
 

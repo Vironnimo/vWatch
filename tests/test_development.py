@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check  # noqa: E402
 import commit_check  # noqa: E402
 import worktree  # noqa: E402
+import test as test_runner  # noqa: E402
 
 
 class Development(unittest.TestCase):
@@ -244,6 +247,176 @@ catch { if ($_.Exception.Message -ne 'probe complete') { throw } }
         blocking = commit_check.classify_rust(output, "", 1, self.repo)
         self.assertEqual(len(blocking), 3)
         self.assertTrue(commit_check.classify_rust("", "tool failed", 1, self.repo))
+
+
+class TestRunner(unittest.TestCase):
+    """Safety boundaries require real disposable processes, not application builds."""
+
+    def setUp(self):
+        fixtures = test_runner.fixture_root(check.primary_root(ROOT))
+        fixtures.mkdir(parents=True, exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="runner-contract-", dir=fixtures)
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+
+    def test_isolation_removes_inherited_owner_config_and_rejects_forbidden_roots(self):
+        hostile = dict(os.environ, HOME="owner-home", USERPROFILE="owner-profile",
+                       GIT_INDEX_FILE="owner-index", GIT_AUTHOR_NAME="owner-name",
+                       WATCHTOWER_FAULT_INJECT="1", NODE_OPTIONS="--require owner-code",
+                       NODE_PATH="owner-libraries", EMAIL="owner@example.invalid",
+                       XDG_CONFIG_HOME="owner-config")
+        env = test_runner.isolated_environment(hostile, self.base / "case")
+        for key in ("GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "WATCHTOWER_FAULT_INJECT",
+                    "NODE_OPTIONS", "NODE_PATH", "EMAIL", "XDG_CONFIG_HOME"):
+            self.assertNotIn(key, env)
+        for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
+                    "WATCHTOWER_HOME", "GIT_CONFIG_GLOBAL", "GIT_CEILING_DIRECTORIES"):
+            self.assertTrue(Path(env[key]).is_relative_to(self.base))
+        self.assertEqual(env["WATCHTOWER_TEST_INSTANCE"], "1")
+        self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        subprocess.run(["git", "init", "--template=", str(self.base)],
+                       env=env, check=True, capture_output=True, timeout=10)
+        # Use an actual child to establish that both inherited config and Git's
+        # parent repository discovery are absent at the process boundary.
+        child = subprocess.run(
+            [sys.executable, "-c", "import json,os,subprocess; print(json.dumps({'home':os.environ['HOME'],"
+             "'git':subprocess.run(['git','rev-parse','--show-toplevel'],cwd=os.environ['TEMP'],"
+             "capture_output=True).returncode}))"],
+            env=env, cwd=self.base, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(json.loads(child.stdout), {"home": env["HOME"], "git": 128})
+        primary, owner = self.base / "primary", self.base / "owner"
+        with patch.dict(os.environ, {"HOME": str(owner), "USERPROFILE": str(owner / "profile")}):
+            for forbidden in (ROOT, primary, owner, owner / "profile"):
+                for candidate in (forbidden, forbidden / "nested"):
+                    with self.subTest(root=candidate), patch.dict(os.environ, {"VORCH_TEST_ROOT": str(candidate)}):
+                        with self.assertRaisesRegex(RuntimeError, "inside a repository or home"):
+                            test_runner.fixture_root(primary)
+            allowed = self.base / "outside"
+            with patch.dict(os.environ, {"VORCH_TEST_ROOT": str(allowed)}):
+                self.assertEqual(test_runner.fixture_root(primary), allowed)
+                self.assertFalse(allowed.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object descendant contract")
+    def test_timeout_cancellation_and_leaked_descendants_terminate_the_owned_tree(self):
+        import ctypes
+        from ctypes import wintypes
+
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        api.OpenProcess.restype = wintypes.HANDLE
+        api.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        api.GetExitCodeProcess.restype = wintypes.BOOL
+        api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        api.WaitForSingleObject.restype = wintypes.DWORD
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        api.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        for mode in ("timeout", "cancelled", "leak"):
+            with self.subTest(mode=mode):
+                folder = self.base / mode
+                marker = folder / "child.pid"
+                # The child is detached, so terminating just the launcher or
+                # ordinary process group would leave it alive on Windows.
+                child = "import os,time; from pathlib import Path; Path(" + repr(str(marker)) + ").write_text(str(os.getpid())); time.sleep(20)"
+                parent = (
+                    "import subprocess,sys,time; from pathlib import Path; "
+                    f"p=subprocess.Popen([sys.executable,'-c',{child!r}],creationflags=0x208); "
+                    f"marker=Path({str(marker)!r}); "
+                    "deadline=time.monotonic()+5; "
+                    "exec('while not marker.exists() and time.monotonic()<deadline: time.sleep(0.01)'); "
+                    + ("sys.exit(0)" if mode == "leak" else "p.wait()")
+                )
+                cancel = threading.Event()
+                ready = []
+
+                def request_cancel():
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    ready.append(marker.exists())
+                    cancel.set()
+
+                trigger = threading.Thread(target=request_cancel) if mode == "cancelled" else None
+                if trigger:
+                    trigger.start()
+                try:
+                    result = test_runner.run_process(
+                        [sys.executable, "-c", parent],
+                        test_runner.isolated_environment(dict(os.environ), folder),
+                        folder / "logs", 1 if mode == "timeout" else 8, cancel,
+                    )
+                finally:
+                    cancel.set()
+                    if trigger:
+                        trigger.join(timeout=6)
+                self.assertTrue(marker.exists(), result)
+                pid = int(marker.read_text())
+                handle = api.OpenProcess(0x101001, False, pid)  # sync, terminate, query limited
+                if handle:
+                    try:
+                        status = wintypes.DWORD()
+                        self.assertEqual(api.WaitForSingleObject(handle, 5000), 0, result)
+                        self.assertTrue(api.GetExitCodeProcess(handle, ctypes.byref(status)))
+                        self.assertNotEqual(status.value, 259, result)
+                    finally:
+                        # Only this case's PID is eligible for emergency teardown
+                        # if containment regresses; wait before fixture cleanup.
+                        api.TerminateProcess(handle, 1)
+                        api.WaitForSingleObject(handle, 5000)
+                        api.CloseHandle(handle)
+                else:
+                    self.assertEqual(ctypes.get_last_error(), 87, "could not inspect owned child")
+                self.assertEqual(result["status"], "failed" if mode == "leak" else mode, result)
+                self.assertIn("terminated", result["detail"])
+                if trigger:
+                    self.assertEqual(ready, [True])
+
+    def test_reports_preserve_failed_fixtures_and_cleanup_only_the_successful_unique_run(self):
+        repository = self.base / "repo"
+        repository.mkdir()
+        shutil.copy2(ROOT / ".python-version", repository / ".python-version")
+        external = self.base / "external"
+        external.mkdir()
+        sentinel = external / "previous-run" / "keep.txt"
+        sentinel.parent.mkdir()
+        sentinel.write_text("unrelated retained data")
+        marker = self.base / "active"
+
+        for mode in ("passed", "failed", "cancelled"):
+            with self.subTest(mode=mode):
+                if marker.exists():
+                    marker.unlink()
+                body = (f"from pathlib import Path; import time; Path({str(marker)!r}).touch(); time.sleep(20)"
+                        if mode == "cancelled" else
+                        "print('1 passed; 0 failed; 0 ignored')" if mode == "passed" else "raise SystemExit(2)")
+                cases = [{"suite": "rust", "name": f"synthetic::{i}", "command": [sys.executable, "-c", body]}
+                         for i in range(2 if mode == "cancelled" else 1)]
+
+                def interrupt_when_started(*args, **kwargs):
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(marker.exists(), "synthetic job never started")
+                    raise KeyboardInterrupt
+
+                with patch.object(test_runner, "ROOT", repository), patch.object(check, "primary_root", return_value=repository), \
+                        patch.object(test_runner, "rust_cases", return_value=cases), patch.object(test_runner, "WORKERS", 1), \
+                        patch.dict(os.environ, {"VORCH_TEST_ROOT": str(external)}), patch.object(sys, "argv", ["test.py", "--suite", "rust"]):
+                    if mode == "cancelled":
+                        with patch.object(test_runner, "wait", side_effect=interrupt_when_started):
+                            code = test_runner.main()
+                    else:
+                        code = test_runner.main()
+                reports = sorted((repository / ".tmp" / "test-runs").glob("*/report.json"), key=lambda path: path.stat().st_mtime_ns)
+                report = json.loads(reports[-1].read_text())
+                self.assertEqual(code, {"passed": 0, "failed": 1, "cancelled": 130}[mode])
+                self.assertEqual(report["status"], "passed" if mode == "passed" else "failed")
+                self.assertEqual([item["status"] for item in report["tests"]], [mode] * len(cases))
+                self.assertEqual(Path(report["fixtures"]).exists(), mode != "passed")
+                self.assertEqual(report.get("fixtures_removed", False), mode == "passed")
+                self.assertEqual(sentinel.read_text(), "unrelated retained data")
 
 
 if __name__ == "__main__":
