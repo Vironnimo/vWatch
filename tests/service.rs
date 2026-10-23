@@ -1953,6 +1953,50 @@ fn quiet_active_projects_take_turns_for_an_idea_review() {
 }
 
 #[test]
+fn unfinished_focus_survives_a_rewrite_in_the_same_clock_tick() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    let written = svc
+        .put_portfolio(
+            json!({"greeting":"Moin", "focus":[{
+                "project":"demo", "title":"Export prüfen", "why":"Fehlende Zeilen finden"
+            }]}),
+            false,
+            false,
+        )
+        .unwrap();
+    let id = written["portfolio"]["focus"][0]["id"].as_str().unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["brief_persistence"]["dropped_focus"],
+        json!([])
+    );
+    svc.put_portfolio(json!({"focus":[]}), true, false).unwrap();
+    let dropped = svc.state(false).unwrap()["brief_persistence"]["dropped_focus"].clone();
+    assert_eq!(dropped.as_array().unwrap().len(), 1);
+    assert_eq!(dropped[0]["id"], id);
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["brief_persistence"]["dropped_focus"],
+        dropped
+    );
+    svc.put_portfolio(json!({"focus":[{"id":id}]}), true, false)
+        .unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["brief_persistence"]["dropped_focus"],
+        json!([])
+    );
+    // Rating the focus while current keeps its completion when it leaves again.
+    svc.set_feedback(id, Some("done"), None).unwrap();
+    svc.put_portfolio(json!({"focus":[]}), true, false).unwrap();
+    assert_eq!(
+        svc.state(false).unwrap()["brief_persistence"]["dropped_focus"],
+        json!([])
+    );
+}
+
+#[test]
 fn a_ci_turning_red_or_green_makes_the_card_due() {
     use std::sync::{Arc, Mutex};
     let tmp = tempfile::tempdir().unwrap();

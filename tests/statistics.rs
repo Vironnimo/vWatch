@@ -358,6 +358,156 @@ fn proposals_survive_report_omission_and_card_replays_do_not_duplicate_history()
 }
 
 #[test]
+fn document_normalization_updates_history_and_retains_new_item_ids() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting":"Hallo"}), false, false)
+        .unwrap();
+    let old_card = svc.store().latest_card("demo").unwrap().unwrap();
+    let old_brief = svc.store().latest_portfolio().unwrap().unwrap();
+    let mut normalized_card = old_card.data.clone();
+    normalized_card["suggestions"][0]["id"] = json!("normalized-suggestion");
+    let mut normalized_brief = old_brief.data.clone();
+    normalized_brief["new_apps"] = json!([{"id":"normalized-app","title":"Retained app"}]);
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    // A failed journal write must also roll back the normalization and retained item.
+    db.execute_batch("CREATE TRIGGER reject_normalization BEFORE INSERT ON content_history BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
+    assert!(svc
+        .store()
+        .rewrite_card_if_current("demo", old_card.version, &old_card.data, &normalized_card)
+        .is_err());
+    assert_eq!(
+        svc.store().latest_card("demo").unwrap().unwrap().data,
+        old_card.data
+    );
+    db.execute_batch("DROP TRIGGER reject_normalization")
+        .unwrap();
+    assert!(svc
+        .store()
+        .rewrite_card_if_current("demo", old_card.version, &old_card.data, &normalized_card)
+        .unwrap());
+    assert!(svc
+        .store()
+        .rewrite_portfolio_if_current(old_brief.version, &old_brief.data, &normalized_brief)
+        .unwrap());
+    let current = svc.store().latest_card("demo").unwrap().unwrap();
+    assert_eq!(current.version, old_card.version);
+    assert_eq!(current.created_at, old_card.created_at);
+    let event = &svc
+        .store()
+        .content_history(None, Some("card"), Some("demo"), None, 1)
+        .unwrap()[0];
+    assert_eq!(event["before"], old_card.data);
+    assert_eq!(event["after"], normalized_card);
+    let event = &svc
+        .store()
+        .content_history(None, Some("portfolio"), None, None, 1)
+        .unwrap()[0];
+    assert_eq!(event["before"], old_brief.data);
+    assert_eq!(event["after"], normalized_brief);
+    let event_count = count(&db, "content_history");
+    svc.store()
+        .rewrite_latest_card("demo", &normalized_card)
+        .unwrap();
+    svc.store()
+        .rewrite_latest_portfolio(&normalized_brief)
+        .unwrap();
+    assert_eq!(count(&db, "content_history"), event_count);
+    svc.put_card("demo", json!({"suggestions":[]}), true, false)
+        .unwrap();
+    svc.put_portfolio(json!({"new_apps":[]}), true, false)
+        .unwrap();
+    let proposals = svc.store().proposals().unwrap();
+    for id in ["normalized-suggestion", "normalized-app"] {
+        let retained = proposals.iter().find(|p| p["id"] == id).unwrap();
+        assert_eq!(retained["in_report"], false);
+        assert_eq!(retained["first_seen"], "2026-09-30T08:00:00Z");
+    }
+}
+
+#[test]
+fn document_update_migration_repairs_already_normalized_proposals_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    drop(svc);
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute_batch(
+        "DROP TRIGGER history_cards_update; DROP TRIGGER history_portfolio_update;
+        DELETE FROM history_migrations WHERE name='document-updates-v1';
+        UPDATE cards SET data=json_set(data,'$.suggestions[0].id','previously-normalized');",
+    )
+    .unwrap();
+    let (svc, _) = service(tmp.path());
+    let proposals = svc.store().proposals().unwrap();
+    assert!(proposals
+        .iter()
+        .any(|p| p["id"] == "previously-normalized" && p["in_report"] == true));
+    assert!(proposals
+        .iter()
+        .filter(|p| p["id"] != "previously-normalized")
+        .all(|p| p["in_report"] == false));
+    let event_count = count(&db, "content_history");
+    drop(svc);
+    let (svc, _) = service(tmp.path());
+    assert_eq!(svc.store().proposals().unwrap(), proposals);
+    assert_eq!(count(&db, "content_history"), event_count);
+}
+
+#[test]
+fn history_filters_and_pages_keep_task_project_membership_and_exact_boundaries() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    for (entity, id, project, before, after) in [
+        (
+            "card",
+            "demo",
+            Some("demo"),
+            json!(null),
+            json!({"headline":"One"}),
+        ),
+        ("task", "1", None, json!(null), json!({"projects":["demo"]})),
+        (
+            "task",
+            "1",
+            None,
+            json!({"projects":["demo"]}),
+            json!({"projects":["other"]}),
+        ),
+        (
+            "card",
+            "other",
+            Some("other"),
+            json!(null),
+            json!({"headline":"Two"}),
+        ),
+    ] {
+        db.execute("INSERT INTO content_history(entity,entity_id,project_id,operation,origin,before_data,after_data) VALUES(?1,?2,?3,'update','write',?4,?5)", rusqlite::params![entity,id,project,before.to_string(),after.to_string()]).unwrap();
+    }
+    let ids = |project, entity, id, before, limit| {
+        svc.store()
+            .content_history(project, entity, id, before, limit)
+            .unwrap()
+            .into_iter()
+            .map(|e| e["id"].as_i64().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(None, None, None, None, 2), [4, 3]);
+    assert_eq!(ids(None, None, None, Some(3), 2), [2, 1]);
+    assert_eq!(ids(Some("demo"), None, None, None, 10), [3, 2, 1]);
+    assert_eq!(ids(Some("demo"), Some("card"), None, None, 10), [1]);
+    assert_eq!(ids(Some("demo"), Some("task"), Some("1"), Some(3), 10), [2]);
+    assert_eq!(ids(Some("other"), Some("task"), None, None, 10), [3]);
+    assert_eq!(ids(None, None, Some("demo"), None, 10), [1]);
+}
+
+#[test]
 fn owner_edits_undo_and_removal_are_journaled_and_newer_idea_edits_are_guarded() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

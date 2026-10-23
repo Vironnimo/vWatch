@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS document_requests(
 CREATE TABLE IF NOT EXISTS owner_undo(
   token TEXT PRIMARY KEY, scope TEXT NOT NULL, before_data TEXT NOT NULL, after_data TEXT NOT NULL,
   versions TEXT NOT NULL, created_at TEXT NOT NULL, undone_at TEXT, undone_versions TEXT);
+CREATE INDEX IF NOT EXISTS owner_undo_active_scope ON owner_undo(scope) WHERE undone_at IS NULL;
 CREATE TABLE IF NOT EXISTS owner_field_versions(field TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_active_source ON tasks(source_key)
   WHERE source_key IS NOT NULL AND status IN ('assigned', 'blocked', 'review');
@@ -754,6 +755,24 @@ impl Store {
         })
     }
 
+    /// Normalize the version that was read only while it is still the current content.
+    pub fn rewrite_card_if_current(
+        &self,
+        id: &str,
+        version: i64,
+        previous: &Value,
+        data: &Value,
+    ) -> Result<bool> {
+        self.with(|db| {
+            db.execute(
+                "UPDATE cards SET data=?4 WHERE id=(SELECT MAX(id) FROM cards WHERE project_id=?1)
+                 AND (SELECT COUNT(*) FROM cards WHERE project_id=?1)=?2 AND data=?3",
+                params![id, version, previous.to_string(), data.to_string()],
+            )
+            .map(|count| count > 0)
+        })
+    }
+
     /// Replaces the stored content of the latest brief, keeping its version and date.
     pub fn rewrite_latest_portfolio(&self, data: &Value) -> Result<()> {
         self.with(|db| {
@@ -762,6 +781,22 @@ impl Store {
                 [data.to_string()],
             )
             .map(drop)
+        })
+    }
+
+    /// A startup migration must not replace a brief another process saved or normalized.
+    pub fn rewrite_portfolio_if_current(
+        &self,
+        version: i64,
+        previous: &Value,
+        data: &Value,
+    ) -> Result<bool> {
+        self.with(|db| {
+            db.execute(
+                "UPDATE portfolio SET data=?3 WHERE id=?1 AND id=(SELECT MAX(id) FROM portfolio) AND data=?2",
+                params![version, previous.to_string(), data.to_string()],
+            )
+            .map(|count| count > 0)
         })
     }
 

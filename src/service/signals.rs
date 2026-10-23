@@ -263,9 +263,14 @@ impl Watchtower {
         };
         let seen = self.item_index(None)?;
         let items = self.persistence_rows(&seen, &brief.data, BRIEF_LISTS, reactions);
+        let current_focus = brief.data["focus"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice);
         let mut dropped: Vec<(&String, Value)> = seen
             .values()
-            .filter(|s| s.kind == "focus" && s.last < brief.created_at)
+            .filter(|s| {
+                s.kind == "focus" && !current_focus.iter().any(|item| item["id"] == s.item["id"])
+            })
             .filter(|s| self.days_since(&s.last) <= DROPPED_FOCUS_DAYS)
             .filter(|s| {
                 !reactions

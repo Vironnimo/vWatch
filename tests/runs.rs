@@ -527,3 +527,49 @@ fn simultaneous_starts_return_their_own_run_identity() {
             .contains(&format!("runs finish {id}")));
     }
 }
+
+#[test]
+fn a_run_keeps_its_original_idea_reviews_when_the_daily_rotation_moves_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    for name in ["alpha", "beta", "gamma", "delta"] {
+        let repo = make_repo(tmp.path(), name, &["2026-09-29T10:00:00"]);
+        svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+        svc.put_card(name, card(), false, false).unwrap();
+    }
+    clock.advance(Duration::days(7));
+    svc.put_portfolio(brief(), false, false).unwrap();
+    let started = svc.run_start(false).unwrap();
+    let id = run_id(&started);
+    let selected: Vec<String> = started["due"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["reason"] == "idea_review")
+        .map(|p| p["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(selected.len(), 2);
+
+    clock.advance(Duration::days(1));
+    let due = svc.due(14, false).unwrap();
+    assert_eq!(due["projects"].as_array().unwrap().len(), 2);
+    assert!(due["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| !selected.iter().any(|id| p["id"] == id.as_str())));
+    let pending = svc.run_status().unwrap();
+    for project_id in &selected {
+        assert_eq!(project(&pending, project_id)["status"], "pending");
+        assert_eq!(project(&pending, project_id)["reason"], "idea_review");
+        svc.put_card(project_id, card(), false, false).unwrap();
+    }
+    svc.put_portfolio(brief(), false, false).unwrap();
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "cards_will_change"
+    );
+    let finished = svc.run_finish(id).unwrap();
+    assert_eq!(finished["state"], "complete", "{finished}");
+    assert_eq!(finished["run"]["portfolio"]["status"], "current");
+}

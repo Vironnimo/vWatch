@@ -121,6 +121,79 @@ fn guarded_writes_require_context_but_dry_runs_do_not_consume_it() {
 }
 
 #[test]
+fn legacy_document_rewrites_cannot_overwrite_newer_versions_or_content() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting":"Original"}), false, false)
+        .unwrap();
+    let old_card = svc.store().latest_card("demo").unwrap().unwrap();
+    let old_brief = svc.store().latest_portfolio().unwrap().unwrap();
+    let (writer, _) = service(tmp.path());
+    writer
+        .put_card("demo", json!({"headline":"Newer report"}), true, false)
+        .unwrap();
+    writer
+        .put_portfolio(json!({"greeting":"Newer brief"}), true, false)
+        .unwrap();
+    let normalized = json!({"must":"not replace current content"});
+    assert!(!svc
+        .store()
+        .rewrite_card_if_current("demo", old_card.version, &old_card.data, &normalized)
+        .unwrap());
+    assert!(!svc
+        .store()
+        .rewrite_portfolio_if_current(old_brief.version, &old_brief.data, &normalized)
+        .unwrap());
+    let current_card = svc.store().latest_card("demo").unwrap().unwrap();
+    let current_brief = svc.store().latest_portfolio().unwrap().unwrap();
+    assert_eq!(current_card.data["headline"], "Newer report");
+    assert_eq!(current_brief.data["greeting"], "Newer brief");
+
+    // Another startup may normalize the same version without adding a new row.
+    let mut card_with_ids = current_card.data.clone();
+    card_with_ids["headline"] = json!("Already normalized");
+    assert!(writer
+        .store()
+        .rewrite_card_if_current(
+            "demo",
+            current_card.version,
+            &current_card.data,
+            &card_with_ids
+        )
+        .unwrap());
+    let mut brief_with_ids = current_brief.data.clone();
+    brief_with_ids["greeting"] = json!("Already normalized");
+    assert!(writer
+        .store()
+        .rewrite_portfolio_if_current(current_brief.version, &current_brief.data, &brief_with_ids)
+        .unwrap());
+    assert!(!svc
+        .store()
+        .rewrite_card_if_current(
+            "demo",
+            current_card.version,
+            &current_card.data,
+            &normalized
+        )
+        .unwrap());
+    assert!(!svc
+        .store()
+        .rewrite_portfolio_if_current(current_brief.version, &current_brief.data, &normalized)
+        .unwrap());
+    assert_eq!(
+        svc.store().latest_card("demo").unwrap().unwrap().data,
+        card_with_ids
+    );
+    assert_eq!(
+        svc.store().latest_portfolio().unwrap().unwrap().data,
+        brief_with_ids
+    );
+}
+
+#[test]
 fn stale_card_writes_preserve_new_owner_instructions_facts_and_cards() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

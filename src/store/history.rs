@@ -46,7 +46,8 @@ pub(super) fn migrate(db: &Connection) -> Result<()> {
         |r| r.get(0),
     )?;
     if done {
-        return record_changed_samples(db);
+        record_changed_samples(db)?;
+        return record_document_updates(db);
     }
     // Preserve the one measurement old installations still possess; never invent older samples.
     db.execute_batch("INSERT OR IGNORE INTO fact_payloads(data) SELECT json_extract(data,'$.code') FROM facts WHERE json_type(data,'$.code')='object';
@@ -238,7 +239,80 @@ pub(super) fn migrate(db: &Connection) -> Result<()> {
         "INSERT INTO history_migrations VALUES('durable-history-v1')",
         [],
     )?;
-    record_changed_samples(db)
+    record_changed_samples(db)?;
+    record_document_updates(db)
+}
+
+/// Legacy documents receive item IDs in place. Keep their journal and retained proposals
+/// consistent with that rewrite, without changing the document version or its first date.
+fn record_document_updates(db: &Connection) -> Result<()> {
+    let done: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM history_migrations WHERE name='document-updates-v1')",
+        [],
+        |r| r.get(0),
+    )?;
+    if done {
+        return Ok(());
+    }
+    for (table, entity, scope, fields) in [
+        (
+            "cards",
+            "card",
+            "NEW.project_id",
+            vec![("suggestions", "suggestion")],
+        ),
+        (
+            "portfolio",
+            "portfolio",
+            "'@portfolio'",
+            vec![("synergies", "synergy"), ("new_apps", "new_app")],
+        ),
+    ] {
+        let project = if entity == "card" {
+            "NEW.project_id"
+        } else {
+            "NULL"
+        };
+        let proposals = proposal_sql("NEW.data", scope, "NEW.created_at", &fields).join(";");
+        db.execute_batch(&format!("CREATE TRIGGER history_{table}_update AFTER UPDATE OF data ON {table}
+            WHEN OLD.data IS NOT NEW.data BEGIN
+            INSERT INTO content_history(entity,entity_id,project_id,at,operation,origin,before_data,after_data)
+            VALUES('{entity}',{scope},{project},strftime('%Y-%m-%dT%H:%M:%fZ','now'),'update','write',OLD.data,NEW.data);
+            {proposals}; END;"))?;
+        // Installations may have already assigned IDs before update triggers existed.
+        let (scope_column, latest) = if entity == "card" {
+            (
+                "project_id",
+                "id IN (SELECT MAX(id) FROM cards GROUP BY project_id)",
+            )
+        } else {
+            ("'@portfolio'", "id=(SELECT MAX(id) FROM portfolio)")
+        };
+        let rows = db
+            .prepare(&format!(
+                "SELECT {scope_column},created_at,data FROM {table} WHERE {latest}"
+            ))?
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        for (scope, at, data) in rows {
+            if serde_json::from_str::<Value>(&data).is_ok() {
+                for sql in proposal_sql("?1", "?2", "?3", &fields) {
+                    db.execute(&sql, params![data, scope, at])?;
+                }
+            }
+        }
+    }
+    db.execute(
+        "INSERT INTO history_migrations VALUES('document-updates-v1')",
+        [],
+    )?;
+    Ok(())
 }
 
 /// A refresh that measures exactly the previous state adds no information. Keep the first
@@ -434,7 +508,32 @@ impl Store {
         before: Option<i64>,
         limit: usize,
     ) -> Result<Vec<Value>> {
-        self.with(|db| db.prepare("SELECT id,entity,entity_id,project_id,at,operation,origin,before_data,after_data FROM content_history WHERE (?1 IS NULL OR project_id=?1 OR (entity='task' AND (EXISTS(SELECT 1 FROM json_each(after_data,'$.projects') WHERE value=?1) OR EXISTS(SELECT 1 FROM json_each(before_data,'$.projects') WHERE value=?1)) )) AND (?2 IS NULL OR entity=?2) AND (?3 IS NULL OR entity_id=?3) AND (?4 IS NULL OR id<?4) ORDER BY id DESC LIMIT ?5")?
+        // Concrete predicates let SQLite seek directly to a page or entity instead of
+        // scanning every newer event before it can return the requested bounded result.
+        let mut filters = Vec::new();
+        if project.is_some() {
+            filters.push(if entity.is_some_and(|entity| entity != "task") {
+                "project_id=?1"
+            } else {
+                "(project_id=?1 OR (entity='task' AND (EXISTS(SELECT 1 FROM json_each(after_data,'$.projects') WHERE value=?1) OR EXISTS(SELECT 1 FROM json_each(before_data,'$.projects') WHERE value=?1))))"
+            });
+        }
+        if entity.is_some() {
+            filters.push("entity=?2");
+        }
+        if id.is_some() {
+            filters.push("entity_id=?3");
+        }
+        if before.is_some() {
+            filters.push("id<?4");
+        }
+        let condition = if filters.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", filters.join(" AND "))
+        };
+        let sql = format!("SELECT id,entity,entity_id,project_id,at,operation,origin,before_data,after_data FROM content_history{condition} ORDER BY id DESC LIMIT ?5");
+        self.with(|db| db.prepare(&sql)?
             .query_map(params![project,entity,id,before,limit as i64], |r| Ok(json!({"id":r.get::<_,i64>(0)?,"entity":r.get::<_,String>(1)?,"entity_id":r.get::<_,String>(2)?,"project":r.get::<_,Option<String>>(3)?,"at":r.get::<_,Option<String>>(4)?,"operation":r.get::<_,String>(5)?,"origin":r.get::<_,String>(6)?,"before":r.get::<_,Option<String>>(7)?.map(super::json),"after":r.get::<_,Option<String>>(8)?.map(super::json)})))?.collect())
     }
 

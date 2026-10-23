@@ -1215,7 +1215,8 @@ impl Watchtower {
                 if let Ok((clean, _)) =
                     cards::validate(Kind::Card, &card.data, &top_fields(&card.data))
                 {
-                    self.store.rewrite_latest_card(&p.id, &clean)?;
+                    self.store
+                        .rewrite_card_if_current(&p.id, card.version, &card.data, &clean)?;
                 }
             }
         }
@@ -1227,7 +1228,8 @@ impl Watchtower {
             if let Ok((clean, _)) =
                 cards::validate(Kind::Portfolio, &pf.data, &top_fields(&pf.data))
             {
-                self.store.rewrite_latest_portfolio(&clean)?;
+                self.store
+                    .rewrite_portfolio_if_current(pf.version, &pf.data, &clean)?;
             }
         }
         Ok(())
@@ -1785,6 +1787,7 @@ impl Watchtower {
         };
         let reactions = self.store.feedback()?;
         let registered = self.store.projects()?;
+        let tasks = self.store.tasks()?;
         let reviewed_today = idea_review_rotation(&registered, self.today());
         for p in registered {
             if p.status == "archived" {
@@ -1801,10 +1804,10 @@ impl Watchtower {
                 }
             }
             let warning_acks = self.warning_acknowledgements(&p.id)?;
-            let tasks = self.project_task_basis(&p.id)?;
+            let project_tasks = task_basis(&tasks, &p.id);
             let (answered, status_changed) = card
                 .as_ref()
-                .map(|c| owner_changes(c, &p, &reactions, &warning_acks, &tasks))
+                .map(|c| owner_changes(c, &p, &reactions, &warning_acks, &project_tasks))
                 .unwrap_or_default();
             if stored.as_ref().is_none_or(|s| s.data["ok"] != true) {
                 let problem = stored.as_ref().map_or("facts_missing", |s| {
@@ -2409,6 +2412,7 @@ impl Watchtower {
         let mut open_questions = Vec::new();
         let previous = self.store.latest_portfolio()?;
         let reactions = self.store.feedback()?;
+        let tasks = self.store.tasks()?;
         let (week, from, to) = self.review_week();
         let week_from = from.to_string();
         let week_to = to.to_string();
@@ -2431,7 +2435,7 @@ impl Watchtower {
                 &p,
                 &reactions,
                 &self.warning_acknowledgements(&p.id)?,
-                &self.project_task_basis(&p.id)?,
+                &task_basis(&tasks, &p.id),
             );
             let collected_at = stored.as_ref().map(|s| &s.collected_at);
             let review_commits = stored
@@ -2561,7 +2565,7 @@ impl Watchtower {
             "owner_last_opened": self.store.pref("last_visit")?,
             "feedback": reactions.iter().map(feedback_context).collect::<Vec<_>>(),
             "feedback_summary": feedback_summary(&reactions),
-            "tasks": self.tasks(None)?["tasks"],
+            "tasks": tasks,
             "next": "Prepare the brief from this context and save the document to a UTF-8 file. Use portfolio put with --file for that file and --context-token for this context's token.",
         }))
     }
@@ -3334,9 +3338,12 @@ impl Watchtower {
             if warning_acks.as_array().is_some_and(|acks| !acks.is_empty()) {
                 entry["warning_acks"] = warning_acks;
             }
-            let tasks = self.project_task_basis(&p.id)?;
-            if tasks.as_array().is_some_and(|tasks| !tasks.is_empty()) {
-                entry["tasks"] = tasks;
+            let project_tasks = task_basis(&tasks, &p.id);
+            if project_tasks
+                .as_array()
+                .is_some_and(|tasks| !tasks.is_empty())
+            {
+                entry["tasks"] = project_tasks;
             }
             basis.insert(p.id.clone(), entry);
         }
@@ -3627,6 +3634,13 @@ impl Watchtower {
             {
                 item["status"] = json!("pending");
                 item["reason"] = reason["reason"].clone();
+            } else if initial["reason"] == "idea_review"
+                && version <= initial["initial_version"].as_i64().unwrap_or(0)
+            {
+                // The review selected when this run started remains due even
+                // after the calendar rotates to a different set of projects.
+                item["status"] = json!("pending");
+                item["reason"] = json!("idea_review");
             }
             if let Some(failure) = run
                 .failures
@@ -3658,6 +3672,12 @@ impl Watchtower {
             "status": if due["portfolio"]["due"] == true { "pending" } else { "current" },
             "reason": due["portfolio"]["reason"], "error": null,
         });
+        if portfolio["reason"] == "cards_will_change" && pending == 0 && failed == 0 {
+            // An otherwise current brief must not wait for reviews selected
+            // only by tomorrow's rotation, which this run deliberately skips.
+            portfolio["status"] = json!("current");
+            portfolio["reason"] = Value::Null;
+        }
         if let Some(failure) = run
             .failures
             .get("@portfolio")
