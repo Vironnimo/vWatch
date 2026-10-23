@@ -6,6 +6,13 @@ use serde_json::{json, Value};
 use watchtower::Watchtower;
 
 fn token(result: &Value) -> &str {
+    assert_eq!(
+        result["undo"],
+        format!(
+            "watchtower undo {}",
+            result["undo_token"].as_str().expect("opaque undo token")
+        )
+    );
     result["undo"]
         .as_str()
         .expect("mutation provides an undo command")

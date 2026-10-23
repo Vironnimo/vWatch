@@ -4,7 +4,7 @@ The Store keeps Watchtower's shared SQLite state, durable evidence and concurren
 
 ## Overview
 
-`src/store.rs` owns database opening, the base schema, column migrations and storage operations. `src/store/history.rs` owns observation/content history, retained proposals and their migrations. `src/store/undo.rs` owns field-scoped owner receipts and guarded undo. Application policy and read models remain in `application.md`; this domain enforces the atomic conditions they rely on.
+`src/store.rs` owns database opening, the base schema, column migrations and shared storage types. Private `store/projects.rs`, `documents.rs`, `owner_state.rs`, `tasks.rs`, `runs.rs` and `reading.rs` keep each SQL responsibility behind Store methods; transaction bodies stay intact. `src/store/history.rs` owns observation/content history, retained proposals and their migrations. `src/store/undo.rs` owns field-scoped owner receipts and guarded undo. Application policy and read models remain in `application.md`; this domain enforces the atomic conditions they rely on.
 
 `Store` serializes its connection with a mutex. That mutex does not coordinate other processes: conflicts must be checked in the transaction or SQL statement that saves the result. Use the existing guarded operations instead of composing a read-check-write sequence in an adapter.
 
@@ -22,7 +22,7 @@ Content history and facts observations are append-only evidence. Normal current-
 
 `GuardedWrite` distinguishes saved, already replayed, stale-context and item-identity conflicts. Return those distinctions to the service; a conflict must not become a fresh unguarded save. Owner operations likewise return receipts or guarded outcomes so callers can report the actual effect and available recovery.
 
-`data_version` uses SQLite `PRAGMA data_version`. It changes for commits made by other connections, not writes on this Store's connection. The desktop refresh loop depends on this distinction; application `versioned_state` samples it before assembling state. Do not replace it with a local write counter or assume it globally identifies a database revision. Contract: `tests/service.rs::the_data_version_moves_only_for_writes_of_other_connections`.
+`data_version` uses SQLite `PRAGMA data_version`. It changes for commits made by other connections, not writes on this Store's connection. The desktop refresh loop depends on this distinction; application `versioned_state` samples it before assembling state. Do not replace it with a local write counter or assume it globally identifies a database revision. Contract: `tests/service.rs::reading::the_data_version_moves_only_for_writes_of_other_connections`.
 
 ## Constraints & Gotchas
 

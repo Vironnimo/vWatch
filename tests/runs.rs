@@ -1,9 +1,7 @@
 mod common;
-
 use chrono::Duration;
 use common::{card, card_with, demo_repo, make_repo, service};
 use serde_json::{json, Value};
-
 fn project<'a>(status: &'a Value, id: &str) -> &'a Value {
     status["latest"]["projects"]
         .as_array()
@@ -28,7 +26,6 @@ fn brief() -> Value {
 fn an_untracked_run_is_unknown() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
-
     let status = svc.run_status().unwrap();
     assert_eq!(status["state"], "unknown");
     assert!(status["latest"].is_null());
@@ -47,7 +44,6 @@ fn partial_runs_can_be_finished_after_repair_and_success_is_preserved() {
     ] {
         svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     }
-
     let started = svc.run_start(false).unwrap();
     let id = run_id(&started);
     assert_eq!(started["state"], "running");
@@ -56,14 +52,12 @@ fn partial_runs_can_be_finished_after_repair_and_success_is_preserved() {
         json!({"total": 2, "current": 0, "pending": 2, "failed": 0})
     );
     assert_eq!(project(&started, "demo")["reason"], "no_card");
-
     let first = svc.put_card("demo", card(), false, false).unwrap();
     let partial = svc.run_status().unwrap();
     assert_eq!(project(&partial, "demo")["status"], "current");
     assert_eq!(project(&partial, "demo")["card_version"], first["version"]);
     assert_eq!(project(&partial, "second")["status"], "pending");
     assert_eq!(partial["latest"]["portfolio"]["status"], "pending");
-
     let unfinished = svc.run_finish(id).unwrap();
     assert_eq!(unfinished["state"], "incomplete");
     assert!(unfinished["latest"]["finished_at"].is_string());
@@ -72,7 +66,6 @@ fn partial_runs_can_be_finished_after_repair_and_success_is_preserved() {
         .as_str()
         .unwrap()
         .contains("second"));
-
     svc.put_card("second", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
     let completed = svc.run_finish(id).unwrap();
@@ -83,12 +76,10 @@ fn partial_runs_can_be_finished_after_repair_and_success_is_preserved() {
     );
     assert_eq!(completed["last_successful"]["id"], id);
     let snapshot = completed["latest"].clone();
-
     // Later owner changes must not rewrite the outcome of a completed run.
     svc.set_goal("demo", "Ein neues Ziel", None).unwrap();
     assert_eq!(svc.run_status().unwrap()["latest"], snapshot);
     drop(svc);
-
     let (svc, _) = service(tmp.path());
     let reopened = svc.run_status().unwrap();
     assert_eq!(reopened["latest"], snapshot);
@@ -98,7 +89,6 @@ fn partial_runs_can_be_finished_after_repair_and_success_is_preserved() {
         .unwrap()
         .iter()
         .any(|entry| entry["id"] == id && entry["state"] == "complete"));
-
     let next = svc.run_start(false).unwrap();
     assert_ne!(run_id(&next), id);
     assert_eq!(next["last_successful"], reopened["last_successful"]);
@@ -117,7 +107,6 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     svc.set_status("archived", "archived", None).unwrap();
     let saved = svc.put_card("demo", card(), false, false).unwrap();
     let saved_brief = svc.put_portfolio(brief(), false, false).unwrap();
-
     let started = svc.run_start(false).unwrap();
     assert_eq!(started["state"], "running");
     assert_eq!(started["latest"]["counts"]["total"], 1);
@@ -134,7 +123,6 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
         started["latest"]["portfolio"]["initial_version"],
         saved_brief["version"]
     );
-
     let measured = svc.store().facts("demo").unwrap().unwrap();
     std::fs::write(repo.join("f0.txt"), "changed after the last measurement\n").unwrap();
     let status = svc.run_status().unwrap();
@@ -142,7 +130,6 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     let after_status = svc.store().facts("demo").unwrap().unwrap();
     assert_eq!(after_status.fingerprint, measured.fingerprint);
     assert_eq!(after_status.collected_at, measured.collected_at);
-
     // An explicit refresh exposes the edit, even though status itself is read-only.
     svc.refresh_facts(None, false).unwrap();
     let changed = svc.run_status().unwrap();
@@ -164,7 +151,6 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
         .unwrap();
     let started = svc.run_start(false).unwrap();
     let id = run_id(&started);
-
     // Failures are measured against the version at failure time, which may have
     // advanced since this run began. All writes happen at the same fixed time.
     let written_card = svc.put_card("demo", card(), false, false).unwrap();
@@ -202,7 +188,6 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
     assert!(repair.contains("Die Zusammenfassung konnte nicht fertig werden"));
     assert!(!repair.contains("runs status"));
     assert!(failed["last_successful"].is_null());
-
     svc.put_card("demo", card(), false, false).unwrap();
     let repaired_card = svc.run_status().unwrap();
     assert_eq!(project(&repaired_card, "demo")["status"], "current");
@@ -233,7 +218,6 @@ fn unreadable_facts_cannot_be_covered_up_by_a_new_card() {
     // that the repository was successfully examined.
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
-
     let started = svc.run_start(false).unwrap();
     let id = run_id(&started);
     let blocked = svc.run_finish(id).unwrap();
@@ -242,7 +226,6 @@ fn unreadable_facts_cannot_be_covered_up_by_a_new_card() {
     assert_eq!(project(&blocked, "demo")["reason"], "path_missing");
     assert!(blocked["last_successful"].is_null());
     assert!(!blocked["repair_task"].as_str().unwrap().is_empty());
-
     svc.store()
         .save_facts("demo", &svc.now(), &readable.fingerprint, &readable.data)
         .unwrap();
@@ -271,14 +254,12 @@ fn owner_replies_remain_pending_when_another_reason_makes_the_card_due() {
         .unwrap();
     std::fs::write(repo.join("f0.txt"), "new work\n").unwrap();
     svc.refresh_facts(None, false).unwrap();
-
     let started = svc.run_start(false).unwrap();
     assert_eq!(project(&started, "demo")["reason"], "changed");
     assert_eq!(started["pending_owner_replies"], 1);
     assert_eq!(project(&started, "demo")["pending_owner_replies"], 1);
     let unfinished = svc.run_finish(run_id(&started)).unwrap();
     assert_eq!(unfinished["pending_owner_replies"], 1);
-
     svc.put_card("demo", card(), false, false).unwrap();
     let acknowledged = svc.run_status().unwrap();
     assert_eq!(acknowledged["pending_owner_replies"], 0);
@@ -298,7 +279,6 @@ fn abandoned_runs_stall_and_never_succeed_without_an_explicit_finish() {
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
-
     let started = svc.run_start(false).unwrap();
     let id = run_id(&started);
     assert_eq!(started["state"], "running");
@@ -327,7 +307,6 @@ fn repairing_an_older_run_reports_its_own_outcome() {
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
     assert_eq!(svc.run_finish(newer).unwrap()["state"], "complete");
-
     svc.run_fail(older, Some("demo"), "Noch nicht fertig")
         .unwrap();
     let failed = svc.run_finish(older).unwrap();
@@ -340,7 +319,6 @@ fn repairing_an_older_run_reports_its_own_outcome() {
         .as_str()
         .unwrap()
         .contains(&format!("runs finish {older}")));
-
     clock.advance(Duration::minutes(1));
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
@@ -351,7 +329,7 @@ fn repairing_an_older_run_reports_its_own_outcome() {
 
 fn service_with_completion_race(
     dir: &std::path::Path,
-    trigger_call: usize,
+    stage: watchtower::service::RunCompletionStage,
     change: impl Fn(&watchtower::store::Store) + Send + Sync + 'static,
 ) -> (
     watchtower::Watchtower,
@@ -360,7 +338,6 @@ fn service_with_completion_race(
 ) {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
-
     let db = dir.join("watchtower.db");
     let store = watchtower::store::Store::open(&db).unwrap();
     let concurrent = watchtower::store::Store::open(&db).unwrap();
@@ -373,25 +350,23 @@ fn service_with_completion_race(
         .with_timezone(&chrono::Utc);
     let svc = watchtower::Watchtower::with_parts(
         store,
-        Box::new(move || {
-            if clock_armed.load(Ordering::SeqCst)
-                && clock_calls.fetch_add(1, Ordering::SeqCst) + 1 == trigger_call
-            {
-                change(&concurrent);
-            }
-            now
-        }),
+        Box::new(move || now),
         Box::new(|path, today, _ci, previous| {
             watchtower::facts::collect_reusing(path, today, false, previous)
         }),
-    );
+    )
+    .with_run_completion_observer(move |reached| {
+        if reached == stage && clock_armed.swap(false, Ordering::SeqCst) {
+            clock_calls.fetch_add(1, Ordering::SeqCst);
+            change(&concurrent);
+        }
+    });
     (svc, armed, calls)
 }
 
 #[test]
 fn run_completion_rechecks_a_project_added_after_the_due_snapshot() {
     use std::sync::atomic::Ordering;
-
     let tmp = tempfile::tempdir().unwrap();
     let second = make_repo(tmp.path(), "second", &["2026-09-29T10:00:00"]);
     let path = second.to_str().unwrap().to_owned();
@@ -402,25 +377,27 @@ fn run_completion_rechecks_a_project_added_after_the_due_snapshot() {
     );
     assert_eq!(facts["ok"], true);
     let fingerprint = watchtower::facts::fingerprint(&facts);
-    // The third clock read returns the due response's date, after it has
-    // examined the old project list but before the run reads that list again.
-    let (svc, armed, calls) = service_with_completion_race(tmp.path(), 3, move |store| {
-        store
-            .add_project("second", "second", &path, "2026-09-30T08:00:00Z")
-            .unwrap();
-        store
-            .save_facts("second", "2026-09-30T08:00:00Z", &fingerprint, &facts)
-            .unwrap();
-    });
+    // Add the project after the due selection, before assembling the registered list.
+    let (svc, armed, calls) = service_with_completion_race(
+        tmp.path(),
+        watchtower::service::RunCompletionStage::DueEvaluated,
+        move |store| {
+            store
+                .add_project("second", "second", &path, "2026-09-30T08:00:00Z")
+                .unwrap();
+            store
+                .save_facts("second", "2026-09-30T08:00:00Z", &fingerprint, &facts)
+                .unwrap();
+        },
+    );
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
     let id = run_id(&svc.run_start(false).unwrap());
-
     armed.store(true, Ordering::SeqCst);
     let finished = svc.run_finish(id).unwrap();
-    assert!(calls.load(Ordering::SeqCst) >= 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(svc.store().project("second").unwrap().is_some());
     assert_ne!(finished["state"], "complete", "{finished}");
     assert_eq!(project(&finished, "second")["status"], "pending");
@@ -431,29 +408,30 @@ fn run_completion_rechecks_a_project_added_after_the_due_snapshot() {
 #[test]
 fn run_completion_rechecks_an_owner_change_before_saving_success() {
     use std::sync::atomic::Ordering;
-
     let tmp = tempfile::tempdir().unwrap();
-    // The fourth clock read stamps the computed result: its current statuses
-    // have already been evaluated, but success has not reached the database.
-    let (svc, armed, calls) = service_with_completion_race(tmp.path(), 4, |store| {
-        store
-            .set_goal(
-                "demo",
-                "Vor dem Abschluss neu prüfen",
-                None,
-                "2026-09-30T08:00:00Z",
-            )
-            .unwrap();
-    });
+    // Change owner evidence after status evaluation, before guarded persistence.
+    let (svc, armed, calls) = service_with_completion_race(
+        tmp.path(),
+        watchtower::service::RunCompletionStage::BeforeSave,
+        |store| {
+            store
+                .set_goal(
+                    "demo",
+                    "Vor dem Abschluss neu prüfen",
+                    None,
+                    "2026-09-30T08:00:00Z",
+                )
+                .unwrap();
+        },
+    );
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
     let id = run_id(&svc.run_start(false).unwrap());
-
     armed.store(true, Ordering::SeqCst);
     let finished = svc.run_finish(id).unwrap();
-    assert!(calls.load(Ordering::SeqCst) >= 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         svc.store().project("demo").unwrap().unwrap().goal,
         "Vor dem Abschluss neu prüfen"
@@ -473,11 +451,15 @@ fn run_completion_rechecks_a_failure_reported_before_saving_success() {
     let tmp = tempfile::tempdir().unwrap();
     let run = Arc::new(AtomicI64::new(0));
     let reported_run = run.clone();
-    let (svc, armed, _) = service_with_completion_race(tmp.path(), 4, move |store| {
-        store.fail_agent_run(reported_run.load(Ordering::SeqCst), "demo", &json!({
+    let (svc, armed, _) = service_with_completion_race(
+        tmp.path(),
+        watchtower::service::RunCompletionStage::BeforeSave,
+        move |store| {
+            store.fail_agent_run(reported_run.load(Ordering::SeqCst), "demo", &json!({
             "version": 1, "error": "Parallel gemeldeter Analysefehler", "at": "2026-09-30T08:00:00Z"
         })).unwrap();
-    });
+        },
+    );
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
@@ -549,7 +531,6 @@ fn a_run_keeps_its_original_idea_reviews_when_the_daily_rotation_moves_on() {
         .map(|p| p["id"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(selected.len(), 2);
-
     clock.advance(Duration::days(1));
     let due = svc.due(14, false).unwrap();
     assert_eq!(due["projects"].as_array().unwrap().len(), 2);
@@ -572,4 +553,44 @@ fn a_run_keeps_its_original_idea_reviews_when_the_daily_rotation_moves_on() {
     let finished = svc.run_finish(id).unwrap();
     assert_eq!(finished["state"], "complete", "{finished}");
     assert_eq!(finished["run"]["portfolio"]["status"], "current");
+}
+
+#[test]
+fn run_completion_stops_after_sustained_conflicts_without_recording_success() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(brief(), false, false).unwrap();
+    let id = run_id(&svc.run_start(false).unwrap());
+    let other = watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = count.clone();
+    let svc = svc.with_run_completion_observer(move |stage| {
+        if stage == watchtower::service::RunCompletionStage::BeforeSave {
+            let n = seen.fetch_add(1, Ordering::SeqCst);
+            other
+                .fail_agent_run(
+                    id,
+                    "demo",
+                    &json!({"version":1,"error":format!("race {n}"),"at":"2026-09-30T08:00:00Z"}),
+                )
+                .unwrap();
+        }
+    });
+    assert_eq!(svc.run_finish(id).unwrap_err().code, "run_conflict");
+    assert_eq!(count.load(Ordering::SeqCst), 3);
+    assert!(svc
+        .store()
+        .agent_run(id)
+        .unwrap()
+        .unwrap()
+        .finished_at
+        .is_none());
+    assert!(svc.run_status().unwrap()["last_successful"].is_null());
 }

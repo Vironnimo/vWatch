@@ -103,7 +103,7 @@ Sources: `src/cli.rs`, `src/cli_output.rs`, `src/cli_jobs.rs` and `src/cli_pagin
 
 ## Schema and service guidance
 
-Sources: `src/cards.rs` validation/schema output; `src/service.rs` errors, context instructions and `run_instruction`. Business behavior remains with those owners. Contract evidence: `docs/agent-interface.md` -> Effects, replay and recovery; Output and error contracts; the dated 2026-10-20 follow-up for item retention.
+Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage errors, `src/service/context.rs` context instructions, `src/service/tasks.rs` Task recovery and `src/service/runs.rs` run instructions. Business behavior remains with those owners. Contract evidence: `docs/agent-interface.md` -> Effects, replay and recovery; Output and error contracts; the dated 2026-10-20 follow-up for item retention.
 
 | Text | Reason |
 |---|---|
@@ -112,22 +112,24 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` errors, conte
 | `cards.rs`: `kept from the previous version although over its word limit` | A merge can preserve an inherited field without requiring unrelated rewriting; the warning identifies the later repair. |
 | `cards.rs`: `Keep each existing id once; omit id for a new item.` | Duplicate IDs must not silently acquire different identities or share reactions. |
 | `cards.rs`: `Use a valid ISO calendar week as YYYY-Www from review_week.week in portfolio context` | Prevent fabricated or misformatted weekly review periods. |
-| `service.rs`: `The context changed.` | The payload's studied basis is stale, even if the proposed document itself parses. |
-| `service.rs`: `Do not merely replace the token.` | Fresh-token substitution defeats reconciliation of owner instructions, facts and later documents. |
-| `service.rs`: `Saving requires the context_token from the context you used.` | Bind writes to evidence the agent actually read; schema-only dry runs are separately exempt. |
-| `service.rs`: `Study the repository read-only and write the card to a UTF-8 file.` | Context output gives the next supported operation without granting repository mutation authority. |
-| `service.rs`: `Use --merge only when sending changed top-level fields` | Context guidance must agree with whole-list/object replacement semantics. |
-| `service.rs`: `Prepare the brief from this context and save the document to a UTF-8 file.` | Direct synthesis to the available context and file input instead of an invented output-as-input flag. |
-| `service.rs`: `To keep an earlier item, use its id from the context; for a new item, omit id.` | Unknown full-content IDs are accepted as new with a warning, not silently treated as retained. |
+| `service/context.rs`: `The context changed.` | The payload's studied basis is stale, even if the proposed document itself parses. |
+| `service/context.rs`: `Do not merely replace the token.` | Fresh-token substitution defeats reconciliation of owner instructions, facts and later documents. |
+| `service/context.rs`: `Saving requires the context_token from the context you used.` | Bind writes to evidence the agent actually read; schema-only dry runs are separately exempt. |
+| `service/context.rs`: `Study the repository read-only and write the card to a UTF-8 file.` | Context output gives the next supported operation without granting repository mutation authority. |
+| `service/context.rs`: `Use --merge only when sending changed top-level fields` | Context guidance must agree with whole-list/object replacement semantics. |
+| `service/context.rs`: `Prepare the brief from this context and save the document to a UTF-8 file.` | Direct synthesis to the available context and file input instead of an invented output-as-input flag. |
+| `service/context.rs`: `To keep an earlier item, use its id from the context; for a new item, omit id.` | Unknown full-content IDs are accepted as new with a warning, not silently treated as retained. |
 | `service.rs`: `Stop writing and preserve the database and its -wal/-shm files.` | Corruption recovery must preserve evidence and later work instead of recreating storage. |
 | `service.rs`: `Read the current state before retrying a write; this error does not confirm that earlier steps were undone.` | A storage error can follow earlier successful steps; retry decisions need actual saved state. |
-| `service.rs`: `Use done with a result and evidence; completion still needs the owner's confirmation.` | Separate agent reporting from owner completion. |
-| `service.rs`: `Reload the task and read its latest result before confirming, reopening or cancelling it.` | A stale revision must not authorize a decision on a different report. |
+| `service/tasks.rs`: `Use done with a result and evidence; completion still needs the owner's confirmation.` | Separate agent reporting from owner completion. |
+| `service/tasks.rs`: `Reload the task and read its latest result before confirming, reopening or cancelling it.` | A stale revision must not authorize a decision on a different report. |
 | `run_instruction`: `Use the Watchtower Skill to review due or failed projects read-only and consider useful improvements before each card save.` | Repair prompts retain project reflection instead of reducing recovery to freshness bookkeeping. |
 | `run_instruction`: `Then read` `watchtower portfolio context` `and synthesize opportunities across all projects, including unchanged ones.` | Cross-project synthesis follows all project reviews, including current projects. |
 | `run_instruction`: `Save due or changed documents with their context tokens; after repairing a recorded failure, save that document even if unchanged.` | Saving records recovery of a failed review without requiring fabricated content edits. |
 | `run_instruction`: `Report newly saved ideas separately from retained ones, or a considered direction and its exclusion reason.` | A run report must reveal the selection outcome instead of presenting retained ideas as new. |
 | `run_instruction`: `Run state complete confirms current reports and readable facts, not that reflection occurred.` | Machine status cannot prove the agent performed reasoning. |
+
+| `references/cli.md`: `Overview and card/portfolio contexts expose` `idea_states` `with the linked task snapshot and the guarded idea-status revision` | Keep status decisions bound to the selected Task snapshot rather than a separately chosen historical assignment. |
 
 ## Copied task instructions
 

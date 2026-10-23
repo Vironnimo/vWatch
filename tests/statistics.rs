@@ -2,7 +2,6 @@ mod common;
 use chrono::Duration;
 use common::*;
 use serde_json::{json, Value};
-
 fn count(db: &rusqlite::Connection, table: &str) -> i64 {
     db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
         .unwrap()
@@ -78,6 +77,56 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
     assert_eq!(incomplete["code"]["partial"], true);
     assert_eq!(incomplete["code"]["unread_files"], 1);
     assert!(svc.statistics(Some("demo"), None, None).unwrap()["summary"]["source_code"].is_null());
+
+    // Complete endpoints cannot bridge a failed or incompatible intermediate observation.
+    for barrier in ["failed", "partial", "path", "branch", "method"] {
+        let fixture = tempfile::tempdir().unwrap();
+        let (model, clock) = service(fixture.path());
+        model
+            .store()
+            .add_project("fixture", "Fixture", "original", &model.now())
+            .unwrap();
+        let save = |data: &Value| {
+            model
+                .store()
+                .save_facts(
+                    "fixture",
+                    &model.now(),
+                    &watchtower::facts::fingerprint(data),
+                    data,
+                )
+                .unwrap()
+        };
+        let initial = common::measured_facts(3);
+        save(&initial);
+        clock.advance(Duration::minutes(1));
+        let db = rusqlite::Connection::open(fixture.path().join("watchtower.db")).unwrap();
+        let mut middle = initial.clone();
+        match barrier {
+            "failed" => middle["ok"] = json!(false),
+            "partial" => {
+                middle["code"]["ok"] = json!(false);
+                middle["code"]["partial"] = json!(true);
+            }
+            "branch" => middle["branch"] = json!("side"),
+            "method" => middle["code"]["method"] = json!("other"),
+            "path" => {
+                db.execute("UPDATE projects SET path='other' WHERE id='fixture'", [])
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        save(&middle);
+        clock.advance(Duration::minutes(1));
+        db.execute("UPDATE projects SET path='original' WHERE id='fixture'", [])
+            .unwrap();
+        save(&common::measured_facts(8));
+        let result = model
+            .statistics(Some("fixture"), Some("2026-09-30"), Some("2026-09-30"))
+            .unwrap();
+        assert_eq!(result["projects"][0]["comparable"], false, "{barrier}");
+        assert!(result["projects"][0]["change"].is_null(), "{barrier}");
+    }
 }
 
 #[test]
@@ -133,19 +182,31 @@ fn identical_refreshes_add_no_sample_but_a_new_day_a_change_or_a_relink_does() {
 fn statistics_skip_repeated_observations_without_changing_their_results() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());
-    let repo = demo_repo(tmp.path());
-    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
-    for (step, file) in [
-        (Duration::hours(2), Some("print(1)\n")),
-        (Duration::days(1), None),
-        (Duration::hours(1), Some("print(1)\nprint(2)\n")),
-        (Duration::days(1), None),
+    svc.store()
+        .add_project("demo", "Demo", "fixture/demo", &svc.now())
+        .unwrap();
+    let save = |lines| {
+        let mut data = common::measured_facts(lines);
+        data["activity"]["through"] = json!(svc.today().to_string());
+        data["activity"]["from"] = json!((svc.today() - Duration::days(29)).to_string());
+        svc.store()
+            .save_facts(
+                "demo",
+                &svc.now(),
+                &watchtower::facts::fingerprint(&data),
+                &data,
+            )
+            .unwrap();
+    };
+    save(0);
+    for (step, lines) in [
+        (Duration::hours(2), 1),
+        (Duration::days(1), 1),
+        (Duration::hours(1), 2),
+        (Duration::days(1), 2),
     ] {
         clock.advance(step);
-        if let Some(text) = file {
-            std::fs::write(repo.join("a.py"), text).unwrap();
-        }
-        svc.refresh_facts(None, false).unwrap();
+        save(lines);
     }
     let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
     assert_eq!(count(&db, "fact_samples"), 5);
@@ -267,6 +328,35 @@ fn archived_git_windows_still_cover_old_periods_and_do_not_turn_gaps_into_zeroes
             .len(),
         2
     );
+
+    svc.store()
+        .add_project("rebase", "Rebase", "fixture/rebase", &svc.now())
+        .unwrap();
+    let mut data = common::measured_facts(1);
+    data["activity"]["from"] = json!("2026-09-28");
+    data["activity"]["through"] = json!("2026-09-30");
+    data["activity"]["days"] = json!([{"date":"2026-09-28","commits":3,"added":3,"removed":0},{"date":"2026-09-29","commits":1,"added":1,"removed":0}]);
+    svc.store()
+        .save_facts("rebase", &svc.now(), "before", &data)
+        .unwrap();
+    clock.advance(Duration::minutes(1));
+    data["head"] = json!("rebased");
+    data["activity"]["days"] = json!([{"date":"2026-09-29","commits":1,"added":1,"removed":0}]);
+    svc.store()
+        .save_facts("rebase", &svc.now(), "after", &data)
+        .unwrap();
+    let replaced = svc
+        .statistics(Some("rebase"), Some("2026-09-28"), Some("2026-09-30"))
+        .unwrap();
+    assert_eq!(replaced["projects"][0]["activity"]["complete"], true);
+    assert_eq!(
+        replaced["projects"][0]["activity"]["days"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(replaced["projects"][0]["activity"]["totals"]["commits"], 1);
 }
 
 #[test]
@@ -505,6 +595,40 @@ fn history_filters_and_pages_keep_task_project_membership_and_exact_boundaries()
     assert_eq!(ids(Some("demo"), Some("task"), Some("1"), Some(3), 10), [2]);
     assert_eq!(ids(Some("other"), Some("task"), None, None, 10), [3]);
     assert_eq!(ids(None, None, Some("demo"), None, 10), [1]);
+}
+
+#[test]
+fn confirmed_completions_count_owner_events_and_exclude_agent_review() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.store()
+        .add_project("demo", "Demo", "fixture/demo", &svc.now())
+        .unwrap();
+    let created = svc
+        .create_task(json!({"projects":["demo"],"title":"Finish"}))
+        .unwrap();
+    let id = created["task"]["id"].as_i64().unwrap();
+    let count = || {
+        svc.statistics(Some("demo"), Some("2026-09-30"), Some("2026-09-30"))
+            .unwrap()["projects"][0]["confirmed_completions"]
+            .clone()
+    };
+    assert_eq!(count(), 0);
+    let reported = svc
+        .report_task(id, "done", "Finished", "Contract checked")
+        .unwrap();
+    assert_eq!(reported["task"]["status"], "review");
+    assert_eq!(count(), 0);
+    svc.set_task_status_guarded(id, "done", reported["task"]["revision"].as_i64().unwrap())
+        .unwrap();
+    assert_eq!(count(), 1);
+    svc.report_task(id, "done", "Finished", "Contract checked")
+        .unwrap();
+    assert_eq!(
+        count(),
+        1,
+        "repeated report does not invent another owner completion"
+    );
 }
 
 #[test]

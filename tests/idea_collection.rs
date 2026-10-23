@@ -61,6 +61,15 @@ fn direct_idea_progress_and_archive_preserve_ratings_tasks_and_history() {
         assert_eq!(done["idea_status"]["status"], "implemented");
         assert_eq!(done["idea_status"]["task"]["id"], task["id"]);
         assert_eq!(done["idea_status"]["task"]["status"], "done");
+        let state = svc.state(false).unwrap();
+        let projected = &state["idea_states"][&id];
+        assert_eq!(projected["revision"], done["idea_status"]["revision"]);
+        assert_eq!(projected["task"]["id"], task["id"]);
+        assert_eq!(
+            projected["task"]["revision"],
+            done["idea_status"]["task"]["revision"]
+        );
+        assert!(!projected["task"]["source_kind"].is_null());
         assert!(
             done["idea_status"]["task"]["reported_at"].is_null(),
             "No invented agent report"
@@ -176,6 +185,57 @@ fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
     )
     .unwrap();
     assert_ne!(token, svc.portfolio_context(&[]).unwrap()["context_token"]);
+    // A non-selected historical Task still belongs to the full source guard.
+    let original = svc
+        .store()
+        .task(task["id"].as_i64().unwrap())
+        .unwrap()
+        .unwrap();
+    let mut legacy = original.clone();
+    legacy.as_object_mut().unwrap().remove("id");
+    legacy.as_object_mut().unwrap().remove("revision");
+    let (newer, _) = svc.store().create_tracked_task(None, &legacy).unwrap();
+    let displayed = svc.idea_status(&id).unwrap();
+    assert_eq!(displayed["idea_status"]["task"]["id"], newer["id"]);
+    let mut changed_old = original.clone();
+    changed_old["result"] = json!("Historical evidence changed");
+    assert!(svc
+        .store()
+        .replace_task(
+            original["id"].as_i64().unwrap(),
+            original["revision"].as_i64().unwrap(),
+            "done",
+            &changed_old
+        )
+        .unwrap());
+    assert_eq!(
+        svc.set_idea_status(
+            &id,
+            "restore",
+            displayed["idea_status"]["revision"].as_str().unwrap()
+        )
+        .unwrap_err()
+        .code,
+        "idea_changed"
+    );
+    let fresh = svc.idea_status(&id).unwrap();
+    let state = svc.state(false).unwrap();
+    assert_eq!(
+        state["idea_states"][&id]["revision"],
+        fresh["idea_status"]["revision"]
+    );
+    assert_eq!(state["idea_states"][&id]["task"]["id"], newer["id"]);
+    svc.store().create_tracked_task(None, &legacy).unwrap();
+    assert_eq!(
+        svc.set_idea_status(
+            &id,
+            "implemented",
+            fresh["idea_status"]["revision"].as_str().unwrap()
+        )
+        .unwrap_err()
+        .code,
+        "ambiguous_idea_tasks"
+    );
     assert_eq!(svc.idea_status("missing").unwrap_err().code, "unknown_idea");
     drop(svc);
     let reopened = watchtower::Watchtower::open(&tmp.path().join("watchtower.db")).unwrap();
@@ -268,6 +328,9 @@ fn task_sources_recover_legacy_idea_kinds_without_inventing_them() {
     svc.put_card("demo", json!({"suggestions": []}), true, false)
         .unwrap();
     svc.create_task(json!({"projects": ["demo"], "source_id": "open:unknown", "title": "Anderen Auftrag erledigen"})).unwrap();
+    // Older databases can retain a historical source only in Cards and Tasks.
+    db.execute("DELETE FROM proposals WHERE id='sg-old'", [])
+        .unwrap();
     let state = svc.state(false).unwrap();
     let tasks = state["tasks"].as_array().unwrap();
     let old = tasks
@@ -277,6 +340,7 @@ fn task_sources_recover_legacy_idea_kinds_without_inventing_them() {
     assert_eq!(old["source_kind"], "suggestion");
     assert_eq!(old["source_snapshot"]["title"], "Export merken");
     assert_eq!(old["source_first_seen"], "2026-09-30T08:00:00Z");
+    assert_eq!(state["idea_states"]["sg-old"]["task"], *old);
     assert!(tasks
         .iter()
         .find(|task| task["source_id"] == "open:unknown")
@@ -293,6 +357,10 @@ fn task_sources_recover_legacy_idea_kinds_without_inventing_them() {
             .is_none(),
         "Projection does not rewrite saved legacy tasks"
     );
+    svc.remove_project("demo").unwrap();
+    let removed = svc.state(false).unwrap();
+    assert_eq!(removed["idea_states"]["sg-old"]["task"], *old);
+    assert_eq!(removed["idea_states"]["sg-old"]["status"], "in_progress");
 }
 
 #[test]

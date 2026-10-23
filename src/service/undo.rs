@@ -17,13 +17,17 @@ fn describe(value: &Value) -> String {
 }
 
 /// Attach the stored outcome to the established response shape.
-pub(super) fn with_receipt(mut result: Value, receipt: Value) -> Value {
-    if let (Some(result), Some(receipt)) = (result.as_object_mut(), receipt.as_object()) {
-        result.extend(
-            receipt
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
+pub(super) fn with_receipt(mut result: Value, receipt: crate::store::OwnerReceipt) -> Value {
+    let fields = result.as_object_mut().expect("service response object");
+    fields.extend(Map::from_iter([
+        ("changed".into(), json!(receipt.changed)),
+        ("target".into(), receipt.target),
+        ("previous".into(), receipt.previous),
+        ("current".into(), receipt.current),
+    ]));
+    if let Some(token) = receipt.token {
+        fields.insert("undo".into(), json!(format!("watchtower undo {token}")));
+        fields.insert("undo_token".into(), json!(token));
     }
     result
 }

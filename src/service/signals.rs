@@ -1,6 +1,133 @@
 //! Signals derived from saved history: how long a measured risk has lasted and
 //! whether it grew, and how long each owner-facing item has been shown.
 use super::*;
+
+/// Measured warnings independent of the owner's decisions or the observation time.
+fn fact_warnings(facts: &Value) -> Vec<Value> {
+    if facts["ok"] != true {
+        return Vec::new();
+    }
+    let mut warnings = Vec::new();
+    let warning = |key: &str, severity: &str, title: &str, basis: Value, can_acknowledge: bool| {
+        json!({"key": key, "kind": key, "severity": severity, "title": title, "basis": basis,
+            "can_acknowledge": can_acknowledge})
+    };
+    if facts["has_remote"] == false {
+        warnings.push(warning(
+            "no_remote",
+            "risk",
+            "Arbeit liegt nur lokal",
+            json!({
+                "head": facts["head"], "commits": facts["commits"]["total"],
+                "dirty": pick(&facts["dirty"], &["files", "lines_added", "lines_removed"]),
+            }),
+            true,
+        ));
+    }
+    if facts["ci"]["state"] == "none" {
+        warnings.push(warning(
+            "ci_none",
+            "info",
+            "Keine CI eingerichtet",
+            json!({"state": "none"}),
+            true,
+        ));
+    } else if facts["ci"]["state"] == "red" {
+        warnings.push(warning(
+            "ci_red",
+            "risk",
+            "CI ist fehlgeschlagen",
+            json!({
+                "state": "red", "failing": facts["ci"]["failing"],
+            }),
+            false,
+        ));
+    }
+    let mut worktrees: Vec<Value> = facts["worktrees"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            pick(
+                item,
+                &[
+                    "path",
+                    "head",
+                    "dirty_files",
+                    "dirty_fingerprint",
+                    "prunable",
+                ],
+            )
+        })
+        .collect();
+    if !worktrees.is_empty() {
+        worktrees.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+        let severity = if worktrees.iter().any(|w| w["prunable"] == true) {
+            "warn"
+        } else {
+            "info"
+        };
+        warnings.push(warning(
+            "worktrees",
+            severity,
+            "Weitere Arbeitsverzeichnisse vorhanden",
+            json!({"items": worktrees}),
+            true,
+        ));
+    }
+    warnings
+}
+
+/// Measured warnings with the owner's acknowledgements applied.
+pub(super) fn acknowledged_warnings(facts: &Value, acknowledgements: &Value) -> Value {
+    let mut warnings = fact_warnings(facts);
+    for warning in &mut warnings {
+        let previous = acknowledgements
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|ack| ack["key"] == warning["key"]);
+        warning["acknowledged"] = json!(previous.is_some_and(|ack| warning_ack_applies(
+            warning["key"].as_str().unwrap_or(""),
+            &ack["basis"],
+            &warning["basis"]
+        )));
+        warning["note"] = previous
+            .map(|ack| ack["note"].clone())
+            .unwrap_or_else(|| json!(""));
+    }
+    json!(warnings)
+}
+
+fn warning_ack_applies(key: &str, before: &Value, now: &Value) -> bool {
+    match key {
+        "no_remote" => {
+            before["head"] == now["head"]
+                && now["commits"].as_u64().unwrap_or(0) <= before["commits"].as_u64().unwrap_or(0)
+                && ["files", "lines_added", "lines_removed"]
+                    .iter()
+                    .all(|field| {
+                        now["dirty"][*field].as_u64().unwrap_or(0)
+                            <= before["dirty"][*field].as_u64().unwrap_or(0)
+                    })
+        }
+        "worktrees" => now["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|current| {
+                before["items"].as_array().into_iter().flatten().any(|old| {
+                    ["path", "head", "dirty_files", "dirty_fingerprint"]
+                        .iter()
+                        .all(|field| old[*field] == current[*field])
+                        && (current["prunable"] != true || old["prunable"] == true)
+                })
+            }),
+        "ci_none" => before == now,
+        _ => false,
+    }
+}
+
 use crate::store::RiskObservation;
 use std::collections::HashMap;
 
@@ -16,6 +143,7 @@ const BRIEF_LISTS: &[(&str, &str)] = &[
     ("new_apps", "new_app"),
     ("park_or_revive", "verdict"),
 ];
+
 /// Focus items taken out of the brief unfinished stay visible this long.
 const DROPPED_FOCUS_DAYS: i64 = 14;
 

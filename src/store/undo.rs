@@ -2,7 +2,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map};
-
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) enum OwnerScope {
     Idea { id: i64 },
@@ -120,6 +119,14 @@ fn visible(snapshot: &Value) -> Value {
         snapshot["value"].clone()
     }
 }
+/// A saved owner change; presentation of its opaque token belongs to the service.
+pub struct OwnerReceipt {
+    pub changed: bool,
+    pub target: Value,
+    pub previous: Value,
+    pub current: Value,
+    pub token: Option<String>,
+}
 
 fn receipt(
     scope: &OwnerScope,
@@ -127,12 +134,14 @@ fn receipt(
     before: &Value,
     after: &Value,
     changed: bool,
-) -> Value {
-    let mut value = json!({"changed": changed, "target": scope.target(), "previous": visible(before), "current": visible(after)});
-    if let Some(token) = token {
-        value["undo"] = json!(format!("watchtower undo {token}"));
+) -> OwnerReceipt {
+    OwnerReceipt {
+        changed,
+        target: scope.target(),
+        previous: visible(before),
+        current: visible(after),
+        token: token.map(str::to_owned),
     }
-    value
 }
 
 impl Store {
@@ -142,7 +151,7 @@ impl Store {
         text: &str,
         revision: i64,
         at: &str,
-    ) -> Result<Option<Value>> {
+    ) -> Result<Option<OwnerReceipt>> {
         let mut accepted = true;
         let receipt = self.owner_change(OwnerScope::Idea { id }, at, |db| {
             let current = db
@@ -167,13 +176,14 @@ impl Store {
         })?;
         Ok(accepted.then_some(receipt))
     }
+
     /// The edit, before/after snapshots and version counters commit together.
     pub(super) fn owner_change(
         &self,
         scope: OwnerScope,
         at: &str,
         change: impl FnOnce(&Connection) -> Result<()>,
-    ) -> Result<Value> {
+    ) -> Result<OwnerReceipt> {
         self.with(|db| {
             let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
             let before = scope.snapshot(&tx)?;
@@ -241,7 +251,7 @@ impl Store {
         })
     }
 
-    pub fn set_owner_prefs(&self, updates: &[(&str, Value)], at: &str) -> Result<Value> {
+    pub fn set_owner_prefs(&self, updates: &[(&str, Value)], at: &str) -> Result<OwnerReceipt> {
         let mut keys = updates
             .iter()
             .map(|(key, _)| key.to_string())
