@@ -67,6 +67,21 @@ fn command_metadata_never_contains_ids_values_or_document_text() {
         .unwrap()
         .iter()
         .any(|row| row["command"] == "invalid_arguments" && row["invalid"] == 1));
+
+    // The metadata destination is optional even when a database write succeeds.
+    let blocked = tempfile::tempdir().unwrap();
+    std::fs::create_dir(watchtower::cli_usage::path(blocked.path())).unwrap();
+    let (code, saved) = command(
+        blocked.path(),
+        &["ideas", "add", "Saved despite unavailable metadata"],
+    );
+    assert_eq!(code, 0, "{saved}");
+    assert_eq!(saved["ok"], true);
+    let service = watchtower::Watchtower::open(&blocked.path().join("watchtower.db")).unwrap();
+    assert_eq!(
+        service.ideas().unwrap()[0]["text"],
+        "Saved despite unavailable metadata"
+    );
 }
 
 #[test]

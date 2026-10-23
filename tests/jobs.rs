@@ -1,5 +1,7 @@
 //! Real-process deadline, result replay, liveness and instance contracts.
 
+mod common;
+
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -266,4 +268,47 @@ fn job_storage_failure_before_launch_reports_that_no_work_started() {
     let message = output["error"]["message"].as_str().unwrap();
     assert!(message.contains("did not start"), "{message}");
     assert!(!message.contains("outcome is unknown"), "{message}");
+}
+
+#[test]
+fn a_relative_repository_job_keeps_its_request_directory_across_continuations() {
+    let fixture = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(fixture.path());
+    let home = fixture.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let first = command(&home, 70)
+        .current_dir(fixture.path())
+        .env("WATCHTOWER_TEST_JOB_BLOCK", "1")
+        .args(["--json", "projects", "add", "demo", "--id", "relative"])
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(1), "{first:?}");
+    let first_result = json(&first);
+    assert_eq!(first_result["finished"], false);
+    let job = first_result["job"]["token"].as_str().unwrap().to_owned();
+    std::fs::write(home.join(".release-test-job"), "release").unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let finished = command(&home, 2_000)
+        .current_dir(elsewhere.path())
+        .args(["--json", "jobs", "wait", &job])
+        .output()
+        .unwrap();
+    assert_eq!(finished.status.code(), Some(0), "{finished:?}");
+    let project = json(&finished)["project"].clone();
+    assert_eq!(project["id"], "relative");
+    assert_eq!(
+        std::fs::canonicalize(project["path"].as_str().unwrap()).unwrap(),
+        std::fs::canonicalize(repo).unwrap()
+    );
+    let replay = command(&home, 2_000)
+        .current_dir(elsewhere.path())
+        .args(["--json", "jobs", "wait", &job])
+        .output()
+        .unwrap();
+    assert_eq!(json(&replay)["project"], project);
+    let service = watchtower::Watchtower::open(&home.join("watchtower.db")).unwrap();
+    assert_eq!(
+        service.list_projects().unwrap().as_array().unwrap().len(),
+        1
+    );
 }
