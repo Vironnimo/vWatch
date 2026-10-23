@@ -2,3 +2,8 @@
 /gen/
 /.tmp/*
 !/.tmp/.gitkeep
+
+/.worktrees/
+/.vorch-worktree
+/.claude/worktrees/
+__pycache__/

@@ -1,105 +1,110 @@
 # AGENTS.md
 
-Guidance for every coding agent working on Watchtower. Read it completely before changing anything, then read `README.md` for install and usage.
 
-## What Watchtower is for
+## Load context for the task
 
-The owner builds about eight software projects at once, mostly through coding agents that work day and night. Without help they lose track: which project moved, what an agent left unfinished, which work exists only on this disk, what waits for their decision, and how to get back into a project they have not touched for weeks.
+At session start, read these core files completely unless their current contents are already in context. Load them once; re-read affected sections when they change:
 
-Watchtower answers that in a few minutes each morning. It is a local Windows app with a window the owner reads and a native console CLI that agents write through. Both use the same service and database. It serves these situations:
+- `.vorch/PROJECT.md` - project context
+- `.vorch/GLOSSARY.md` - project-specific terms
 
-- Morning overview: what changed overnight, what is at risk, what to do first today.
-- Re-entry: coming back to a project after days or weeks: what it is, how to start and use it, where things are, what happened since the owner last looked.
-- Decisions: questions agents could not settle alone, collected in one place, answered with a click or a short reply.
-- Handoff: turning a suggestion or open end into a ready-to-paste task for a coding agent.
-- Learning the owner's taste: the owner rates suggestions and ideas; agents never bring back what was rejected and adapt to what was welcomed.
+Before working in or discussing a domain, read its root map under `.vorch/domain-maps/` (index in PROJECT.md), plus adjacent maps when ownership or contracts cross domains. Use them to locate owners, contracts, source, and tests. The task's `read:` list is a starting point; add a map only when the task reaches into its domain. Follow the root map's `## References` only for supplementary files whose triggers match the task; do not preload a supplementary folder. Supplementary files never replace the root map or enter the Domain Maps index.
 
-When you extend Watchtower, start from a situation like these and ask what the owner needs to see or decide in it. New features should make the morning read shorter or a decision easier, not add reading.
+Before changing a domain map or supplementary file, read `.vorch/workflows/domain-map-workflow.md` up to `## Creating or restructuring a map` unless its current contents are already in context; read the rest too when you create, split, merge, rename or restructure a map. Ordinary map reading does not require that workflow.
 
-## How it works
+## Interpret documentation
 
-Two kinds of data, kept strictly apart:
+Distinguish explicit user requirements and engineering contracts from descriptions of current behavior, examples, and proposals. Follow applicable requirements and contracts; a documented implementation or past choice is not automatically a constraint on new work. Existing behavior and design may be revised within the user's requested scope without a documentation exception. When the user asks to rethink or rebuild a system, its documented design, invariants and earlier decisions about it are open for revision; say which ones you would keep and why. A recorded user requirement stays in force until the user agrees to drop it by name.
 
-- Facts Watchtower measures itself, read-only, from git (and `gh` for CI): commits and the weekly activity curve, remote and unpushed commits, uncommitted work, extra worktrees, unmerged branches, CI state, releases, overnight work, lines of work that will collide, rebuildable disk space. Exact, free and instant. The window renders them directly.
-- Interpretation written by coding agents through the CLI: one card per project (headline, phase, re-entry, open ends, questions for the owner, suggestions, handbook, …) and one cross-project portfolio brief (today's focus, patterns, synergies, new app ideas, park or revive, assessments of the owner's parked ideas, and once a week a review of the past week). Agents follow the Skill in `skill/watchtower/`.
+Source code establishes what is implemented, not what ought to be implemented. Verify behavior claims against source and relevant tests. Correct stale descriptions; when code conflicts with an explicit requirement or contract, address the discrepancy rather than rewriting the requirement to match the code. Keep observations, requirements, and proposed changes identifiable in the docs.
 
-The daily run, done by an agent with the Skill: `watchtower runs start` refreshes facts and returns due projects with a reason (`no_card`, `changed`, `ci_changed`, `answered`, `status_changed`, `new_fields`, `stale`, `idea_review`) → the agent reads `watchtower context <id>` and studies the repository read-only → `watchtower card put <id> --context-token ...` → `watchtower portfolio context` → `watchtower portfolio put --context-token ...` → `watchtower runs finish <id>`. Agents read ordinary text and follow output or job continuations; programs opt into `--json`. Context tokens guard writes against newer documents, facts and owner instructions. `due` remains an untracked check; it compares measured facts with the card's basis so a daily run only re-analyses what changed. Recorded runs preserve failures and the last successful completion.
+## Communication with the user
 
-The owner's side is editable in the window or through the CLI on the owner's explicit instruction: watched projects, ratings and replies (`feedback`), status (`active`, `parked`, `done`, `archived`) with a note to agents, a goal with a due date, completed focus items, parked ideas (assessed by `idea_checks`), display preferences and visits. Reading through the CLI does not record a visit or acknowledge changes unless requested. Replies, status, notes and goals make the affected card due so agents react in the next run. A daily observation run never invents these owner decisions.
+### Use established terminology
 
-The window never calls a model and never writes to a repository. It picks up agent writes within seconds by watching the database's data version.
+Use the project's established terms as defined in the glossary and domain maps, such as Card, portfolio brief, Task and Run. Keep these terms untranslated when you talk to the user in another language.
 
-The owner can separately assign a copied task; agent reports (`tasks report`) await owner confirmation, and task snapshots/history survive card rewrites. Deliberate warning acknowledgements keep raw facts visible and expire on material worsening. "Später" has a local return date. The changes digest compares semantic content against the explicitly acknowledged snapshot; refreshing or revisiting must never silently mark new content read.
+### Present Agent-facing text changes
 
-## Principles
+For runtime Agent-facing text, explain the meaningful changes in the conversation and show the relevant proposed wording verbatim. Include the corresponding current wording when comparison helps the user assess the change.
 
-- Observe, never act on repositories. Facts come from read-only git commands. Never add a git command that writes (commit, fetch, push, gc, checkout, …), and never add features that change, back up or clean the owner's repositories. Watchtower shows the state; the owner or their agents act.
-- Local and private. Everything stays in one folder on this machine. No telemetry, no network except `gh` for CI state. Cards must not contain credentials; the Skill tells agents so.
-- Facts are exact, interpretation is honest. The window shows measured numbers as measured. Agents cite evidence (file, function, fact field) and say when something is stale or uncertain.
-- Short reading, clear next step. Word limits in the schemas keep cards readable. Every open end, question and suggestion leads to a concrete action or decision.
-- The owner's word wins. Ratings, replies, status notes and goals are instructions for agents. A rejected idea never returns.
-- The CLI serves people and agents. Both read ordinary text. Programs explicitly request `--json` for complete structured results, errors and schemas. A fresh agent with only the Skill must be able to finish work and recover from mistakes. Document payloads use `--file` or `--input-json`, never the output flag.
-- Project identity survives renames. Names and folder paths are editable; IDs stay stable. Update the existing record so cards, feedback, tasks and history remain attached. Never implement renaming by removing and re-adding a project.
-- Recovery preserves later work. Removed projects and ideas remain restorable. Document writes use context tokens; owner changes provide guarded undo where supported. An unknown or partial result is not permission to replay a mutation blindly. Report which effects remain saved.
+For larger changes, keep the conversation focused on the passages that materially affect Agent behavior. Make the complete changes available through the source-file diff. Do not create additional files solely to present the review. Show complete wording when the user requests it.
 
-## Layout
+Runtime Agent-facing text includes the operating Skill, CLI help/results/recovery hints, schema descriptions and copied task instructions supplied by Watchtower to an Agent or Model. Repository governance and development documentation are outside this review rule.
 
-- `src/main.rs` starts the console-only `Watchtower.exe` CLI (`cli.rs`); `src/bin/watchtower-ui.rs` starts the GUI-only `Watchtower-UI.exe` window (`app.rs`). The console process owns stdin, stdout, stderr and its exit status; never route CLI commands through a GUI process or attach a console after startup. The optional `desktop` feature contains the Tauri adapter and dependencies.
-- `src/cli_output.rs` renders readable command output. JSON mode preserves the service result and adds the success/error envelope; never infer JSON mode from redirection or choose it by default.
-- `src/cli_paging.rs` saves immutable text snapshots for bounded continuation. `src/cli_jobs.rs` owns the console deadline and detached workers; its saved result is replayed without rerunning the operation. `src/cli_usage.rs` records local command metadata without argument values or document text.
-- `src/service.rs` (`Watchtower`) owns all behavior: registration, facts refresh, due detection, context, card and portfolio writes (with merge and dry run), feedback, visits, goals, prefs and the window state. `cli.rs` and the Tauri commands in `app.rs` are thin adapters over it; put new behavior here, not in the adapters.
-- `src/facts/statistics.rs` counts working-tree source lines/languages with bounded Tokei scans and reconstructs daily Git activity. Counts exclude common dependency/generated files; incomplete measurements remain unknown.
-- `src/facts.rs` measures one repository (`collect`) and computes the fingerprint (`fingerprint` over `basis()`; new informational facts fields stay out of the basis so they do not make cards due). Disk space is measured once a day by `space`, carried over in `service.rs`.
-- `src/cards.rs` defines the agent-written documents (card, portfolio brief) as schema data: field types, word limits, defaults. It validates writes, merges and reports fields a card lacks (`missing_fields` → due reason `new_fields`). `watchtower schema card` and `watchtower schema portfolio` describe the same definition; `--json` exports the schema.
-- `src/store.rs` is the SQLite persistence (WAL). Schema changes go through the migration list; existing databases must keep working. `store/history.rs` atomically records every changed facts observation (and the first of each UTC day) and every content change, and keeps agent proposals independently of current reports. History is append-only; unchanged code/activity payloads share storage. `service/statistics.rs` supplies comparable observations, coverage-aware Git reconstructions and document comparisons.
-- `src/system.rs` owns the folder layout (both executables, `data\`, `skill\watchtower\`), exports the embedded Skill, and the Windows integration (autostart Run key targeting the window, user PATH targeting the folder).
-- `ui/` is the vanilla JS page in the window (`index.html`, `app.js`, `app.css`, no build step). It calls `app.rs` through `window.__TAURI__.core.invoke`. Four areas: "Heute" (owner actions, focus and unread changes), "Projekte" (project voices and assignments; opening a project shows its full page beside a compact project list), "Ideen" (one collection with rating and assignment filters, plus a round that rates new ideas one at a time) and "Statistik" (measurements, comparisons and content history). The project page is one continuous read with a jump bar: work, start & handbook, history & facts; search (Ctrl+K) opens the exact result. "Auftrag vorbereiten" previews a task before either copying only or assigning and copying its tracking instructions. Visits never acknowledge unread content; only the explicit read action does.
-- `skill/watchtower/` is the Skill: `SKILL.md` (the workflow), `references/card-guide.md` (how to study a project and fill each card field), `references/portfolio-guide.md` (the brief), `references/cli.md` (data meanings, owner operations and recovery). It is embedded with `include_str!` and written next to the exe on startup and by `watchtower status`.
-- `tests/`: `service.rs` (service contracts), `cli.rs` (readable and JSON output), `process.rs` (real executable streams, shell completion, deadlines and recovery), `skill_commands.rs` (commands extracted from Skill examples), `facts.rs` (git measurements on temporary repositories); shared helpers use a fixed clock in `tests/common/mod.rs`.
-- `scripts/install.ps1` builds both release executables and installs them to `%LOCALAPPDATA%\Programs\Watchtower`, preserving data and the owner's autostart/PATH choices.
+## Agent-facing work
 
-## Changing contracts
+Before writing or reviewing runtime Agent-facing text, load the matching Skill and follow it: `agent-cli` for the application CLI, `agent-skill-creator` for the operating Skill, `agent-text` for generated task instructions, and `agent-eval` for fresh-model evaluations.
 
-The CLI's command names, readable outcomes and continuation markers, JSON output, error codes, due/brief reasons and document schemas are contracts.
+## Architecture & code
 
-- Change them deliberately and update the Skill in the same commit: `references/cli.md` must match `cli.rs` and the JSON the service returns; `card-guide.md` and `portfolio-guide.md` must describe every field the schema has.
-- Adding a card field: define it in `cards.rs` with a default, document it in the card guide, render it in the UI. Existing cards then become due with `new_fields`, so the next daily run fills the field everywhere.
-- The portfolio brief is rewritten only when fields it builds on change (`BRIEF_FIELDS` in `service.rs`). Add a card field there only if the brief uses it.
-- Skill text is runtime Agent-facing text: self-contained for a fresh agent that has never seen this repository, no references to its internals, only concepts the agent can observe or act on through the CLI. Keep it concise; every sentence costs every run.
+**Few, deep modules:** Prefer clear ownership, small interfaces, and hidden implementation. Extend an existing owner when the capability belongs there. Before introducing a new responsibility, public interface, layer, or abstraction, identify the closest existing owner and explain why the new boundary is warranted. Avoid pass-through layers and abstractions that expose their internals or add little beyond their interface.
 
-## Agent interface
+Judge complexity by responsibilities, coupling, and what callers must understand, not file count alone. Tests, documentation, components, and internal file splits do not need a new-owner justification unless they introduce an architectural boundary. Split files when it improves clarity and cohesion; do not overload an existing file merely to avoid creating one.
 
-Read `docs/agent-interface.md` when changing a command, an owner capability, output, recovery or the operating Skill. It maps every Tauri endpoint to a CLI capability or an explicit exclusion, records ideal call sequences, output/deadline budgets, privacy boundaries and the reasons for runtime instructions. Keep that mapping and the Skill aligned with the implementation.
+**Technical Decisions** - when making technical decisions, do not give much weight to development cost. Instead, prefer quality, simplicity, robustness, scalability, and long-term maintainability.
 
-Production agents operate the installed console executable from vBot or Codex shells. Use ordinary text for model reading and JSON only for programmatic parsing. Test against an explicit scratch `WATCHTOWER_HOME` or `--data-dir`; fault switches work only with the isolated-test opt-in described in the interface document. Validate behavior through real processes as well as the service; never claim model evaluations from deterministic tests.
+## Testing
 
-## Conventions
+Tests guard behavior against regressions from concurrent and later work. Every test also costs runtime and maintenance for all later tasks, so keep the suite a curated set of behavior contracts, not a record of every change.
 
-- UI text is German and addresses the owner as "du". Code, comments, docs, the Skill and commit messages are English. Card and brief content is written by agents in German.
-- Keep modules few and deep; extend the existing owner of a capability before adding a new one.
-- Card and window paths use forward slashes or environment variables such as `%LOCALAPPDATA%` where the Skill asks for them.
+**Write tests for contracts, not for changes.**
 
-## Build, run, test
+- Test behavior at the owning module's public interface: contracts, persisted formats, protocols, CLI outcomes and recovery, measured facts, and owner-visible state. Test an internal helper directly only when it carries its own contract that is impractical to reach through that interface.
+- A bug fix extends the existing test that owns the behavior, with a new parameter case or assertion. Add a new test only when no existing test covers that behavior.
+- One test per distinct behavior; parameterize only over genuinely different cases.
+- Developer scripts and probes get at most a smoke test, unless they protect data or installations (converters, installers, update and worktree tooling).
+- Keep tests fast and deterministic: controlled clocks and in-memory fakes instead of avoidable waits and network. Real Git repositories and console processes remain necessary at those public boundaries. A test that needs more than about a second must justify it. Load and scale variants carry the `stress` marker, which the normal suite skips (PROJECT.md -> Testing).
+- Durability and process recovery are real contracts here. Keep real SQLite synchronization and job-result syncs until a test-only seam can preserve the durability cases; do not weaken production writes to speed up tests. See the testing guide for isolation and opt-in stress cases.
+- When a change makes tests obsolete or redundant, delete or merge them in the same change.
+- Documentation-only edits need no tests; review content, references, and the diff.
 
-```bash
-cargo test                      # all tests, a few seconds
-cargo clippy --all-targets      # must stay free of warnings
-cargo run                       # the window from source
-cargo run --bin Watchtower -- due --no-refresh # the CLI from source
-cargo test --no-default-features # the core and CLI without desktop dependencies
-```
+Before writing or changing a test, read `.vorch/domain-maps/development/testing.md`: what to assert, how to wait, and what the shared fixtures isolate.
 
-- Use the repository-root `.tmp/` for all development scratch files: temporary scripts, logs, screenshots, payloads, database copies and test fixtures. Create task-specific subfolders there; do not use the operating system's temp folder.
-- Cargo sets `TEMP`, `TMP` and `TMPDIR` to this checkout's `.tmp/`. For tools launched outside Cargo, set those variables to the same absolute path in the command's process environment (see README); do not change user or machine environment settings.
-- Set `WATCHTOWER_HOME` to a task-specific folder under `.tmp/` when running from source, so test data stays out of the installed app. Copy the installed `data\watchtower.db` there to try changes on real data.
-- Build into the one `target\` folder. Never set `CARGO_TARGET_DIR` to a second folder (each is a full rebuild of several gigabytes) and never put logs, screenshots or scripts into `target\`; use `.tmp/`.
-- Install with `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`. It closes the running window; start it again afterwards. Do not install while an agent is using the installed CLI.
-- Tests guard contracts (service behavior, CLI JSON, facts), not individual changes. Extend the test that owns a behavior before adding a new one. Keep them fast and deterministic with the fixed clock and temporary repositories.
-- Verify UI changes in the running window. Do not change the owner's preferences (style, hidden sections) or leave ratings, replies or ticks behind while testing; `watchtower feedback` must show no test entries afterwards.
-- Never toggle the owner's autostart or PATH setting; those are the owner's choices in the settings.
-- When updating an installed operating Skill, first locate its actual scope and preserve it. An agent-private Skill must not become global or shared unless the owner explicitly requests that change.
+**Commits and merges get static checks only.** Run the tests covering your change yourself and commit once they pass. Before completing a larger change or an installation, run the complete local check; this repository has no remote or CI gate. Investigate failures and report any unresolved ones.
+
+Do not run existing suites merely to analyze code. Read source and contract tests with a question in mind; use a targeted probe for an uncertain behavior claim. A requested survey or test audit runs the suite to measure it.
+
+## Watchtower development boundaries
+
+- Observe the owner's repositories; do not add Git-writing commands, cleanup, backup or repository-editing features to Watchtower. Development commits in this repository are separate from application behavior.
+- Keep the owner's data and OS choices intact. Use a task-specific scratch instance for development; do not leave test ratings, replies or ticks in the installed app. Never toggle the owner's autostart or PATH setting.
+- Verify changes to the window in the running window. VM tests do not establish layout or WebView behavior; follow the live-testing workflow.
+- UI text and agent-written report content are German, addressing the owner as `du`. Code, comments, repository documentation, the operating Skill and commit messages are English.
+- Changes to application commands, output, recovery, owner capabilities or document schemas update the operating Skill and `docs/agent-interface.md` in the same commit. The agent-interface map routes to those contracts.
+- Preserve the actual scope when updating an installed operating Skill. An agent-private installation stays private unless the owner requests another scope.
+- Keep build/log/script scratch in the current checkout's `.tmp/` and source-run data in a task-specific subfolder. The test runner puts fixture homes and repositories outside checkouts and the user profile, as the testing guide describes. Use the primary checkout's single `target/` through the development tools; never link checkout folders or create a second build tree.
+
+## Dependencies
+
+If a task requires a new dependency, **check first** that no existing dependency already covers the need. Then install it, add it to `Cargo.toml` (application dependencies) or an explicit development manifest when the existing standard-library tools cannot do the job, and commit the lock file changes. Do not install packages speculatively - only what the current task requires.
+
+## You maintain the docs & domain maps
+
+Maintain affected documentation as part of the task with small, factual updates:
+
+- `.vorch/PROJECT.md` - architecture, conventions, dev/test setup, domain-maps index, strategic context. Every agent reads it, so a fact whose use is confined to one domain goes into that domain's map instead
+- `.vorch/domain-maps/<domain>.md` - a domain's ownership, contracts, or documented behavior changes, including affected supplementary files, or a new domain emerges (a new domain also gets added to the domain-maps index in PROJECT.md)
+- `.vorch/GLOSSARY.md` - shared vocabulary under the Terminology rules below
+- `.vorch/FLAGGED.md` - git-ignored, never commit it; keep only confirmed, concrete, still-open concerns, with the evidence and affected behavior. During implementation, fix confirmed bugs with a clear, bounded, low-risk solution even outside the original task; defer them to this file only with a concrete reason. Investigate a suspicion before adding it; when reviewing an existing suspicion, check it before removing it. Do not add pending evaluations, missing live checks, speculative future failures, or completion notes. Append at the bottom, or fold into a related entry when one fits; delete an entry once its concern is resolved or verified fixed instead of annotating it.
+
+**Write all project documents in English.** Plans, design documents, decision records, domain maps, PROJECT.md, GLOSSARY.md, FLAGGED.md - every project artifact is written in English, regardless of the language you and the user speak in chat. User-facing chat follows the user's language; the documents do not.
+
+## Terminology
+
+`.vorch/GLOSSARY.md` holds the terms every agent needs in every task: a term belongs there when several domains use it and an agent would otherwise misread it, especially as a concept of its own environment or of another system, such as Project, Task, Run and Job. A term only one domain uses belongs in that domain map's `## Terms` section, even when the user mentions it; when other domains start using it, move it to the glossary and leave a pointer. Standard vocabulary gets no entry.
+
+An entry, in the glossary or in a map's Terms, says what the term means, not how it works: at most two sentences of definition plus a "Not ..." distinction where a misreading is realistic, and the map or section that owns the concept. Tables, columns, functions, syntax, limits, states and procedures stay out of entries; they belong in the owning map's Data Model, Interfaces or a supplementary file, which the entry names. Give each term one canonical home; use references elsewhere.
+
+Maintain terminology as part of relevant work when a missing, stale, or ambiguous definition could cause mistakes. Make clear, evidence-backed updates directly; no separate Skill or interview is required. Ask the user when competing meanings would materially affect the work, rather than silently establishing a new meaning.
 
 ## Git
 
-- Work on `main` and commit finished work with conventional commits (`feat(scope): what`, lowercase, at most 72 characters). One logical change per commit; never commit failing tests.
-- The repository is local only. Do not add a remote.
+- Work directly on `main` - no feature branches by default. When you finish a task, commit it (the user may also ask you to commit mid-way); you don't need to wait to be asked.
+- **Small, quick, low-risk changes go directly on `main`; use a worktree for larger or uncertain tasks, or when concurrent work could interfere.** Create worktrees with `python scripts/worktree.py create <task-name>` (see PROJECT.md -> Development), then work and commit inside them. Once everything is committed, run `python scripts/worktree.py merge <task-name>` to merge into `main` and remove the worktree; the merge commit passes the commit check. For conflicts, follow `.vorch/workflows/worktree-workflow.md`. No user confirmation is needed before merging.
+- **Commits carry only the user's authorship.** Never commit as an AI tool (such as `Claude <noreply@anthropic.com>`) and never add `Co-Authored-By`, `Claude-Session`, or "Generated with" lines to commit messages or PRs. The hooks enforce this (`scripts/commit_authorship.py`): a tool identity blocks the commit, attribution lines are stripped from messages, and a push carrying either is refused. If a commit is blocked, commit under the user's identity with repository-local config only, never `--global`.
+- **Line endings are handled for you.** `.gitattributes` stores every text file with LF; Git's `CRLF will be replaced by LF` warning is harmless. Never convert files by hand to silence it.
+- Conventional format: `<type>(<scope>): <what>` - lowercase, <=72 chars, no trailing period. Types: `feat` `fix` `docs` `refactor` `perf` `test` `chore`. Breaking change -> `!`.
+- One logical unit per commit; never batch unrelated changes; commit once the tests covering your change pass.
+- **The commit hook checks every commit.** It checks the staged snapshot with Rust formatting and Clippy, JavaScript/Python syntax, and domain-map validation without rewriting or staging working-tree files (PROJECT.md -> Testing). Review the staged diff. When it blocks, fix the reported problems, stage, and commit again; never bypass it with `--no-verify`. It excludes other sessions' unstaged content entirely; all errors in the staged snapshot block. Leave other sessions' files alone. If a commit of source files prints no `Commit check` report, the hook is not enabled: enable it (PROJECT.md -> Development).
+- **Local repository:** do not add a remote or push. `python scripts/push.py --no-push` is the immutable-commit verification path; read `.vorch/workflows/push-workflow.md` before using it. `python scripts/check.py all` checks the current checkout.

@@ -2,7 +2,7 @@ mod common;
 
 use chrono::NaiveDate;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use watchtower::facts;
 
 fn today() -> NaiveDate {
@@ -415,8 +415,7 @@ fn commit(repo: &Path, files: &[(&str, Option<&str>)], date: &str) {
     common::git_at(repo, &["commit", "-q", "-m", date], date);
 }
 
-#[test]
-fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
+fn measurement_reuse_repo() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let repo = common::make_repo(
         tmp.path(),
@@ -428,15 +427,21 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
         &[("app.rs", Some("fn main() {}\n"))],
         "2026-09-29T10:00:00",
     );
+    (tmp, repo)
+}
+
+// Marked values can only come from the previous measurement.
+fn marked_measurements(facts: &Value) -> Value {
+    let mut facts = facts.clone();
+    facts["code"]["source_code"] = 999.into();
+    facts["activity"]["days"][1]["added"] = 777.into();
+    facts
+}
+
+#[test]
+fn measurement_reuse_keeps_same_head_and_worktree() {
+    let (_tmp, repo) = measurement_reuse_repo();
     let path = repo.to_str().unwrap();
-    let day = |offset| today() + chrono::Duration::days(offset);
-    // marked values can only come from the previous measurement
-    let marked = |facts: &Value| {
-        let mut facts = facts.clone();
-        facts["code"]["source_code"] = 999.into();
-        facts["activity"]["days"][1]["added"] = 777.into();
-        facts
-    };
     let first = facts::collect(path, today(), false);
     assert_eq!(first["activity"]["days"][0]["date"], "2025-09-30");
     assert_eq!(first["activity"]["days"][1]["date"], "2026-07-01");
@@ -446,7 +451,7 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
         facts::collect_reusing(path, today(), false, Some(&first)),
         first
     );
-    let reused = facts::collect_reusing(path, today(), false, Some(&marked(&first)));
+    let reused = facts::collect_reusing(path, today(), false, Some(&marked_measurements(&first)));
     assert_eq!(
         (
             reused["code"]["source_code"].as_u64(),
@@ -454,7 +459,14 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
         ),
         (Some(999), Some(777))
     );
+}
 
+#[test]
+fn measurement_reuse_trims_elapsed_days() {
+    let (_tmp, repo) = measurement_reuse_repo();
+    let path = repo.to_str().unwrap();
+    let day = |offset| today() + chrono::Duration::days(offset);
+    let first = facts::collect(path, today(), false);
     // later days drop the days that left the window and keep the rest
     for offset in [1, 40] {
         let full = facts::collect(path, day(offset), false);
@@ -463,10 +475,18 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
             facts::collect_reusing(path, day(offset), false, Some(&first)),
             full
         );
-        let carried = facts::collect_reusing(path, day(offset), false, Some(&marked(&first)));
+        let carried =
+            facts::collect_reusing(path, day(offset), false, Some(&marked_measurements(&first)));
         assert_eq!(carried["activity"]["days"][0]["added"], 777);
     }
+}
 
+#[test]
+fn measurement_reuse_extends_forward_head() {
+    let (_tmp, repo) = measurement_reuse_repo();
+    let path = repo.to_str().unwrap();
+    let day = |offset| today() + chrono::Duration::days(offset);
+    let first = facts::collect(path, today(), false);
     // HEAD moved forward: only the new commits are read and the code is counted again
     commit(
         &repo,
@@ -483,10 +503,21 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
         facts::collect_reusing(path, day(1), false, Some(&first)),
         facts::collect(path, day(1), false)
     );
-    let extended = facts::collect_reusing(path, today(), false, Some(&marked(&first)));
+    let extended = facts::collect_reusing(path, today(), false, Some(&marked_measurements(&first)));
     assert_eq!(extended["activity"]["days"][1]["added"], 777);
     assert_eq!(extended["code"], moved["code"]);
+}
 
+#[test]
+fn measurement_reuse_rejects_rewritten_history() {
+    let (_tmp, repo) = measurement_reuse_repo();
+    let path = repo.to_str().unwrap();
+    commit(
+        &repo,
+        &[("app.rs", Some("fn main() {}\nfn more() {}\n"))],
+        "2026-09-30T06:00:00",
+    );
+    let moved = facts::collect(path, today(), false);
     // rewritten history is measured again in full
     common::git(&repo, &["reset", "-q", "--hard", "HEAD~2"]);
     commit(
@@ -495,14 +526,19 @@ fn slow_measurements_carry_over_exactly_while_their_inputs_hold() {
         "2026-09-30T07:00:00",
     );
     assert_eq!(
-        facts::collect_reusing(path, today(), false, Some(&marked(&moved))),
+        facts::collect_reusing(path, today(), false, Some(&marked_measurements(&moved))),
         facts::collect(path, today(), false)
     );
+}
 
+#[test]
+fn measurement_reuse_rejects_grafted_history() {
+    let (_tmp, repo) = measurement_reuse_repo();
+    let path = repo.to_str().unwrap();
     // so is a history whose shape changed under the same HEAD
     let before = facts::collect(path, today(), false);
     common::git(&repo, &["replace", "--graft", "HEAD~1"]);
-    let grafted = facts::collect_reusing(path, today(), false, Some(&marked(&before)));
+    let grafted = facts::collect_reusing(path, today(), false, Some(&marked_measurements(&before)));
     let full = facts::collect(path, today(), false);
     assert_ne!(full["activity"], before["activity"]);
     assert_eq!(grafted["activity"], full["activity"]);
