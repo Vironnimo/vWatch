@@ -54,10 +54,11 @@
   const TASKS = {};       // "Auftrag kopieren" buttons: key → the task they copy, refilled on every render
   let lastVersion = null; // data_version of the state shown; the watch reloads when it moves on
   let loadSeq = 0, shownSeq = 0, loading = 0; // a state never replaces one requested later
+  let loadRetryAt = 0;
   let shown = false;
   let statsProject = null, statsFrom = '', statsUntil = '', statsTab = 'numbers';
   let statsData = null, statsHistory = null, statsVersions = null, statsDetail = null;
-  let statsBusy = false, statsRequest = 0;
+  let statsBusy = false, statsRequest = 0, statsDetailRequest = 0;
   let statsBasis = {}, statsText = {}, statsBasisMemo = null; // what the shown statistics rest on, per tab
 
   // ---------- helpers ----------
@@ -672,10 +673,19 @@
     } catch (e) { toast(`Projekt nicht wieder aufgenommen: ${errText(e)}`); }
     finally { restoringIdeaProjects.delete(id); render(); }
   }
+  let ideaTasksMemo = { tasks: null, bySource: new Map() };
   function ideaTask(id) {
-    const tasks = (S.tasks || []).filter(t => t.source_id === id);
-    return tasks.filter(t => ['assigned', 'blocked', 'review'].includes(t.status)).sort((a, b) => Number(b.id) - Number(a.id))[0]
-      || tasks.sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+    // State reads and assignments replace this array; classify each task once
+    // instead of scanning and sorting the full history for every idea/filter.
+    if (ideaTasksMemo.tasks !== S.tasks) {
+      const bySource = new Map(), active = task => ['assigned', 'blocked', 'review'].includes(task.status);
+      for (const task of S.tasks || []) {
+        const previous = bySource.get(task.source_id);
+        if (!previous || (active(task) && !active(previous)) || (active(task) === active(previous) && Number(task.id) > Number(previous.id))) bySource.set(task.source_id, task);
+      }
+      ideaTasksMemo = { tasks: S.tasks, bySource };
+    }
+    return ideaTasksMemo.bySource.get(id) || null;
   }
   function ideaBucket(entry) {
     const task = ideaTask(entry.s.id);
@@ -721,8 +731,8 @@
     return entry.own ? ownerIdeaCard(entry, options) : ideaCard(entry.s, entry.projects, entry.project, IDEA_KINDS[entry.kind], options);
   }
   function renderIdeas() {
-    const all = ideaCollection(), entries = categoryEntries(), matching = entries.filter(e => ideaFilter === 'all' || ideaBucket(e) === ideaFilter);
-    const pinned = all.filter(e => !matching.includes(e) && [noteFor, snoozeFor].includes(e.s.id));
+    const all = ideaCollection(), entries = all.filter(e => proposalCategory(e.s, e.kind) === ideaCategory), matching = entries.filter(e => ideaFilter === 'all' || ideaBucket(e) === ideaFilter);
+    const pinned = all.filter(e => [noteFor, snoozeFor].includes(e.s.id) && !matching.includes(e));
     const isIdea = ideaCategory === 'idea', label = PROPOSAL_CATEGORIES[ideaCategory];
     const categories = Object.entries(PROPOSAL_CATEGORIES).map(([key, title]) => {
       const fresh = all.filter(e => proposalCategory(e.s, e.kind) === key && ideaBucket(e) === 'new').length;
@@ -1335,6 +1345,7 @@
   function invalidateStatistics() { statsBasisMemo = null; }
   // A new selection starts over.
   function resetStatistics() {
+    statsDetailRequest++;
     statsRequest++; statsBusy = false; statsData = null; statsHistory = null; statsVersions = null; statsBasis = {}; statsText = {};
     statsDetail = null; statsFilterDraft = {}; statsCompareDraft = {};
   }
@@ -1487,9 +1498,10 @@
       resetStatistics(); render();
     }
     if (e.target.id === 'stats-compare') {
-      e.preventDefault(); const request = statsRequest;
+      e.preventDefault(); const request = statsRequest, detailRequest = ++statsDetailRequest;
       call('compare_documents', { project: statsProject, from: Number($('#stats-version-from').value), to: Number($('#stats-version-to').value) })
-        .then(data => { if (request === statsRequest) { statsDetail = data; render(); } }).catch(e => toast(errText(e)));
+        .then(data => { if (request === statsRequest && detailRequest === statsDetailRequest) { statsDetail = data; render(); } })
+        .catch(e => { if (request === statsRequest && detailRequest === statsDetailRequest) toast(errText(e)); });
     }
   });
   document.addEventListener('click', async e => {
@@ -1503,20 +1515,20 @@
       statsFrom = start.toISOString().slice(0, 10); statsUntil = S.today;
       resetStatistics(); render(); return;
     }
-    if (t.dataset.statsTab) { statsTab = t.dataset.statsTab; statsDetail = null; render(); return; }
-    if (t.hasAttribute('data-stats-close-detail')) { statsDetail = null; render(); return; }
-    const request = statsRequest;
+    if (t.dataset.statsTab) { statsTab = t.dataset.statsTab; statsDetail = null; statsDetailRequest++; render(); return; }
+    if (t.hasAttribute('data-stats-close-detail')) { statsDetail = null; statsDetailRequest++; render(); return; }
+    const request = statsRequest, detailRequest = t.dataset.historyEvent ? ++statsDetailRequest : null;
     t.disabled = true;
     try {
       if (t.dataset.historyEvent) {
         const result = await call('history_event', { id: Number(t.dataset.historyEvent) });
-        if (request === statsRequest) statsDetail = result;
+        if (request === statsRequest && detailRequest === statsDetailRequest) statsDetail = result;
       } else if (t.dataset.historyMore) {
         const result = await call('history', { project: statsProject, entity: null, id: null, before: Number(t.dataset.historyMore) });
         if (request === statsRequest) statsHistory = { ...result, events: [...statsHistory.events, ...result.events] };
       }
-      if (request === statsRequest) render();
-    } catch (e) { toast(errText(e)); } finally { t.disabled = false; }
+      if (request === statsRequest && (detailRequest === null || detailRequest === statsDetailRequest)) render();
+    } catch (e) { if (request === statsRequest && (detailRequest === null || detailRequest === statsDetailRequest)) toast(errText(e)); } finally { t.disabled = false; }
   });
 
   // ---------- page ----------
@@ -1665,23 +1677,24 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
-  // `seen` is the data_version that prompted the load; a failed load keeps it so
-  // the watch does not retry the same change every few seconds.
-  async function load(visit, seen) {
+  async function load(visit) {
     const seq = ++loadSeq;
     loading++;
     try {
       const next = await call('state', { visit });
       if (seq > shownSeq) {
-        shownSeq = seq; S = next; lastVersion = next.data_version ?? null;
+        shownSeq = seq; S = next; lastVersion = next.data_version ?? null; loadRetryAt = 0;
         if (S.prefs.style === 'handbook') S.prefs.style = 'board';
         if (S.prefs.style === 'statistics') invalidateStatistics(true);
         render();
       }
     } catch (e) {
       if (seq > shownSeq) {
-        if (seen !== undefined) lastVersion = seen;
-        $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}</p>`;
+        // A failed read is not an acknowledged database version. Retain the
+        // last usable page and retry, including when the first read failed.
+        loadRetryAt = Date.now() + 10000;
+        if (S) toast('Aktualisierung fehlgeschlagen. Der bisherige Stand bleibt sichtbar; Watchtower versucht es erneut. ' + errText(e));
+        else $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}. Ein neuer Versuch folgt automatisch.</p>`;
       }
     } finally { loading--; }
     if (!shown) { shown = true; call('ready').catch(() => {}); }
@@ -1696,7 +1709,7 @@
     try {
       const next = await call('refresh');
       // read after measuring, so it is newer than any state requested meanwhile
-      shownSeq = ++loadSeq; S = next; lastVersion = next.data_version ?? null;
+      shownSeq = ++loadSeq; S = next; lastVersion = next.data_version ?? null; loadRetryAt = 0;
       invalidateStatistics(); render();
     } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
     b.disabled = false; b.textContent = 'Git-Fakten messen';
@@ -2266,15 +2279,17 @@
   // a window write was not followed by its own load. Loads and refreshes in flight
   // adopt their own version, so the watch waits for them instead of loading twice.
   const typing = () => { const a = document.activeElement; return !!a && ((a.tagName === 'INPUT' && a.type !== 'checkbox') || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
-  const idle = () => S && !refreshing && !loading && !typing();
+  const idle = () => !refreshing && !loading && !typing();
   let watching = false;
   async function watch() {
     if (watching || !idle()) return;
     watching = true;
     try {
+      if (loadRetryAt) { if (Date.now() >= loadRetryAt) await load(false); return; }
+      if (!S) return;
       const v = await call('data_version');
       if (lastVersion === null) lastVersion = v;
-      else if (v !== lastVersion && idle()) await load(false, v);
+      else if (v !== lastVersion && idle()) await load(false);
     } catch (e) { /* the next tick asks again */ }
     finally { watching = false; }
   }

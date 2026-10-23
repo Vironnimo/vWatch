@@ -5,6 +5,35 @@ const { app } = require('./ui-helpers.cjs');
 const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea });`;
 const ids = entries => Array.from(entries, entry => entry.s.id);
 
+test('an open snooze has exactly one editor inside its filter and stays pinned in other filters', async () => {
+  const a = await app(undefined, expose);
+  a.state.prefs.style = 'ideas';
+  await a.ui.load(false);
+  a.ui.openSnooze('s1');
+  let html = a.ui.renderIdeas();
+  assert.equal((html.match(/data-snooze-save/g) || []).length, 1);
+  assert.doesNotMatch(html, /class="idea-pending"/);
+  a.ui.setIdeaFilter('up');
+  html = a.ui.renderIdeas();
+  assert.equal((html.match(/data-snooze-save/g) || []).length, 1);
+  assert.match(html, /class="idea-pending"/);
+});
+
+test('idea progress prefers the newest active task and rebuilds after a refreshed task list', async () => {
+  const a = await app(undefined, expose);
+  a.state.tasks = [
+    { id: 3, status: 'done', source_id: 's1' },
+    { id: 1, status: 'review', source_id: 's1' },
+    { id: 2, status: 'blocked', source_id: 's1' },
+  ];
+  await a.ui.load(false);
+  a.ui.setIdeaFilter('assigned');
+  assert.match(a.ui.renderIdeas(), /data-task-id="2"/);
+  a.state.tasks = a.state.tasks.filter(t => t.id === 3);
+  await a.ui.load(false);
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'done');
+});
+
 test('one idea collection orders all sources by first appearance and preserves remembered proposals', async () => {
   const a = await app(undefined, expose);
   a.state.prefs.style = 'ideas';

@@ -71,6 +71,27 @@ test('live refresh retains unsubmitted filters and an immutable comparison', asy
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+const historyClick = (a, dataset) => a.dispatch('click', { target: { closest: selector => selector.startsWith('[data-project-statistics],')
+  ? { dataset, hasAttribute: name => name === 'data-stats-close-detail' && Object.hasOwn(dataset, 'statsCloseDetail') } : null } });
+
+test('history details follow the last selection and a closed detail stays closed after pending reads', async () => {
+  const first = deferred(), second = deferred(), last = deferred();
+  const a = await app((command, args) => command === 'history_event' ? ({ 1: first, 2: second, 3: last })[args.id].promise : {}, expose);
+  historyClick(a, { historyEvent: '1' });
+  historyClick(a, { historyEvent: '2' });
+  second.resolve({ event: { changes: [{ field: 'headline', before: 'Old', after: 'Latest selected event' }] } });
+  await settle();
+  first.resolve({ event: { changes: [{ field: 'headline', before: 'Old', after: 'Earlier selected event' }] } });
+  await settle();
+  assert.match(a.ui.historyDetail(), /Latest selected event/);
+  assert.doesNotMatch(a.ui.historyDetail(), /Earlier selected event/);
+  historyClick(a, { historyEvent: '3' });
+  historyClick(a, { statsCloseDetail: '' });
+  last.resolve({ event: { changes: [{ field: 'headline', before: 'Old', after: 'Closed event' }] } });
+  await settle();
+  assert.equal(a.ui.historyDetail(), '');
+});
+
 test('reloads keep the shown statistics and fetch again only after measured facts changed', async () => {
   let reads = 0;
   const a = await app(command => command === 'statistics' ? { from: '2026-10-01', until: '2026-10-07', projects: [], summary: { source_code: 1000 + ++reads, measured_projects: 1, projects: 1 } } : {}, expose);

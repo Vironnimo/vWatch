@@ -3,6 +3,45 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { app, fixture, deferred } = require('./ui-helpers.cjs');
 
+const recoveryExpose = `Object.assign(ui, {
+  watch,
+  advanceClock: () => { const now = Date.now() + 60000; Date.now = () => now; },
+  failNextRead: () => {
+    const original = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, args) => {
+      if (command === 'state') { window.__TAURI__.core.invoke = original; throw new Error('Temporary read failure'); }
+      return original(command, args);
+    };
+  },
+});`;
+
+test('a failed live state read preserves the page and retries the same database version after a delay', async () => {
+  const a = await app(command => command === 'data_version' ? 'v2' : {}, recoveryExpose);
+  a.state.data_version = 'v1';
+  await a.ui.load(false);
+  const shown = a.node('#view').innerHTML;
+  a.state.data_version = 'v2';
+  a.state.projects[0].name = 'Recovered update';
+  a.ui.failNextRead();
+  await a.ui.watch();
+  assert.equal(a.node('#view').innerHTML, shown);
+  const calls = a.calls.length;
+  await a.ui.watch();
+  assert.equal(a.calls.length, calls, 'wait before retrying a failed read');
+  a.ui.advanceClock();
+  await a.ui.watch();
+  assert.match(a.node('#view').innerHTML, /Recovered update/);
+});
+
+test('a failed first state read recovers automatically without a restart or database change', async () => {
+  const a = await app(undefined, recoveryExpose + 'ui.failNextRead();');
+  assert.match(a.node('#view').innerHTML, /Temporary read failure/);
+  a.ui.advanceClock();
+  await a.ui.watch();
+  assert.doesNotMatch(a.node('#view').innerHTML, /Temporary read failure/);
+  assert.match(a.node('#view').innerHTML, /Sample/);
+});
+
 test('legacy effort estimates stay invisible while recommendations and task actions remain usable', async () => {
   const a = await app();
   const card = a.state.projects[0].card;
