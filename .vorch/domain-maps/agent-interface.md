@@ -4,7 +4,9 @@ The native console protocol and operating Skill let people and agents use Watcht
 
 ## Overview
 
-`src/main.rs` starts the console process through `cli_jobs::main`. `src/cli.rs` owns parsing, input decoding, service dispatch, output mode and exit status; `src/cli_output.rs` renders readable results. `src/cli_paging.rs`, `src/cli_jobs.rs` and `src/cli_usage.rs` own saved output, bounded command execution and local command metadata respectively.
+`src/main.rs` starts the console process through `cli_jobs::main`. `src/cli.rs` owns instance selection, runtime metadata, Job planning, result/error delivery and console orchestration. Its private `cli/parser.rs` owns command grammar, output keys and help; `cli/dispatch.rs` owns document decoding and thin service dispatch.
+
+`src/cli_output.rs` selects readable renderers and owns shared escaping, tree/table primitives and generated receipt framing. Its private `cli_output/documents.rs` renders documents, contexts and schemas; `observations.rs` renders Facts, statistics, history and overview; `operations.rs` renders owner changes and Run/Job receipts. The operations renderer reuses the observations owner's Due rendering for Run results. `src/cli_paging.rs`, `src/cli_jobs.rs` and `src/cli_usage.rs` own saved output, bounded execution and local command metadata respectively.
 
 Business behavior stays in `src/service.rs` and its modules; document validation stays in `src/cards.rs` (see `application.md`). The console and Tauri adapters call the same service. A new owner capability needs CLI coverage or a deliberate exclusion in `docs/agent-interface.md` -> Capability coverage. Window lifecycle and `src/system.rs` belong to `desktop.md`; building and installing belong to `development.md`.
 
