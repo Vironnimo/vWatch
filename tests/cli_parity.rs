@@ -724,6 +724,31 @@ fn owner_changes_return_an_executable_undo_without_overwriting_newer_changes() {
             "ideas",
         ],
     );
+    let token = changed["undo_token"]
+        .as_str()
+        .expect("JSON preserves the opaque Undo token");
+    assert!(!token.is_empty());
+    let (code, text) = call(
+        &home,
+        &[
+            "settings",
+            "update",
+            "--style",
+            "board",
+            "--hidden-modules",
+            "ideas",
+        ],
+    );
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("Undo: watchtower ")),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Undo token:"),
+        "opaque receipt metadata stays out of readable output: {text}"
+    );
     let undo_args: Vec<&str> = changed["undo"]
         .as_str()
         .unwrap()

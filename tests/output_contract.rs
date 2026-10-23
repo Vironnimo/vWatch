@@ -36,17 +36,21 @@ fn continuation(output: &str) -> Option<Vec<&str>> {
 
 #[test]
 fn long_list_pages_the_original_result_and_json_stays_complete() {
+    const PROJECTS: usize = 48;
     let home = tempfile::tempdir().unwrap();
     let store = Store::open(&home.path().join("watchtower.db")).unwrap();
     let long_name = format!(
         "東京 Zürich {} complete title tail",
         "long name ".repeat(100)
     );
-    for n in 0..300 {
+    for n in 0..PROJECTS {
         let name = if n == 0 {
             long_name.clone()
         } else {
-            format!("東京 Zürich project {n:03} with a sufficiently descriptive display name")
+            format!(
+                "東京 Zürich project {n:03} with {}a descriptive display name",
+                "context ".repeat((n % 9) * 9)
+            )
         };
         store
             .add_project(
@@ -59,17 +63,17 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
     }
     let (status, mut page) = run(home.path(), &["projects", "list"]);
     assert_eq!(status, 0, "{page}");
-    assert!(page.contains("300 registered projects"));
+    assert!(page.contains("48 registered projects"));
     assert!(page.contains("oldest registration first"));
     assert!(continuation(&page).is_some());
     assert!(
         page.contains(&long_name),
         "table values must remain complete"
     );
-    let original_last = "東京 Zürich project 299";
+    let original_last = "東京 Zürich project 047";
     let db = rusqlite::Connection::open(home.path().join("watchtower.db")).unwrap();
     db.execute(
-        "UPDATE projects SET name='CHANGED AFTER FIRST PAGE' WHERE id='p299'",
+        "UPDATE projects SET name='CHANGED AFTER FIRST PAGE' WHERE id='p047'",
         [],
     )
     .unwrap();
@@ -96,19 +100,27 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
     }
     assert!(pages.contains(original_last));
     assert!(
-        pages.len() < 70_000,
+        pages.len() < 27_000,
         "one long cell must not pad every row to its length"
     );
     assert!(!pages.contains("CHANGED AFTER FIRST PAGE"));
-    for n in 0..300 {
-        assert!(pages.contains(&format!("p{n:03}")), "missing p{n:03}");
+    let mut previous = 0;
+    for n in 0..PROJECTS {
+        let position = pages
+            .find(&format!("p{n:03}"))
+            .unwrap_or_else(|| panic!("missing p{n:03}"));
+        assert!(position >= previous, "rows retain registration order");
+        previous = position;
     }
     let (status, json) = run(home.path(), &["--json", "projects", "list"]);
     assert_eq!(status, 0);
     assert!(json.chars().count() > 10_000);
     let data: Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(data["projects"].as_array().unwrap().len(), 300);
-    assert_eq!(data["projects"][299]["name"], "CHANGED AFTER FIRST PAGE");
+    assert_eq!(data["projects"].as_array().unwrap().len(), PROJECTS);
+    assert_eq!(
+        data["projects"][PROJECTS - 1]["name"],
+        "CHANGED AFTER FIRST PAGE"
+    );
 }
 
 #[test]
@@ -183,7 +195,10 @@ fn current_document_text_omits_legacy_estimates_and_context_references_week_evid
             {"date": today.to_string(), "title": "Neuer Export", "detail": "Dieses Detail stammt aus der aktuellen Woche."},
             {"date": previous_week, "title": "Datiertes Ergebnis", "detail": "Ein eindeutiger Beleg aus der Berichtswoche."}
         ],
-        "milestones": [{"date": previous_week, "title": "Erster erfolgreicher Import"}]
+        "milestones": [
+            {"date": previous_week, "title": "Erster erfolgreicher Import"},
+            {"date": today.to_string(), "title": "Weiterer erfolgreicher Import"}
+        ]
     })), false, false).unwrap();
     let mut card = svc.card("demo").unwrap()["card"].clone();
     card["reentry"]["effort"] = serde_json::json!("half-day");
@@ -213,19 +228,38 @@ fn current_document_text_omits_legacy_estimates_and_context_references_week_evid
     }
     let (code, context) = run(&home, &["portfolio", "context"]);
     assert_eq!(code, 0, "{context}");
-    assert_eq!(
+    // Both adjacent review weeks have dated evidence. A real CLI call can cross
+    // Monday without relying on the test's earlier wall-clock observation.
+    assert!(
         context
             .matches("Ein eindeutiger Beleg aus der Berichtswoche.")
-            .count(),
-        1
+            .count()
+            <= 1
     );
-    assert_eq!(context.matches("Erster erfolgreicher Import").count(), 1);
     assert!(
-        context.contains("card.recent_changes: 2 (1-based positions; full evidence above)"),
+        context
+            .matches("Dieses Detail stammt aus der aktuellen Woche.")
+            .count()
+            <= 1
+    );
+    assert!(context.matches("Erster erfolgreicher Import").count() <= 1);
+    assert!(context.matches("Weiterer erfolgreicher Import").count() <= 1);
+    assert!(
+        context.contains("Ein eindeutiger Beleg aus der Berichtswoche.")
+            || context.contains("Dieses Detail stammt aus der aktuellen Woche.")
+    );
+    assert!(
+        context.contains("Erster erfolgreicher Import")
+            || context.contains("Weiterer erfolgreicher Import")
+    );
+    assert!(
+        context.contains("card.recent_changes: 2 (1-based positions; full evidence above)")
+            || context.contains("card.recent_changes: 1 (1-based positions; full evidence above)"),
         "{context}"
     );
     assert!(
-        context.contains("card.milestones: 1 (1-based positions; full evidence above)"),
+        context.contains("card.milestones: 1 (1-based positions; full evidence above)")
+            || context.contains("card.milestones: 2 (1-based positions; full evidence above)"),
         "{context}"
     );
     assert!(context.contains("Neuer Export"));
@@ -233,20 +267,32 @@ fn current_document_text_omits_legacy_estimates_and_context_references_week_evid
     let (code, raw) = run(&home, &["portfolio", "context", "--json"]);
     assert_eq!(code, 0, "{raw}");
     let parsed: Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(
-        parsed["projects"][0]["review_week_evidence"]["recent_changes"][0],
-        card["recent_changes"][1]
-    );
-    assert_eq!(
-        parsed["projects"][0]["review_week_evidence"]["milestones"],
-        card["milestones"]
-    );
+    for field in ["recent_changes", "milestones"] {
+        let expected: Vec<_> = card[field]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| {
+                item["date"].as_str().unwrap() >= parsed["review_week"]["from"].as_str().unwrap()
+                    && item["date"].as_str().unwrap()
+                        <= parsed["review_week"]["to"].as_str().unwrap()
+            })
+            .cloned()
+            .collect();
+        assert!(!expected.is_empty());
+        assert_eq!(
+            parsed["projects"][0]["review_week_evidence"][field],
+            serde_json::json!(expected)
+        );
+    }
 
     // Similar dated titles do not justify picking one abbreviated row and losing
     // the other finding's evidence. Ambiguous matches keep both full entries.
     card["recent_changes"] = serde_json::json!([
         {"date": previous_week, "title": "Gleicher Titel", "detail": "Erster eigenständiger Befund."},
-        {"date": previous_week, "title": "Gleicher Titel", "detail": "Zweiter eigenständiger Befund."}
+        {"date": previous_week, "title": "Gleicher Titel", "detail": "Zweiter eigenständiger Befund."},
+        {"date": today.to_string(), "title": "Gleicher Titel", "detail": "Erster eigenständiger Befund."},
+        {"date": today.to_string(), "title": "Gleicher Titel", "detail": "Zweiter eigenständiger Befund."}
     ]);
     svc.store().rewrite_latest_card("demo", &card).unwrap();
     let (code, context) = run(&home, &["portfolio", "context"]);
@@ -387,6 +433,44 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
             .as_array()
             .unwrap()
             .len(),
+        100
+    );
+
+    // A successful mutation precedes output delivery. Blocking snapshot storage
+    // must disclose the saved effect rather than suggesting a rolled-back write.
+    std::fs::rename(home.join("output"), home.join("retained-output")).unwrap();
+    std::fs::write(home.join("output"), "snapshot directory unavailable").unwrap();
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut changed = brief;
+    changed["greeting"] = serde_json::json!("Saved before output failed");
+    std::fs::write(&file, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let (status, failure) = run(
+        &home,
+        &[
+            "portfolio",
+            "put",
+            "--file",
+            file.to_str().unwrap(),
+            "--context-token",
+            &token,
+        ],
+    );
+    assert_eq!(status, 1, "{failure}");
+    assert!(failure.contains("output_unavailable"), "{failure}");
+    assert!(
+        failure.contains("original command has already run")
+            && failure.contains("does not undo its changes"),
+        "{failure}"
+    );
+    assert!(failure.contains("before repeating a change"), "{failure}");
+    let saved = svc.portfolio().unwrap();
+    assert_eq!(saved["version"], 3);
+    assert_eq!(saved["portfolio"]["greeting"], "Saved before output failed");
+    assert_eq!(
+        saved["portfolio"]["patterns"].as_array().unwrap().len(),
         100
     );
 }

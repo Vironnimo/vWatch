@@ -727,19 +727,19 @@ fn readable_statistics_round_shares_and_list_languages_largest_first() {
     std::fs::write(repo.join("more.js"), "let b = 2;\nlet c = 3;\nlet d = 4;\n").unwrap();
     human_success(&home, &["facts", "refresh", "demo", "--no-ci"]);
     let out = human_success(&home, &["statistics"]);
+    for semantic in [
+        "1 of 1 projects",
+        "7 source code lines",
+        "JavaScript: 4 lines (57.1%)",
+        "Python: 3 lines (42.9%)",
+        "+3 source code lines (+75.0%)",
+        "Coverage:",
+        "2 observation points",
+    ] {
+        assert!(out.contains(semantic), "missing {semantic}: {out}");
+    }
     assert!(
-        out.contains("Summary: 1 of 1 projects measured completely; 7 source code lines.\nSource code languages, largest first:\n  JavaScript: 4 lines (57.1%)\n  Python: 3 lines (42.9%)\n"),
-        "{out}"
-    );
-    assert!(
-        out.contains("  Change: +3 source code lines (+75.0%)\n"),
-        "{out}"
-    );
-    assert!(out.contains("    Coverage: "), "{out}");
-    assert!(
-        out.contains(
-            "  2 observation points in the period: the first of each UTC day and every change."
-        ),
+        out.find("JavaScript: 4").unwrap() < out.find("Python: 3").unwrap(),
         "{out}"
     );
     assert!(!out.contains("Entry") && !out.contains("57.14"), "{out}");

@@ -80,19 +80,19 @@ Sources: `skill/watchtower/references/card-guide.md`, `skill/watchtower/referenc
 
 ## CLI help, outcomes and recovery
 
-Sources: `src/cli.rs`, `src/cli_output.rs`, `src/cli_jobs.rs` and `src/cli_paging.rs`. Contract evidence: `docs/agent-interface.md` -> Output and error contracts; Privacy and metadata; Error and recovery test inventory. Process and framing checks live in `tests/process.rs`, `tests/output_contract.rs` and `tests/recovery_contract.rs`.
+Sources: `src/cli.rs` (console delivery), `src/cli/parser.rs` (help), `src/cli/dispatch.rs` (input errors), `src/cli_output.rs` and its private renderer files, `src/cli_jobs.rs` and `src/cli_paging.rs`. Contract evidence: `docs/agent-interface.md` -> Output and error contracts; Privacy and metadata; Error and recovery test inventory. Process and framing checks live in `tests/process.rs`, `tests/output_contract.rs` and `tests/recovery_contract.rs`.
 
 | Text | Reason |
 |---|---|
-| `cli.rs` help: `Use --json when a program parses the output.` | Preserve text for people/agents and complete structured output for programs. |
-| `cli.rs` help: `Exit codes: 0 success, 1 failed or incomplete, 2 invalid call.` | A nonzero result distinguishes invalid invocation from failed or unfinished work without hiding partial effects. |
-| `cli.rs` input error: `Nothing was saved.` | Input rejection occurs before the document operation; distinguish it from an output failure after saving. |
+| `cli/parser.rs` help: `Use --json when a program parses the output.` | Preserve text for people/agents and complete structured output for programs. |
+| `cli/parser.rs` help: `Exit codes: 0 success, 1 failed or incomplete, 2 invalid call.` | A nonzero result distinguishes invalid invocation from failed or unfinished work without hiding partial effects. |
+| `cli/dispatch.rs` input error: `Nothing was saved.` | Input rejection occurs before the document operation; distinguish it from an output failure after saving. |
 | `cli.rs`: `--file - needs piped input; terminal input is not read.` | A file-input request must not hang waiting for interactive terminal input. |
-| `cli_output.rs`: `Use the exact field names below in the document.` | Readable labels are not aliases for JSON payload keys. |
-| `cli_output.rs`: `Required fields are marked.` | Schema output identifies what a first valid document needs without guessing from examples. |
-| `cli_output.rs`: `Note: this run does not confirm a complete daily update.` | Partial/failing run state must not be presented as completed work. |
-| `cli_output.rs`: `Warning acknowledgement saved; measured facts remain visible.` | A deliberate warning decision does not remove the underlying measurement. |
-| `cli_output.rs`: `Changes since the explicitly acknowledged snapshot.` | Define the digest against explicit reading, not an ordinary visit or refresh. |
+| `cli_output/documents.rs`: `Use the exact field names below in the document.` | Readable labels are not aliases for JSON payload keys. |
+| `cli_output/documents.rs`: `Required fields are marked.` | Schema output identifies what a first valid document needs without guessing from examples. |
+| `cli_output/operations.rs`: `Note: this run does not confirm a complete daily update.` | Partial/failing run state must not be presented as completed work. |
+| `cli_output/operations.rs`: `Warning acknowledgement saved; measured facts remain visible.` | A deliberate warning decision does not remove the underlying measurement. |
+| `cli_output/operations.rs`: `Changes since the explicitly acknowledged snapshot.` | Define the digest against explicit reading, not an ordinary visit or refresh. |
 | `cli_output.rs` label: `Saved note` | Distinguish stored owner content from protocol-generated notices. |
 | `cli_jobs.rs`: `This call did not start project work.` | Preparation failures can say no work began; this cannot be reused for uncertain worker failures. |
 | `cli_jobs.rs`: `Its outcome is unknown; changes may have happened.` | Lost or unreadable worker state does not establish rollback. |
