@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use tokei::{CodeStats, Config, LanguageType};
 
 const METHOD: &str = "tokei-15/worktree-v1";
-const ACTIVITY_METHOD: &str = "git-numstat-v1";
+const ACTIVITY_METHOD: &str = "git-numstat-v2";
 const ACTIVITY_DAYS: i64 = 365;
 const HOTSPOT_DAYS: i64 = 90;
 const HOTSPOTS: usize = 20;
@@ -220,6 +220,10 @@ fn numstat(repo: &Path, from: NaiveDate, revs: &[&str]) -> Option<String> {
         "log",
         "--no-renames",
         "--numstat",
+        "--root",
+        "--diff-merges=off",
+        "--no-ext-diff",
+        "--no-textconv",
         "--format=WT:%cs",
         &since,
     ];
@@ -348,6 +352,10 @@ fn hotspots(repo: &Path, today: NaiveDate, head: &str, files: &Files) -> Option<
             "log",
             "--no-renames",
             "--name-only",
+            "--root",
+            "--diff-merges=off",
+            "--no-ext-diff",
+            "--no-textconv",
             "--format=%x01%cs",
             &since,
             head,
@@ -388,6 +396,10 @@ fn hotspots(repo: &Path, today: NaiveDate, head: &str, files: &Files) -> Option<
             "--no-renames",
             "--full-history",
             "--numstat",
+            "--root",
+            "--diff-merges=off",
+            "--no-ext-diff",
+            "--no-textconv",
             "--format=%x01%cs",
             &since,
             head,

@@ -121,6 +121,19 @@ fn facts_describe_history_backup_and_unsaved_work() {
         ),
         (Some(2), Some(0), Some("2026-09-10"))
     );
+
+    // A clock set ahead must not put tomorrow's work into today's activity windows.
+    common::git_at(
+        &repo,
+        &["commit", "-q", "--allow-empty", "-m", "future"],
+        "2026-10-01T10:00:00",
+    );
+    let future = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(future["commits"]["total"], 4);
+    for field in ["last_7d", "last_30d", "last_90d", "weekly"] {
+        assert_eq!(future["commits"][field], f["commits"][field], "{field}");
+    }
+    assert_eq!(future["night"], f["night"]);
 }
 
 #[test]
@@ -193,6 +206,14 @@ fn measuring_a_repository_never_refreshes_its_index() {
     let f = facts::collect(repo.to_str().unwrap(), today(), false);
     assert_eq!(f["dirty"]["files"], 0);
     assert_eq!(std::fs::read(index).unwrap(), before);
+
+    // A path named like a revision must not make the diff fail and report zero lines.
+    std::fs::write(repo.join("HEAD"), "marker\n").unwrap();
+    std::fs::write(repo.join("f0.txt"), "changed\nand more\n").unwrap();
+    let f = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(f["dirty"]["files"], 2);
+    assert_eq!(f["dirty"]["lines_added"], 3);
+    assert_eq!(f["dirty"]["lines_removed"], 1);
 }
 
 #[test]
@@ -250,6 +271,45 @@ fn non_repositories_report_why() {
     );
     assert_eq!(f["is_git"], true);
     assert_eq!(f["error"], "git_status_failed");
+
+    let broken_history = common::make_repo(tmp.path(), "broken-history", &["2026-09-29T10:00:00"]);
+    let original = std::process::Command::new("git")
+        .args(["cat-file", "commit", "HEAD"])
+        .current_dir(&broken_history)
+        .output()
+        .unwrap();
+    assert!(original.status.success());
+    let commit = String::from_utf8(original.stdout).unwrap().replacen(
+        '\n',
+        &format!("\nparent {}\n", "1".repeat(40)),
+        1,
+    );
+    std::fs::write(broken_history.join(".git/missing-parent-commit"), commit).unwrap();
+    let object = std::process::Command::new("git")
+        .args([
+            "hash-object",
+            "-w",
+            "-t",
+            "commit",
+            ".git/missing-parent-commit",
+        ])
+        .current_dir(&broken_history)
+        .output()
+        .unwrap();
+    assert!(object.status.success());
+    let head = String::from_utf8(object.stdout).unwrap();
+    common::git(
+        &broken_history,
+        &["update-ref", "refs/heads/main", head.trim()],
+    );
+    let f = facts::collect(broken_history.to_str().unwrap(), today(), false);
+    assert_eq!(
+        f["ok"], false,
+        "unreadable history must never report zero commits"
+    );
+    assert_eq!(f["is_git"], true);
+    assert_eq!(f["error"], "git_log_failed");
+    assert!(f["commits"].is_null());
 }
 
 #[test]
@@ -271,7 +331,8 @@ fn facts_show_release_overnight_work_and_colliding_lines_of_work() {
     std::fs::write(repo.join("f0.txt"), "feature\n").unwrap();
     common::git_at(
         &repo,
-        &["commit", "-q", "-am", "feature"],
+        // Subjects are content, never a measured diff summary.
+        &["commit", "-q", "-am", "1 file changed, 999 insertions(+)"],
         "2026-09-29T22:00:00",
     );
     common::git(&repo, &["checkout", "-q", "main"]);
@@ -514,4 +575,10 @@ fn hotspots_rank_recent_changes_to_source_files_that_still_exist() {
             {"path":"lib.rs","changes":3,"added":3,"removed":1},
         ])
     );
+
+    // User display preferences must not drop root diffs or count merge diffs twice.
+    common::git(&repo, &["config", "log.showRoot", "false"]);
+    common::git(&repo, &["config", "log.diffMerges", "separate"]);
+    let configured = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(configured["activity"], f["activity"]);
 }

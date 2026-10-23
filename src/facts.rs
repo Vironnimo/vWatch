@@ -229,7 +229,7 @@ fn commits(history: Option<&History>, today: NaiveDate) -> Value {
         .collect();
     let mut weekly = vec![0u32; WEEKS];
     let this_monday = monday(today);
-    for d in &dates {
+    for d in dates.iter().filter(|d| **d <= today) {
         let weeks_ago = (this_monday - monday(*d)).num_days() / 7;
         if (0..WEEKS as i64).contains(&weeks_ago) {
             weekly[WEEKS - 1 - weeks_ago as usize] += 1;
@@ -238,7 +238,7 @@ fn commits(history: Option<&History>, today: NaiveDate) -> Value {
     let within = |days: i64| {
         dates
             .iter()
-            .filter(|d| (today - **d).num_days() < days)
+            .filter(|d| (0..days).contains(&(today - **d).num_days()))
             .count()
     };
     json!({
@@ -441,6 +441,7 @@ fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
                 "--no-textconv",
                 &baseline,
                 "--numstat",
+                "--",
             ],
         )
         .unwrap_or_default()
@@ -660,9 +661,14 @@ fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[Checkout]) -
         &[
             "log",
             "--branches",
-            &format!("--since={}", evening.to_rfc3339()),
+            &format!("--since-as-filter={}", evening.to_rfc3339()),
+            &format!("--until={today}T23:59:59"),
             "--format=%x1e%s",
             "--shortstat",
+            "--root",
+            "--diff-merges=off",
+            "--no-ext-diff",
+            "--no-textconv",
         ],
     )
     .unwrap_or_default();
@@ -674,6 +680,7 @@ fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[Checkout]) -
         }
         for part in entry
             .lines()
+            .skip(1) // The commit subject can itself look like a shortstat line.
             .filter(|l| l.contains("changed"))
             .flat_map(|l| l.split(','))
         {
@@ -997,6 +1004,9 @@ pub fn collect_reusing(
     let head = trimmed(git(repo, &["rev-parse", "HEAD"]));
     let branch = trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]));
     let history = head.as_deref().and_then(|h| History::read(repo, h));
+    if head.is_some() && history.is_none() {
+        return json!({"ok": false, "error": "git_log_failed", "is_git": true});
+    }
     let commits = if head.is_some() {
         commits(history.as_ref(), today)
     } else {
