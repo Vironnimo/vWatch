@@ -122,7 +122,7 @@ fn documents_need_no_effort_estimates_and_drop_legacy_estimates() {
 }
 
 #[test]
-fn integer_validation_preserves_values_without_overflow() {
+fn idea_assessments_preserve_identity_without_overflow_or_duplicates() {
     let brief = |idea: Value| {
         json!({
             "greeting": "Moin",
@@ -144,6 +144,47 @@ fn integer_validation_preserves_values_without_overflow() {
         assert!(
             errors.iter().any(|e| e.starts_with("idea_checks[0].idea:")),
             "{invalid}: {errors:?}"
+        );
+    }
+
+    let mut duplicate = brief(json!(42));
+    duplicate["idea_checks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"idea":42.0,"verdict":"build","why":"Jetzt umsetzen"}));
+    let errors = validate(Kind::Portfolio, &duplicate, &[])
+        .expect_err("one idea cannot carry conflicting assessments");
+    assert!(
+        errors.iter().any(|e| e.starts_with("idea_checks[1].idea:")),
+        "{errors:?}"
+    );
+    duplicate["idea_checks"][1]["idea"] = json!(43);
+    assert!(validate(Kind::Portfolio, &duplicate, &[]).is_ok());
+}
+
+#[test]
+fn weekly_reviews_require_an_existing_iso_calendar_week() {
+    let brief = |week: &str| json!({"greeting":"Moin","week_review":{"week":week}});
+    for week in ["2020-W53", "2021-W01", "2025-W52", "2026-W53"] {
+        let (clean, _) = validate(Kind::Portfolio, &brief(week), &[]).unwrap();
+        assert_eq!(clean["week_review"]["week"], week);
+    }
+    for week in [
+        "2025-W53",
+        "2026-W00",
+        "2026-W54",
+        "2026-W1",
+        "2026-w01",
+        "2026-01",
+        "2026-10-23",
+        "é026-W1",
+        "later",
+    ] {
+        let errors = validate(Kind::Portfolio, &brief(week), &[])
+            .expect_err("an invalid review week would remain due and hidden from the owner");
+        assert!(
+            errors.iter().any(|e| e.starts_with("week_review.week:")),
+            "{week}: {errors:?}"
         );
     }
 }

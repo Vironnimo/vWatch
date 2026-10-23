@@ -28,6 +28,7 @@ enum Ty {
         words: Option<usize>,
     },
     Date,
+    Week,
     Enum(&'static [&'static str]),
     Int {
         min: i64,
@@ -318,7 +319,7 @@ const IDEA_CHECK: &[Field] = &[
 ];
 /// What the past calendar week brought, written by the first brief of a week.
 const WEEK_REVIEW: &[Field] = &[
-    f("week", words(1), Required),
+    f("week", Ty::Week, Required),
     f("done", Ty::List(&words(10), Some(6)), Empty),
     f("stalled", Ty::List(&words(10), Some(6)), Empty),
     f("time_note", SENTENCE, Text("")),
@@ -510,6 +511,21 @@ pub fn validate(
             ));
         }
     }
+    let mut assessed = HashSet::new();
+    for (index, item) in clean["idea_checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        if let Some(idea) = item["idea"].as_i64() {
+            if !assessed.insert(idea) {
+                ctx.problems.push(format!(
+                    "idea_checks[{index}].idea: Duplicate assessment for idea {idea}. Send one assessment per idea."
+                ));
+            }
+        }
+    }
     let mut seen = HashSet::new();
     for (list, _, _) in kind.items() {
         for (index, item) in clean[*list].as_array().into_iter().flatten().enumerate() {
@@ -633,6 +649,10 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
             Some(s) if s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() => Some(json!(s)),
             _ => fail(ctx, path, "Use a valid date as YYYY-MM-DD".into()),
         },
+        Ty::Week => match value.as_str() {
+            Some(s) if valid_iso_week(s) => Some(json!(s)),
+            _ => fail(ctx, path, "Use a valid ISO calendar week as YYYY-Www from review_week.week in portfolio context".into()),
+        },
         Ty::Id => match value.as_str() {
             Some(s) if valid_item_id(s) => Some(json!(s)),
             _ => fail(ctx, path, "Use an id of 3-64 characters: lowercase letters, digits, ':', '_' or '-'; start with a letter or digit".into()),
@@ -688,6 +708,20 @@ fn valid_item_id(s: &str) -> bool {
         && b.iter().all(|c| {
             c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b':' | b'_' | b'-')
         })
+}
+
+fn valid_iso_week(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 8
+        || &b[4..6] != b"-W"
+        || !b[..4].iter().all(u8::is_ascii_digit)
+        || !b[6..].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let year = s[..4].parse::<i32>().expect("four ASCII digits");
+    let week = s[6..].parse::<u32>().expect("two ASCII digits");
+    chrono::NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon).is_some()
 }
 
 fn new_id(prefix: &str) -> String {
@@ -747,6 +781,9 @@ pub fn json_schema(kind: Kind) -> Value {
     if kind == Kind::Card {
         schema["properties"][list]["description"] =
             json!("At most 4 ideas and 4 recommendations; either category can be empty.");
+    } else {
+        schema["properties"]["idea_checks"]["description"] =
+            json!("At most one assessment per idea ID.");
     }
     schema
 }
@@ -782,6 +819,9 @@ fn ty_schema(ty: &Ty) -> Value {
         }
         Ty::Date => {
             json!({"type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"})
+        }
+        Ty::Week => {
+            json!({"type": "string", "pattern": "^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$", "description": "A valid ISO calendar week as YYYY-Www."})
         }
         Ty::Id => json!({"type": "string", "pattern": "^[a-z0-9][a-z0-9:_-]{2,63}$"}),
         Ty::Enum(options) => json!({"type": "string", "enum": options}),
