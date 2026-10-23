@@ -174,7 +174,9 @@ def isolated_environment(base: dict[str, str], folder: Path) -> dict[str, str]:
         "LOCALAPPDATA": str(home / "AppData" / "Local"),
         "TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp),
         "GIT_CONFIG_GLOBAL": str(config), "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CEILING_DIRECTORIES": str(temp), "GIT_TERMINAL_PROMPT": "0",
+        # Git ignores a ceiling equal to its starting directory. Use the case
+        # parent so commands started directly in TEMP or HOME stay contained.
+        "GIT_CEILING_DIRECTORIES": str(folder), "GIT_TERMINAL_PROMPT": "0",
         "WATCHTOWER_HOME": str(folder / "watchtower"), "WATCHTOWER_TEST_INSTANCE": "1",
     })
     return env
@@ -346,7 +348,7 @@ def main() -> int:
             for path in sorted((ROOT / "tests").glob("ui*.cjs")):
                 if path.name == "ui-helpers.cjs":
                     continue
-                command = ["node", "--test", "--test-reporter=tap", "--test-concurrency=1", f"--test-timeout={TEST_TIMEOUT * 1000}"]
+                command = ["node", "--experimental-vm-modules", "--test", "--test-reporter=tap", "--test-concurrency=1", f"--test-timeout={TEST_TIMEOUT * 1000}"]
                 if not args.stress:
                     command.append("--test-skip-pattern=^stress: ")
                 if args.filter:

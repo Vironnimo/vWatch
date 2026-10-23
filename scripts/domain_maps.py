@@ -10,15 +10,13 @@ checks live in ``.vorch/workflows/domain-map-workflow.md``.
 
 ``python scripts/domain_maps.py`` prints the corpus report a domain-map audit
 starts from: root map sizes against the budget, routing defects and punctuation
-findings. The commit check calls ``staged_findings`` for the staged map files.
+findings. ``commit_check.map_findings`` checks the exported staged snapshot.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -114,76 +112,8 @@ def broken_references(root: Path, path: str, text: str) -> list[Finding]:
     ]
 
 
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-
-
-def _committed_size(root: Path, path: str) -> int:
-    """Return the characters of *path* at HEAD; 0 when HEAD does not hold it."""
-    shown = _git(root, "show", f"HEAD:{path}")
-    return len(shown.stdout) if shown.returncode == 0 else 0
-
-
 def _read(root: Path, path: str) -> str:
     return (root / path).read_text(encoding="utf-8")
-
-
-def staged_findings(root: Path, staged: Iterable[str]) -> list[Finding]:
-    """Check the staged map files as they are in the working tree.
-
-    Non-ASCII prose and References entries that name no file block. A root map
-    or ``INDEX_FILE`` above its budget that the change makes larger is reported
-    without blocking.
-    """
-    findings: list[Finding] = []
-    for path in staged:
-        if not is_checked(path):
-            continue
-        text = _read(root, path)
-        lines = prose_non_ascii(text) if is_map(path) else []
-        if lines:
-            shown = ", ".join(str(number) for number in lines[:10])
-            more = f" and {len(lines) - 10} more" if len(lines) > 10 else ""
-            findings.append(
-                Finding(
-                    path,
-                    f"non-ASCII characters outside code spans on lines {shown}{more}; use "
-                    "ASCII punctuation, or put a literal product string in a code span",
-                    True,
-                )
-            )
-        if is_map(path):
-            findings.extend(broken_references(root, path, text))
-        budget = budget_for(path)
-        if budget is not None and len(text) > budget:
-            before = _committed_size(root, path)
-            if len(text) > before:
-                if path == INDEX_FILE:
-                    remedy = "move facts whose use is confined to one domain into that domain's map"
-                elif path == GLOSSARY_FILE:
-                    remedy = (
-                        "move mechanics into the owning maps and terms only one domain uses "
-                        "into that map's Terms"
-                    )
-                else:
-                    remedy = "move task-gated material of this domain into a supplementary file"
-                findings.append(
-                    Finding(
-                        path,
-                        f"grows from {before} to {len(text)} characters, above its budget of "
-                        f"{budget}; {remedy} so the file does not grow "
-                        "(domain-map-workflow.md -> Size budget)",
-                        False,
-                    )
-                )
-    return findings
 
 
 @dataclass(frozen=True)

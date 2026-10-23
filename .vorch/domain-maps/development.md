@@ -30,7 +30,7 @@ Codex-managed worktrees use the app's attachment/archive lifecycle. Do not add a
 
 There is no remote or CI. `scripts/push.py --no-push` verifies an immutable commit in a private checkout; it never fetches or publishes. `scripts/check.py all` checks the working tree. The local verification workflow describes failure handling and exact checked revisions.
 
-`scripts/install.ps1` builds both release binaries, preserves installed data/preferences and refuses to interrupt an active console. It closes the GUI for replacement, exports the Skill and updates the Start menu. Runtime OS integration belongs to desktop; release and live-test procedures are workflows.
+`scripts/install.ps1` resolves the shared primary target through `check.py target-dir`, passes it explicitly to Cargo and copies both release binaries from that same directory, including from worktrees or with inherited Cargo target settings. It preserves installed data/preferences and refuses to interrupt an active console. It closes the GUI for replacement, exports the Skill and updates the Start menu. Runtime OS integration belongs to desktop; release and live-test procedures are workflows.
 
 ## Constraints & Gotchas
 

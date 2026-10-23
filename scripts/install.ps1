@@ -9,12 +9,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $Target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Target)
+$buildTarget = & python (Join-Path $PSScriptRoot 'check.py') target-dir
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildTarget)) {
+    throw 'Could not resolve the primary Cargo target directory'
+}
+$release = Join-Path $buildTarget 'release'
 
 # Cargo discovers .cargo/config.toml from its working directory, not from
 # --manifest-path. Keep the checkout's scratch paths even when called elsewhere.
 Push-Location -LiteralPath $repo
 try {
-    cargo build --release --bins
+    cargo build --release --bins --target-dir $buildTarget
     if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 } finally {
     Pop-Location
@@ -39,8 +44,8 @@ foreach ($process in $running) {
 }
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
-Copy-Item -Force -LiteralPath (Join-Path $repo 'target\release\Watchtower.exe') -Destination $cliExe
-Copy-Item -Force -LiteralPath (Join-Path $repo 'target\release\Watchtower-UI.exe') -Destination $guiExe
+Copy-Item -Force -LiteralPath (Join-Path $release 'Watchtower.exe') -Destination $cliExe
+Copy-Item -Force -LiteralPath (Join-Path $release 'Watchtower-UI.exe') -Destination $guiExe
 # `status` writes the embedded Skill next to the exe, so agents get the new one right away.
 & $cliExe status | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Watchtower status failed after installation' }
