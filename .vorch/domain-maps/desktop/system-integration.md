@@ -8,6 +8,8 @@ Use this when changing `src/system.rs`, GUI startup or OS integration. Packaging
 
 `SKILL_FILES` embeds the operating Skill and its CLI, card and portfolio guides with `include_str!`. `export_skill` writes only content that differs. GUI startup and the console `status` command export the matching embedded version next to the executable. Changes to embedded wording belong to `agent-interface.md`; update source files rather than treating an exported copy as canonical.
 
+The system unit contract exports to an explicit scratch path through the same private writer: every embedded file must match exactly, unchanged files retain their modification time, stale content is repaired and unrelated installation notes are retained. Its data-folder override probe does not export beside the real executable or call Windows settings.
+
 The settings response supplies the exported Skill path and a vBot install command with `--scope own`. Preserve the actual scope when updating an installed operating Skill: an agent-private installation must not become global/shared without the owner's explicit request. An external vBot caller needs the intended agent's scope as documented in `README.md`.
 
 ## Window lifecycle

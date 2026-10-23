@@ -76,7 +76,7 @@ test('owner fields stay open across refresh without losing drafts, and the overv
 });
 
 test('status buttons change the project intent, while task cards with a status do not', async () => {
-  const a = await app(undefined, expose);
+  const a = await app(command => command === 'set_status' ? { undo_token: 'opaque verdict receipt / v3' } : {}, expose + 'Object.assign(ui, { adoptVerdict });');
   a.state.tasks = [{ id: 3, source_id: 's1', projects: ['sample'], title: 'Review exports', status: 'review' }];
   await a.ui.load(false);
   a.ui.openProject('sample');
@@ -85,6 +85,10 @@ test('status buttons change the project intent, while task cards with a status d
   a.dispatch('click', { target: { closest: selector => selector === '.seg [data-status]' ? { dataset: { status: 'parked' } } : null } });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(a.calls.filter(c => c.command === 'set_status').map(c => c.args.status), ['parked']);
+  await a.ui.adoptVerdict('sample', 'active');
+  a.node('#undo').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(a.calls.find(c => c.command === 'undo').args.token, 'opaque verdict receipt / v3');
 });
 
 test('search routes to the exact command, reply, task and owner idea instead of the top of a project', async () => {

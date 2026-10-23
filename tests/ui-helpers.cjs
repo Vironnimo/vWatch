@@ -1,9 +1,44 @@
-// Run with `node --test tests/ui.cjs`; no browser packages are required.
+// Run with `node --experimental-vm-modules --test tests/ui.cjs`; no browser packages are required.
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
 
-const source = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');
+// The production ES module graph runs unchanged in each fixture's fresh VM.
+// Private test accessors are appended only in memory, never exported by the app.
+async function loadModules(context) {
+  if (!vm.SourceTextModule) throw new Error('UI tests require node --experimental-vm-modules');
+  const folder = path.join(__dirname, '../ui'), modules = new Map();
+  for (const file of fs.readdirSync(folder).filter(file => file.endsWith('.js'))) {
+    let source = fs.readFileSync(path.join(folder, file), 'utf8');
+    const bindings = [];
+    for (const match of source.matchAll(/^(const|let|(?:async )?function) ([\w$]+)(.*)$/gm)) {
+      bindings.push([match[2], match[1] === 'let']);
+      if (match[1] === 'let') {
+        // These statements contain only scalar declarations and object/array
+        // literals. A comma followed by an identifier and '=' starts a binding.
+        for (const extra of match[3].matchAll(/, ([\w$]+) =/g)) bindings.push([extra[1], true]);
+      }
+    }
+    const accessors = bindings.map(([name, writable]) => `${JSON.stringify(name)}: { get: () => ${name}${writable ? `, set: value => { ${name} = value; }` : ''} }`).join(',\n');
+    source = source.replace('load(true).then(refreshWhenDue);', '');
+    source += `\nexport function __fixtureBindings() { return { ${accessors} }; }`;
+    modules.set(file, new vm.SourceTextModule(source, { context, identifier: pathToFileURL(path.join(folder, file)).href }));
+  }
+  const entry = modules.get('app.js');
+  await entry.link(specifier => {
+    const module = modules.get(specifier.replace(/^\.\//, ''));
+    if (!module) throw new Error(`Unexpected UI import: ${specifier}`);
+    return module;
+  });
+  await entry.evaluate();
+  const bindings = Object.assign({}, ...Array.from(modules.values(), module => module.namespace.__fixtureBindings()));
+  context.__fixtureScope = new Proxy({}, {
+    has: (_target, key) => Object.hasOwn(bindings, key),
+    get: (_target, key) => bindings[key]?.get(),
+    set: (_target, key, value) => { bindings[key].set(value); return true; },
+  });
+}
 const expose = `globalThis.ui = {
   load, startRound, closeRound, roundStep, setFeedback, saveNote, saveAnswer,
   highlight: (text, query) => { searchQ = query; return highlight(text); },
@@ -19,7 +54,7 @@ const expose = `globalThis.ui = {
 function fixture() {
   return {
     today: '2026-10-07', review_week: '2026-W40', prefs: { style: 'handover' },
-    feedback: {}, ideas: [], snooze_days: 7,
+    feedback: {}, ideas: [], idea_states: {}, snooze_days: 7,
     projects: [{
       id: 'sample', name: 'Sample', path: 'C:/sample', status: 'active',
       card: {
@@ -67,7 +102,8 @@ async function app(invoke = () => ({}), extraExpose = '') {
       } } },
     },
   });
-  vm.runInContext(source.replace('load(true).then(refreshWhenDue);', expose + extraExpose), context);
+  await loadModules(context);
+  vm.runInContext(`with (__fixtureScope) { ${expose + extraExpose} }`, context, { filename: 'ui-test-accessors' });
   await context.ui.load(false);
   return { ui: context.ui, state, node, calls, copied, document, dispatch: (type, event) => {
     for (const handler of events.get(type) || []) handler(event);

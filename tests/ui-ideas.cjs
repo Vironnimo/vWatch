@@ -2,8 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea, changeIdeaStatus });`;
+const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea, changeIdeaStatus, saveOwnerIdea, ideaEdit: (id, value) => ownerIdeaDrafts.set(id, value), ideaEditState: id => ownerIdeaDrafts.get(id) });`;
 const ids = entries => Array.from(entries, entry => entry.s.id);
+// Explicit service read models, not a copy of its Task selection algorithm.
+const projection = (state, id, status, task, revision = 'idea-r1') => {
+  state.idea_states[id] = { status, archived: false, revision, task };
+};
 
 test('direct progress and archive actions work without copying or rating, including the round', async () => {
   const a = await app((command, args, state) => {
@@ -11,7 +15,11 @@ test('direct progress and archive actions work without copying or rating, includ
     assert.equal(args.revision, state.idea_states.s1.revision);
     const progress = args.status === 'in_progress' ? 'assigned' : args.status === 'implemented' ? 'done' : 'cancelled';
     if (args.status === 'archived' || args.status === 'restore') state.idea_states.s1.archived = args.status === 'archived';
-    else state.tasks = [{ id: 1, revision: 1, status: progress, source_id: 's1', title: 'Suggestion', projects: ['sample'] }];
+    else {
+      state.tasks = [{ id: 1, revision: 1, status: progress, source_id: 's1', title: 'Suggestion', projects: ['sample'] }];
+      state.idea_states.s1.status = args.status === 'open' ? 'open' : args.status;
+      state.idea_states.s1.task = state.tasks[0];
+    }
     state.idea_states.s1.revision += 'x';
     return { changed: true, idea_status: state.idea_states.s1 };
   }, expose);
@@ -54,6 +62,7 @@ test('status conflicts retain the actual state and expose the refreshed result',
   }, expose);
   a.state.idea_states = { s1: { archived: false, revision: 'old' } };
   a.state.tasks = [{ id: 1, status: 'review', source_id: 's1', projects: ['sample'], title: 'Suggestion' }];
+  projection(a.state, 's1', 'in_progress', a.state.tasks[0], 'old');
   a.ui.setIdeaFilter('assigned');
   await a.ui.changeIdeaStatus('s1', 'implemented', 'old');
   assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'assigned');
@@ -74,17 +83,32 @@ test('an open snooze has exactly one editor inside its filter and stays pinned i
   assert.match(html, /class="idea-pending"/);
 });
 
-test('idea progress prefers the newest active task and rebuilds after a refreshed task list', async () => {
-  const a = await app(undefined, expose);
+test('idea progress displays the service-selected Task and keeps its revision with the idea snapshot', async () => {
+  const a = await app(undefined, expose + 'Object.assign(ui, { openTaskPreview, closeTaskPreview, selectedTask: () => taskPreview?.task });');
   a.state.tasks = [
-    { id: 3, status: 'done', source_id: 's1' },
-    { id: 1, status: 'review', source_id: 's1' },
-    { id: 2, status: 'blocked', source_id: 's1' },
+    { id: 3, status: 'done', source_id: 's1', title: 'Completed idea', projects: ['sample'] },
+    { id: 1, status: 'review', source_id: 's1', title: 'Reviewed idea', projects: ['sample'] },
+    { id: 2, status: 'blocked', source_id: 's1', title: 'Selected idea', projects: ['sample'] },
   ];
+  projection(a.state, 's1', 'in_progress', { ...a.state.tasks[2], revision: 9, result: 'Coherent selected report' }, 'whole-source-revision');
   await a.ui.load(false);
   a.ui.setIdeaFilter('assigned');
   assert.match(a.ui.renderIdeas(), /data-task-id="2"/);
+  assert.match(a.ui.renderIdeas(), /data-task-revision="9"/);
+  assert.match(a.ui.renderIdeas(), /Coherent selected report/);
+  assert.match(a.ui.renderIdeas(), /data-idea-revision="whole-source-revision"/);
+  // The separately displayed Task list can come from another projection; it
+  // must not overwrite the selected snapshot or its corresponding revision.
+  a.state.tasks.push({ id: 99, status: 'review', source_id: 's1', result: 'Unrelated newer list entry' });
+  await a.ui.load(false);
+  assert.match(a.ui.renderIdeas(), /data-task-id="2"/);
+  assert.doesNotMatch(a.ui.renderIdeas(), /Unrelated newer list entry/);
+  a.ui.openTaskPreview('s1');
+  assert.equal(a.ui.selectedTask().id, 2);
+  assert.equal(a.ui.selectedTask().revision, 9);
+  a.ui.closeTaskPreview();
   a.state.tasks = a.state.tasks.filter(t => t.id === 3);
+  projection(a.state, 's1', 'implemented', a.state.tasks[0]);
   await a.ui.load(false);
   assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'done');
 });
@@ -118,7 +142,7 @@ test('one idea collection orders all sources by first appearance and preserves r
 });
 
 test('ratings, dated returns and explicit task state have separate reachable filters', async () => {
-  const a = await app(undefined, expose);
+  const a = await app(undefined, expose + 'Object.assign(ui, { openTaskPreview, closeTaskPreview, selectedTask: () => taskPreview?.task });');
   a.state.prefs.style = 'ideas';
   a.state.projects[0].card.suggestions = ['fresh', 'good', 'later', 'returned', 'rejected', 'working', 'finished', 'cancelled'].map(id => ({ id, category: 'idea', title: `Title ${id}` }));
   a.state.feedback = {
@@ -131,12 +155,20 @@ test('ratings, dated returns and explicit task state have separate reachable fil
     { id: 2, source_id: 'finished', status: 'done', title: 'Title finished', projects: ['sample'], revision: 3 },
     { id: 3, source_id: 'cancelled', status: 'cancelled', title: 'Title cancelled', projects: ['sample'], revision: 2 },
   ];
+  projection(a.state, 'working', 'in_progress', a.state.tasks[0]);
+  projection(a.state, 'finished', 'implemented', a.state.tasks[1]);
+  projection(a.state, 'cancelled', 'open', a.state.tasks[2]);
   await a.ui.load(false);
   const buckets = Object.fromEntries(a.ui.ideaCollection().map(e => [e.s.id, a.ui.ideaBucket(e)]));
   assert.deepEqual(buckets, { fresh: 'new', good: 'up', later: 'later', returned: 'new', rejected: 'down', working: 'assigned', finished: 'done', cancelled: 'new' });
   let html = a.ui.renderIdeas();
   assert.match(html, /Title fresh/); assert.match(html, /Wieder da · aufgeschoben bis 07\.10\.2026/);
   assert.doesNotMatch(html, /Title later|Title finished|Title working|Title rejected/);
+  a.ui.openTaskPreview('cancelled');
+  assert.equal(a.ui.selectedTask().id, undefined, 'an ended assignment leaves a fresh handoff available');
+  assert.equal(a.ui.selectedTask().source_id, 'cancelled');
+  assert.equal(a.ui.selectedTask().title, 'Title cancelled');
+  a.ui.closeTaskPreview();
   for (const filter of ['up', 'later', 'assigned', 'done', 'down', 'all']) assert.match(html, new RegExp(`data-idea-filter="${filter}"`));
   a.ui.setIdeaFilter('assigned'); html = a.ui.renderIdeas();
   assert.match(html, /Title working/); assert.match(html, /Ergebnis bestätigen/);
@@ -145,6 +177,15 @@ test('ratings, dated returns and explicit task state have separate reachable fil
   assert.match(html, /Erledigt bestätigt/); assert.match(html, /Wieder öffnen/);
   assert.doesNotMatch(html, /data-task-assign="finished"/);
   a.ui.setIdeaFilter('down'); assert.match(a.ui.renderIdeas(), /Title rejected/);
+  a.state.ideas = [{ id: 8, text: 'Own idea after cancellation', added_at: '2026-10-06' }];
+  const cancelled = { id: 8, source_id: 'idea:8', status: 'cancelled', title: 'Earlier own assignment', projects: [] };
+  a.state.tasks.push(cancelled);
+  projection(a.state, 'idea:8', 'open', cancelled);
+  await a.ui.load(false); a.ui.setIdeaFilter('new');
+  a.ui.openTaskPreview('idea:8');
+  assert.equal(a.ui.selectedTask().id, undefined);
+  assert.equal(a.ui.selectedTask().title, 'Own idea after cancellation');
+  a.ui.closeTaskPreview();
 });
 
 test('an assigned idea survives source removal without collecting unrelated tasks', async () => {
@@ -156,6 +197,7 @@ test('an assigned idea survives source removal without collecting unrelated task
     { id: 4, source_id: 'focus', status: 'assigned', title: 'Focus task', projects: ['sample'], source_snapshot: { kind: 'focus', title: 'Focus task' } },
     { id: 5, source_id: 'other', status: 'assigned', title: 'Arbitrary task', projects: ['sample'] },
   ];
+  projection(a.state, 'old', 'in_progress', a.state.tasks[0]);
   await a.ui.load(false);
   assert.deepEqual(ids(a.ui.ideaCollection()), ['old']);
   a.ui.setIdeaFilter('assigned');
@@ -176,6 +218,8 @@ test('opened idea evidence and task results stay open across refresh and can clo
     { id: 11, source_id: 's1', status: 'review', title: 'Suggestion', projects: ['sample'], revision: 2, result: 'Original result' },
     { id: 12, source_id: 'idea:8', status: 'review', title: 'Own assigned idea', projects: [], revision: 2, result: 'Own result' },
   ];
+  projection(a.state, 's1', 'in_progress', a.state.tasks[0]);
+  projection(a.state, 'idea:8', 'in_progress', a.state.tasks[1]);
   await a.ui.load(false);
   a.ui.setIdeaFilter('assigned');
   for (const fold of ['idea-task:s1:11', 'idea-task:idea:8:12', 'idea-evidence:s1']) {
@@ -391,6 +435,7 @@ test('reclassification keeps the rating, original date, assignment and open note
   a.state.projects[0].suggestion_first_seen = { s1: '2026-09-01' };
   a.state.feedback.s1 = { value: 'up' };
   a.state.tasks = [{ id: 4, source_id: 's1', title: 'Suggestion', projects: ['sample'], status: 'assigned', revision: 1 }];
+  projection(a.state, 's1', 'in_progress', a.state.tasks[0]);
   await a.ui.load(false);
   a.ui.setIdeaFilter('assigned');
   a.ui.note('s1');
@@ -404,4 +449,29 @@ test('reclassification keeps the rating, original date, assignment and open note
   assert.match(a.ui.renderIdeas(), /data-task-copy="s1"|Auftrag ansehen/);
   assert.match(a.ui.renderIdeas(), /data-v="up" aria-pressed="true"/);
   assert.equal(a.calls.filter(c => c.command === 'set_feedback' || c.command === 'create_task').length, 0);
+});
+
+test('unrated retained agent proposals stay visible and own idea edits retain drafts on failure', async () => {
+  let fail = true;
+  const a = await app(async (command) => {
+    if (command === 'update_idea') {
+      if (fail) throw { message: 'Newer revision exists' };
+      return { undo_token: 'opaque idea receipt / v2' };
+    }
+    return {};
+  }, expose);
+  a.state.proposals = [{ id: 'retained', scope: 'sample', kind: 'suggestion', first_seen: '2026-10-01', in_report: false, item: { id: 'retained', title: 'Still available' } }];
+  await a.ui.load(false);
+  assert.ok(a.ui.ideaCollection().some(e => e.s.id === 'retained' && e.retained));
+  a.ui.ideaEdit(4, { text: 'Überarbeitete Idee', revision: 3 });
+  await a.ui.saveOwnerIdea(4);
+  const write = a.calls.find(c => c.command === 'update_idea');
+  assert.equal(write.args.revision, 3); assert.equal(write.args.text, 'Überarbeitete Idee');
+  assert.equal(a.ui.ideaEditState(4).text, 'Überarbeitete Idee');
+  fail = false;
+  await a.ui.saveOwnerIdea(4);
+  assert.equal(a.ui.ideaEditState(4), undefined);
+  a.node('#undo').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(a.calls.find(c => c.command === 'undo').args.token, 'opaque idea receipt / v2');
 });

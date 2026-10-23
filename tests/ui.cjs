@@ -1,4 +1,4 @@
-// Run with node --test tests/ui*.cjs.
+// Run with node --experimental-vm-modules --test tests/ui*.cjs.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { app, fixture, deferred } = require('./ui-helpers.cjs');
@@ -14,6 +14,45 @@ const recoveryExpose = `Object.assign(ui, {
     };
   },
 });`;
+
+test('state and refresh responses keep the newest accepted snapshot with its version and drafts', async () => {
+  for (const [firstCommand, secondCommand] of [['state', 'state'], ['refresh', 'state'], ['state', 'refresh']]) {
+    const older = deferred(), newer = deferred();
+    const a = await app(undefined, `Object.assign(ui, {
+      refreshFacts,
+      version: () => lastVersion,
+      routeReads: handler => {
+        const original = window.__TAURI__.core.invoke;
+        window.__TAURI__.core.invoke = (command, args) => ['state', 'refresh'].includes(command) ? handler(command) : original(command, args);
+      },
+    });`);
+    a.state.prefs.style = 'board';
+    await a.ui.load(false); a.ui.openProject('sample');
+    a.ui.draft('q1', 'Unsent answer'); a.ui.answer('q1'); a.ui.render();
+    const input = a.node('#answer-draft');
+    input.id = 'answer-draft'; input.tagName = 'INPUT'; input.selectionStart = 3; input.selectionEnd = 7;
+    input.focus();
+    const oldState = structuredClone(a.state), newState = structuredClone(a.state);
+    oldState.projects[0].name = 'Older snapshot'; oldState.data_version = '5.1';
+    newState.projects[0].name = 'Newer accepted state'; newState.data_version = '5.2';
+    let requests = 0;
+    a.ui.routeReads(command => {
+      assert.equal(command, requests++ === 0 ? firstCommand : secondCommand);
+      return requests === 1 ? older.promise : newer.promise;
+    });
+    const first = firstCommand === 'state' ? a.ui.load(false) : a.ui.refreshFacts();
+    const second = secondCommand === 'state' ? a.ui.load(false) : a.ui.refreshFacts();
+    newer.resolve(newState); await second;
+    older.resolve(oldState); await first;
+    assert.match(a.node('#view').innerHTML, /Newer accepted state/);
+    assert.doesNotMatch(a.node('#view').innerHTML, /Older snapshot/);
+    assert.equal(a.ui.version(), '5.2');
+    assert.match(a.node('#project-page').innerHTML, /Unsent answer/);
+    assert.equal(a.document.activeElement, input);
+    assert.equal(input.selectionStart, 3); assert.equal(input.selectionEnd, 7);
+    assert.equal(a.calls.filter(c => c.command === 'mark_changes_read').length, 0);
+  }
+});
 
 test('a failed live state read preserves the page and retries the same database version after a delay', async () => {
   const a = await app(command => command === 'data_version' ? 'v2' : {}, recoveryExpose);
@@ -540,11 +579,11 @@ test('later waits for an explicit future calendar date and preserves its note', 
 
 test('snoozes expire on the stored local date and undo uses the stored receipt', async () => {
   const old = { value: 'later', note: 'Next week', at: '2026-10-01T23:00:00Z', snoozed_until: '2026-10-07' };
-  const token = '0123456789abcdef0123456789abcdef';
+  const token = 'opaque undo token / 42';
   const a = await app((command, args, state) => {
     if (command === 'set_feedback') {
       state.feedback.s1 = { value: args.value, note: args.note, snoozed_until: args.until };
-      return { undo: `watchtower undo ${token}` };
+      return { undo_token: token, undo: 'legacy CLI presentation is not parsed' };
     }
     if (command === 'undo') { state.feedback.s1 = old; return { restored: true }; }
     return {};
@@ -565,7 +604,7 @@ test('snoozes expire on the stored local date and undo uses the stored receipt',
 
 test('feedback undo keeps and shows a newer owner change when the receipt conflicts', async () => {
   const a = await app((command, args, state) => {
-    if (command === 'set_feedback') return { undo: 'watchtower undo 0123456789abcdef0123456789abcdef' };
+    if (command === 'set_feedback') return { undo_token: 'opaque newer-change token' };
     if (command === 'undo') throw { code: 'undo_conflict', message: 'A newer reply is saved. Nothing was changed.' };
     return {};
   });

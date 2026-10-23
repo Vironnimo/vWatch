@@ -133,7 +133,7 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 
 ## Copied task instructions
 
-Source: `ui/app.js` -> `taskPrompt`. The desktop domain owns rendering/copying; this register owns the cross-surface rationale. Contract evidence: `docs/agent-interface.md` -> Output and error contracts and Runtime text and its reasons; behavior is covered by `tests/ui.cjs` and `tests/ui-handoff.cjs`.
+Source: `ui/handoff.js` -> `taskPrompt`. The desktop domain owns rendering/copying; this register owns the cross-surface rationale. Contract evidence: `docs/agent-interface.md` -> Output and error contracts and Runtime text and its reasons; behavior is covered by `tests/ui.cjs` and `tests/ui-handoff.cjs`.
 
 | Text | Reason |
 |---|---|

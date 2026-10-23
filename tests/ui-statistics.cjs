@@ -1,9 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app, deferred } = require('./ui-helpers.cjs');
-const expose = `Object.assign(ui, { renderStatistics, metricCurve, languageBars, projectStatistics, fetchStatistics, invalidateStatistics, resetStatistics, historyDetail, saveOwnerIdea, ideaCollection, keepStatisticsDraft,
+const expose = `Object.assign(ui, { renderStatistics, metricCurve, languageBars, projectStatistics, fetchStatistics, invalidateStatistics, resetStatistics, historyDetail, keepStatisticsDraft,
   stats: data => { statsData = data; }, openFold: id => openFolds.add(id), history: (data, versions) => { statsTab = 'history'; statsHistory = data; statsVersions = versions; },
-  detail: data => { statsDetail = data; }, ideaEdit: (id, value) => ownerIdeaDrafts.set(id, value), ideaEditState: id => ownerIdeaDrafts.get(id) });`;
+  detail: data => { statsDetail = data; } });`;
 
 test('statistics show missing values honestly and break curves at incomplete or incompatible observations', async () => {
   const a = await app(undefined, expose);
@@ -34,18 +34,6 @@ test('saved history exposes older pages and escaped before/after comparisons wit
   assert.match(html, /stats-version-from/); assert.match(html, /Vorher/); assert.match(html, /Nachher/);
   assert.match(html, /&lt;img/); assert.doesNotMatch(html, /<script>|<img src=x>/);
   assert.equal(a.calls.filter(c => c.command === 'mark_changes_read').length, 0);
-});
-
-test('unrated retained agent proposals stay visible and own idea edits retain drafts on failure', async () => {
-  const a = await app(async (command) => { if (command === 'update_idea') throw { message: 'Newer revision exists' }; return {}; }, expose);
-  a.state.proposals = [{ id: 'retained', scope: 'sample', kind: 'suggestion', first_seen: '2026-10-01', in_report: false, item: { id: 'retained', title: 'Still available' } }];
-  await a.ui.load(false);
-  assert.ok(a.ui.ideaCollection().some(e => e.s.id === 'retained' && e.retained));
-  a.ui.ideaEdit(4, { text: 'Überarbeitete Idee', revision: 3 });
-  await a.ui.saveOwnerIdea(4);
-  const write = a.calls.find(c => c.command === 'update_idea');
-  assert.equal(write.args.revision, 3); assert.equal(write.args.text, 'Überarbeitete Idee');
-  assert.equal(a.ui.ideaEditState(4).text, 'Überarbeitete Idee');
 });
 
 test('a stale statistics response cannot replace a newer selected query', async () => {

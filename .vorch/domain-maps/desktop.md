@@ -4,7 +4,7 @@ The desktop presents Watchtower's shared state to the owner and connects explici
 
 ## Overview
 
-- `ui/index.html`, `ui/app.js` and `ui/app.css` form the vanilla JavaScript page, with no frontend build step. `src/app.rs` is its Tauri adapter; `src/bin/watchtower-ui.rs` starts the GUI executable. Keep service rules in `src/service.rs`; see `application.md`.
+- `ui/index.html` loads `ui/app.js` as a native ES module, with no frontend build step. The entry point coordinates state reads, rendering and modal event precedence; private feature modules own Today (`overview.js`), projects/handbook, ideas, feedback/decision rounds, handoff, statistics, search and settings. `presentation.js` owns shared markup/date helpers and disclosure state; `app.css` owns styling. `src/app.rs` is the Tauri adapter and `src/bin/watchtower-ui.rs` the GUI executable. Keep service rules in the application domain.
 - `src/system.rs` owns executable-relative paths, the data-folder override, embedded Skill export, autostart and user PATH integration. Installer scripts belong to `development.md`; the operating Skill's content belongs to `agent-interface.md`.
 - The GUI executable has the Windows GUI subsystem and remains independent of the console lifecycle. Do not move CLI dispatch, streams or exit-status handling into the window; see `agent-interface.md`.
 - The page's four areas separate today's decisions, project re-entry, ideas and recommendations, and statistics/history. Changes should shorten the owner's read or make the next action clearer. UI text is German and addresses the owner as `du`.
@@ -21,7 +21,7 @@ Adding a document field requires its schema/default and guide in the owning doma
 
 ## Conventions
 
-`ui/app.js` keeps view state in its closure and renders HTML strings. Use `esc` for stored text in markup. Keep unsent drafts, selected targets and open disclosures independently of generated DOM: a background reload rebuilds the page. Event handlers generally delegate through document-level `data-*` targets; preserve their relationship to stable project and item IDs.
+Feature modules keep their transient state private and render HTML strings. Share named actions/read models through explicit imports; do not pass the whole page's state or functions as a feature context. The service snapshot `S` is replaced only by the entry point's acceptance logic. Use `esc` for stored text in markup. Keep unsent drafts, selected targets and open disclosures independently of generated DOM: a background reload rebuilds the page. Feature handlers delegate through document-level `data-*` targets; preserve modal precedence and their relationship to stable project and item IDs.
 
 The service owns project identity, ratings, task transitions, warning decisions and undo guards. A successful save followed by a failed refresh or clipboard write is still saved. Display that distinction and reload before retrying an uncertain mutation. Feature-specific interaction contracts are in `desktop/interactions.md`.
 
@@ -29,13 +29,13 @@ Display preferences are persisted owner choices. Legacy values may need a presen
 
 ## Constraints & Gotchas
 
-- `tests/ui-helpers.cjs` executes the page in a Node VM with a small mock DOM. `tests/ui.cjs` covers shared behavior; the focused `ui-handoff`, `ui-project`, `ui-overview`, `ui-ideas` and `ui-statistics` files cover their interactions. These tests do not verify WebView layout, actual focus behavior or Windows integration.
+- `tests/ui-helpers.cjs` executes the actual ES module graph through `vm.SourceTextModule` in a fresh Node VM and small mock DOM. The runner supplies `--experimental-vm-modules`; direct Node invocations need that flag too. Test-only private accessors are appended in memory, outside shipped assets. `tests/ui.cjs` covers shared behavior; the focused `ui-handoff`, `ui-project`, `ui-overview`, `ui-ideas` and `ui-statistics` files cover their interactions. These tests do not verify WebView layout, actual focus behavior or Windows integration.
 - Verify UI changes in the running window using a task-specific `WATCHTOWER_HOME` under the checkout's `.tmp/`; see `development.md` for scratch and build setup. Do not change the owner's style/hidden-section preferences or leave test ratings, replies or completed ticks. `watchtower feedback` must show no test entries afterwards.
 - Never toggle the owner's autostart or PATH choice for development verification. A scratch database does not isolate registry changes. The window requires WebView2; the optional Cargo `desktop` feature keeps Tauri dependencies out of the core/CLI build.
 
 ## Agent-facing text
 
-`taskPrompt` in `ui/app.js` produces copied instructions for coding agents. Its reasons and the shared runtime-text change rules live in `agent-interface/agent-facing-text.md`. Read them before changing, adding or removing a sentence; update the corresponding reason with the text. `src/system.rs` exports the embedded Skill but does not own its wording.
+`taskPrompt` in `ui/handoff.js` produces copied instructions for coding agents. Its reasons and the shared runtime-text change rules live in `agent-interface/agent-facing-text.md`. Read them before changing, adding or removing a sentence; update the corresponding reason with the text. `src/system.rs` exports the embedded Skill but does not own its wording.
 
 ## References
 
