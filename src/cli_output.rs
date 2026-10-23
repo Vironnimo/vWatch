@@ -1,7 +1,7 @@
 //! Plain output shared by people and agents. Stored content is always data.
 use serde_json::{json, Value};
 
-pub(super) fn human(command: &str, data: &Value) -> String {
+pub(super) fn human(command: &str, data: &Value, data_dir: &std::path::Path) -> String {
     let mut out = String::new();
     match command {
         "facts.history" => {
@@ -460,7 +460,11 @@ pub(super) fn human(command: &str, data: &Value) -> String {
                     .filter_map(|p| p["id"].as_str())
                     .collect();
                 if let Some(first) = summaries.first() {
-                    line(&mut out, 0, &format!("Note: {} projects unchanged since the previous brief are summaries (detail: summary). For the full card details of one, run `watchtower portfolio context --project {first}`; repeat --project for several.", summaries.len()));
+                    let details = crate::cli::scoped_command(
+                        data_dir,
+                        &format!("watchtower portfolio context --project {first}"),
+                    );
+                    line(&mut out, 0, &format!("Note: {} projects unchanged since the previous brief are summaries (detail: summary). For the full card details of one, run `{details}`; repeat --project for several.", summaries.len()));
                 }
                 tree_except(
                     &mut out,

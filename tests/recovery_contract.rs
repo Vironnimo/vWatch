@@ -95,6 +95,61 @@ fn invalid_recovery_explains_document_flags_and_names_the_requested_instance() {
     );
     assert!(!home.path().join("watchtower.db").exists());
     assert!(!fallback.path().join("watchtower.db").exists());
+
+    let locator = format!(
+        "p_{}",
+        home.path()
+            .to_str()
+            .unwrap()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    let attached = format!("--data-dir={}", home.path().display());
+    for selector in [
+        vec!["--data-dir", home.path().to_str().unwrap()],
+        vec!["--instance", locator.as_str()],
+        vec![attached.as_str()],
+    ] {
+        let mut args = vec!["--json", "projects", "list", "--unknown"];
+        args.extend(selector);
+        let (code, text) = call(fallback.path(), &args);
+        assert_eq!(code, 2, "{text}");
+        let body: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(body["instance"]["data_dir"], home.path().to_str().unwrap());
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
+            .env("WATCHTOWER_HOME", fallback.path())
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stderr.is_empty());
+        let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(body["instance"]["data_dir"], home.path().to_str().unwrap());
+    }
+    assert!(cli_usage::path(home.path()).exists());
+    assert!(!cli_usage::path(fallback.path()).exists());
+    assert!(!home.path().join("watchtower.db").exists());
+
+    // Instance-looking payload text stays data after the option terminator.
+    let (code, text) = call(
+        fallback.path(),
+        &[
+            "--json",
+            "ideas",
+            "add",
+            "--",
+            "--data-dir",
+            home.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 2, "{text}");
+    let body: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        body["instance"]["data_dir"],
+        fallback.path().to_str().unwrap()
+    );
 }
 
 #[test]

@@ -1240,7 +1240,7 @@ where
 // After a parse failure there is no Cli value to ask about the mode. Consult the
 // same argument definitions, skipping actual option values and positional-only
 // input after `--`. A missing value before `--json` still requests JSON errors.
-fn requested_json(args: &[OsString]) -> bool {
+fn value_options() -> HashMap<OsString, bool> {
     fn value_options(command: &clap::Command, options: &mut HashMap<OsString, bool>) {
         for arg in command.get_arguments() {
             if arg.get_action().takes_values() {
@@ -1262,6 +1262,11 @@ fn requested_json(args: &[OsString]) -> bool {
     command.build();
     let mut options = HashMap::new();
     value_options(&command, &mut options);
+    options
+}
+
+fn requested_json(args: &[OsString]) -> bool {
+    let options = value_options();
     let mut pending_value = None;
     let mut pending_format = false;
     for arg in args.iter().skip(1) {
@@ -1502,6 +1507,7 @@ fn command_index(command: &clap::Command) -> String {
             let marker = match path {
                 "due" => "refreshes facts unless --no-refresh",
                 "overview" => "reads data; --refresh/--visit change data",
+                "ideas status" => "reads data; supplied status changes data",
                 "context" | "facts show" => "reads data; measures missing facts",
                 "status" => "reads data; exports Skill",
                 _ if changes => "changes data",
@@ -1534,19 +1540,50 @@ fn parse_cli(args: &[OsString]) -> std::result::Result<Cli, clap::Error> {
 }
 
 fn requested_data_dir(args: &[OsString], fallback: &Path) -> PathBuf {
-    // Parse only recognized options for diagnostics after a failed call. This
-    // reads no database and cannot turn a malformed command into an execution.
-    Cli::command()
-        .ignore_errors(true)
-        .try_get_matches_from(args)
-        .ok()
-        .and_then(|matches| {
-            matches
-                .get_one::<PathBuf>("data_dir")
-                .or_else(|| matches.get_one::<PathBuf>("instance"))
-                .cloned()
-        })
-        .unwrap_or_else(|| fallback.to_owned())
+    // Clap stops at the first invalid argument, which can precede a global
+    // instance selector. Inspect selectors without executing the failed call,
+    // and respect values and `--` so payload text never selects an instance.
+    let options = value_options();
+    let mut pending_value = None;
+    let mut pending_selector = None;
+    let mut data_dir = None;
+    let mut instance = None;
+    for arg in args.iter().skip(1) {
+        let selector = pending_selector.take();
+        if let Some(allow_hyphens) = pending_value.take() {
+            if allow_hyphens || !arg.as_encoded_bytes().starts_with(b"-") || arg == "-" {
+                match selector {
+                    Some("--data-dir") => data_dir = Some(PathBuf::from(arg)),
+                    Some("--instance") => {
+                        instance = arg.to_str().and_then(|value| decode_instance(value).ok());
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+        }
+        if arg == "--" {
+            break;
+        }
+        if let Some(value) = arg
+            .to_str()
+            .and_then(|value| value.strip_prefix("--data-dir="))
+        {
+            data_dir = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|value| value.strip_prefix("--instance="))
+        {
+            instance = decode_instance(value).ok();
+        }
+        pending_selector = match arg.to_str() {
+            Some("--data-dir") => Some("--data-dir"),
+            Some("--instance") => Some("--instance"),
+            _ => None,
+        };
+        pending_value = options.get(arg).copied();
+    }
+    data_dir.or(instance).unwrap_or_else(|| fallback.to_owned())
 }
 
 fn usage_error(error: &clap::Error) -> WatchtowerError {
@@ -1818,7 +1855,7 @@ pub(crate) fn write_result(
         let text = if key == "output" {
             value["page"].as_str().unwrap_or("").to_owned()
         } else {
-            scoped_lines(&cli_output::human(key, &value), data_dir)
+            scoped_lines(&cli_output::human(key, &value, data_dir), data_dir)
         };
         let page = if key == "output" {
             Ok(text)

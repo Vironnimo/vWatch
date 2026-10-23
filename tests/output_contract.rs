@@ -728,4 +728,35 @@ fn open_questions_and_unchanged_projects_read_briefly() {
         "{detail}"
     );
     assert!(detail.contains("Programme lesen es direkt."), "{detail}");
+
+    // A printed detail command must keep the selected instance even in a fresh
+    // shell whose default is another database.
+    let other = temp.path().join("other-instance");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
+        .env("WATCHTOWER_HOME", &other)
+        .args(["--data-dir", home.to_str().unwrap(), "portfolio", "context"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let text = String::from_utf8(output.stdout).unwrap();
+    let details = text
+        .split('`')
+        .find(|part| {
+            part.starts_with("watchtower ") && part.contains("portfolio context --project")
+        })
+        .expect("printed full-card command");
+    assert!(details.contains("--instance p_"), "{details}");
+    let replay = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
+        .env("WATCHTOWER_HOME", &other)
+        .args(details.split_whitespace().skip(1))
+        .output()
+        .unwrap();
+    assert!(replay.status.success(), "{replay:?}");
+    assert!(replay.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&replay.stdout).contains("Programme lesen es direkt."));
+    assert!(
+        !other.exists(),
+        "the detail read must not open another instance"
+    );
 }
