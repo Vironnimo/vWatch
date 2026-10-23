@@ -4,7 +4,7 @@ Use this when changing a page flow, rendering state, asynchronous loading or tas
 
 ## Live state and rendering
 
-`load` in `ui/app.js` assigns monotonically increasing request numbers. Only a response newer than the accepted response replaces `S` and its version. A failed read keeps the last usable display, does not acknowledge the failed version, and schedules a retry; this also recovers an initial load failure. `refreshFacts` adopts a fresh state after measurement and invalidates statistics.
+State reads, explicit Task recovery and Facts refreshes in `ui/app.js` share monotonically increasing request numbers allocated before dispatch. Only a response from a later request than the accepted response replaces `S` and its version. A delayed refresh cannot relabel an older snapshot as newer on arrival. A failed background read keeps the last usable display, does not acknowledge the failed version, and schedules a retry; this also recovers an initial load failure. Accepted snapshots invalidate statistics' basis without discarding shown results or drafts.
 
 `watch` checks `data_version` every 2.5 seconds, avoiding overlapping loads and active text/select editing. Automatic fact refresh is separate: it runs while the page is visible, observes a 20-minute interval and skips measurement when all nonarchived projects have fresh facts. Focus can record a visit; the background version watcher calls `load(false)`. Neither is a read acknowledgement.
 
@@ -27,6 +27,10 @@ The read action uses the token of the displayed semantic snapshot. Newer changes
 Agent completion reports await the owner's confirmation. Reopening or confirming uses the displayed task revision, and task/source history remains available after a card rewrite. Warning acknowledgement leaves measured facts visible and expires when the service judges a material worsening. These are service rules rendered here, not transitions for the UI to invent.
 
 Ideas and recommendations have independent category filters and rating rounds. Positive ratings do not assign work. Deferred items return on their saved local calendar date; rejected/deferred items and open note editors remain distinct. Stable IDs, retained proposals and first appearance keep feedback and task history attached after source rewrites. See `tests/ui-ideas.cjs`.
+
+Idea progress and selected Task details come from `idea_states[id]`, including the full idea revision and enriched `task` from that same service snapshot. Do not reselect from the separate Task list or derive progress in the page. Local rating/snooze filters and pinned editors remain presentation decisions. The selected Task snapshot also drives the handoff preview, so its displayed revision cannot silently switch to a different list entry.
+
+Guarded Undo receipts carry an opaque `undo_token`; feedback, owner-idea edits and project verdict adoption send it unchanged to `undo`. The GUI does not parse the separate CLI `undo` command string. Archive/restore and removal/restore actions retain their distinct inverse commands.
 
 ## References
 

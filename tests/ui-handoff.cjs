@@ -5,6 +5,7 @@ const { app: loadApp, deferred } = require('./ui-helpers.cjs');
 const expose = `Object.assign(ui, { openTaskPreview, closeTaskPreview, renderTaskPreview, taskPreviewKey, checkTaskAssignment,
   registerTracked: task => trackedTask(task),
   registerTask: () => { const item = S.projects[0].card.suggestions[0]; taskBtn(item.id, { projects: ['sample'], title: item.title, why: item.why, evidence: item.evidence, done_when: item.done_when }); },
+  registerUnscoped: () => taskBtn('unscoped', { title: 'Projectless suggestion' }),
   setClipboard: fn => { navigator.clipboard.writeText = fn; } });`;
 async function app(invoke) {
   const a = await loadApp(invoke, expose);
@@ -172,6 +173,9 @@ test('existing assignments reopen with their saved task and keyboard focus stays
   a.ui.taskPreviewKey({ key: 'Escape', preventDefault() { prevented++; } });
   assert.equal(a.node('#task-root').innerHTML, '');
   assert.equal(prevented, 3);
+  a.state.tasks.push(savedTask({ source_id: 'unscoped', title: 'Existing projectless assignment' }));
+  await a.ui.load(false);
+  assert.match(a.ui.registerUnscoped(), /Auftrag ansehen/);
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 0);
 });
 
