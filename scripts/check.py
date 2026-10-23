@@ -145,8 +145,11 @@ def tests(root: Path, env: dict[str, str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("tools", "static", "test", "all"), nargs="?", default="all")
+    parser.add_argument("mode", choices=("tools", "static", "test", "all", "target-dir"), nargs="?", default="all")
     args = parser.parse_args(argv)
+    if args.mode == "target-dir":
+        print(primary_root(ROOT) / "target")
+        return 0
     problems = tool_problems(ROOT)
     if problems:
         print("\n".join(problems), file=sys.stderr)
