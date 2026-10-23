@@ -254,6 +254,12 @@ pub(super) fn render(command: &str, data: &Value, out: &mut String) {
                     "Stored facts from the latest measurement."
                 },
             );
+            let facts = &data["facts"];
+            if (facts["dirty"].is_object() && facts["dirty"]["line_counts"]["ok"] != true)
+                || (facts["space"].is_object() && facts["space"]["ok"] != true)
+            {
+                line(out, 0, "Note: Incomplete line or space measurements are unknown, not zero. Complete directory sizes remain usable even when the overall space measurement is incomplete.");
+            }
             tree(out, &data["facts"], 0);
         }
         "due" => due(out, data),

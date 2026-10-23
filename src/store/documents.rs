@@ -75,11 +75,12 @@ impl Store {
         self.with(|db| {
             db.prepare("SELECT at,ok,files,added,ahead,ci FROM (
                     SELECT created_at AS at,json_extract(basis,'$.readable') AS ok,
-                        json_extract(basis,'$.uncommitted[0]') AS files,json_extract(basis,'$.uncommitted[1]') AS added,
+                        json_extract(basis,'$.uncommitted[0]') AS files,NULL AS added,
                         json_extract(basis,'$.unpushed') AS ahead,ci,id AS seq,0 AS src
                     FROM cards WHERE project_id=?1 AND basis IS NOT NULL
                     UNION ALL
-                    SELECT at,json_extract(data,'$.ok'),json_extract(data,'$.dirty.files'),json_extract(data,'$.dirty.lines_added'),
+                    SELECT at,json_extract(data,'$.ok'),json_extract(data,'$.dirty.files'),
+                        CASE WHEN json_extract(data,'$.dirty.line_counts.ok')=1 THEN json_extract(data,'$.dirty.lines_added') END,
                         json_extract(data,'$.ahead'),json_extract(data,'$.ci.state'),id,1
                     FROM fact_samples WHERE project_id=?1)
                 ORDER BY at DESC,src DESC,seq DESC")?

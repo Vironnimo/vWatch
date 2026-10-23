@@ -313,7 +313,7 @@ class TestRunner(unittest.TestCase):
         api.WaitForSingleObject.restype = wintypes.DWORD
         api.CloseHandle.argtypes = [wintypes.HANDLE]
         api.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
-        for mode in ("timeout", "cancelled", "leak"):
+        for mode in ("timeout", "cancelled", "leak", "build_helper"):
             with self.subTest(mode=mode):
                 folder = self.base / mode
                 marker = folder / "child.pid"
@@ -326,7 +326,7 @@ class TestRunner(unittest.TestCase):
                     f"marker=Path({str(marker)!r}); "
                     "deadline=time.monotonic()+5; "
                     "exec('while not marker.exists() and time.monotonic()<deadline: time.sleep(0.01)'); "
-                    + ("sys.exit(0)" if mode == "leak" else "p.wait()")
+                    + ("sys.exit(0)" if mode in ("leak", "build_helper") else "p.wait()")
                 )
                 cancel = threading.Event()
                 ready = []
@@ -346,6 +346,7 @@ class TestRunner(unittest.TestCase):
                         [sys.executable, "-c", parent],
                         test_runner.isolated_environment(dict(os.environ), folder),
                         folder / "logs", 1 if mode == "timeout" else 8, cancel,
+                        check_descendants=mode != "build_helper",
                     )
                 finally:
                     cancel.set()
@@ -368,7 +369,8 @@ class TestRunner(unittest.TestCase):
                         api.CloseHandle(handle)
                 else:
                     self.assertEqual(ctypes.get_last_error(), 87, "could not inspect owned child")
-                self.assertEqual(result["status"], "failed" if mode == "leak" else mode, result)
+                expected = {"leak":"failed", "build_helper":"passed"}.get(mode, mode)
+                self.assertEqual(result["status"], expected, result)
                 self.assertIn("terminated", result["detail"])
                 if trigger:
                     self.assertEqual(ready, [True])

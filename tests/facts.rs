@@ -10,6 +10,48 @@ fn today() -> NaiveDate {
 }
 
 #[test]
+fn dirty_line_totals_require_every_text_measurement_to_complete() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(tmp.path(), "limits", &["2026-09-29T10:00:00"]);
+    std::fs::write(repo.join("f0.txt"), "changed\n").unwrap();
+    let untracked = repo.join("draft.txt");
+    std::fs::write(&untracked, vec![b'x'; 2_000_001]).unwrap();
+    let measured = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(measured["ok"], true);
+    assert_eq!(measured["dirty"]["files"], 2);
+    assert!(measured["dirty"]["lines_added"].is_null());
+    assert!(measured["dirty"]["lines_removed"].is_null());
+    assert_eq!(measured["dirty"]["line_counts"]["partial"], true);
+    assert_eq!(
+        measured["dirty"]["line_counts"]["errors"],
+        serde_json::json!(["untracked_size_limit"])
+    );
+
+    std::fs::write(&untracked, "one\ntwo\n").unwrap();
+    let measured = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(measured["dirty"]["line_counts"]["ok"], true);
+    assert_eq!(measured["dirty"]["lines_added"], 3);
+    assert_eq!(measured["dirty"]["lines_removed"], 1);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&untracked)
+            .unwrap();
+        let measured = facts::collect(repo.to_str().unwrap(), today(), false);
+        assert_eq!(measured["dirty"]["files"], 2);
+        assert!(measured["dirty"]["lines_added"].is_null());
+        assert_eq!(
+            measured["dirty"]["line_counts"]["errors"],
+            serde_json::json!(["untracked_read_failed"])
+        );
+    }
+}
+
+#[test]
 fn facts_describe_history_backup_and_unsaved_work() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = common::make_repo(

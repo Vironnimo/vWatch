@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn space_retries_incomplete_or_uncertified_results_but_reuses_a_complete_day() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, clock) = service(tmp.path());
+    let repo = demo_repo(tmp.path());
+    svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
+    std::fs::create_dir(repo.join("target")).unwrap();
+    std::fs::write(repo.join("target/rebuildable"), b"12345").unwrap();
+    for legacy in [true, false] {
+        let mut stored = svc.store().facts("demo").unwrap().unwrap();
+        stored.data["space"] = if legacy {
+            json!({"measured_on":svc.today().to_string(),"total_bytes":99999,"dirs":[]})
+        } else {
+            json!({"measured_on":svc.today().to_string(),"total_bytes":null,"ok":false,"partial":true,"errors":[{"path":"target","reason":"permission_denied"}],"dirs":[]})
+        };
+        svc.store()
+            .save_facts("demo", &svc.now(), &stored.fingerprint, &stored.data)
+            .unwrap();
+        svc.refresh_facts(None, false).unwrap();
+        assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 5);
+        assert_eq!(svc.facts("demo").unwrap()["space"]["ok"], true);
+    }
+    std::fs::write(repo.join("target/rebuildable"), b"1234567").unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 5);
+    clock.advance(Duration::days(1));
+    svc.refresh_facts(None, false).unwrap();
+    assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 7);
+}
+
+#[test]
 fn status_and_registration_rules() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

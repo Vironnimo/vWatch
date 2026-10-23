@@ -97,7 +97,7 @@ class WindowsJob:
             self.handle = None
 
 
-def run_process(command: list[str], env: dict[str, str], folder: Path, timeout: float, cancel: threading.Event | None = None) -> dict:
+def run_process(command: list[str], env: dict[str, str], folder: Path, timeout: float, cancel: threading.Event | None = None, *, check_descendants: bool = True) -> dict:
     """Capture output to disk so a blocked descendant cannot keep a pipe alive."""
     folder.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -132,7 +132,10 @@ def run_process(command: list[str], env: dict[str, str], folder: Path, timeout: 
                     while job and job.active() and time.monotonic() < settled_by:
                         time.sleep(0.01)
                     if job and job.active():
-                        status, detail = "failed", "Test left child processes running; the runner terminated them."
+                        if check_descendants:
+                            status, detail = "failed", "Test left child processes running; the runner terminated them."
+                        else:
+                            detail = "Build helper processes were terminated after the compiler exited."
                     break
                 except subprocess.TimeoutExpired:
                     if time.monotonic() >= deadline:
@@ -186,8 +189,9 @@ def output(folder: Path, name: str = "stdout.txt") -> str:
     return (folder / name).read_text(encoding="utf-8", errors="replace")
 
 
-def checked(command: list[str], env: dict[str, str], folder: Path, timeout: float = 30) -> str:
-    result = run_process(command, env, folder, timeout)
+def checked(command: list[str], env: dict[str, str], folder: Path, timeout: float = 30, *, check_descendants: bool = True) -> str:
+    result = run_process(command, env, folder, timeout, check_descendants=check_descendants)
+    (folder / "process.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     if result["status"] != "passed":
         raise RuntimeError(
             f"Command failed: {subprocess.list2cmdline(command)}\n"
@@ -202,7 +206,9 @@ def rust_cases(check, env: dict[str, str], folder: Path, scratch: Path, no_defau
     if no_default:
         arguments.append("--no-default-features")
     print("Building Rust test executables (locked dependencies)...", flush=True)
-    messages = checked(check.cargo(ROOT, *arguments), env, folder / "build", timeout=1200)
+    # MSVC can retain compiler helpers such as vctip.exe after a successful link. The build
+    # job still terminates all its descendants; only actual test/discovery leaks are failures.
+    messages = checked(check.cargo(ROOT, *arguments), env, folder / "build", timeout=1200, check_descendants=False)
     artifacts = {}
     for line in messages.splitlines():
         try:

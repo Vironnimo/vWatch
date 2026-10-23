@@ -76,7 +76,50 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
     let incomplete = svc.facts("demo").unwrap();
     assert_eq!(incomplete["code"]["partial"], true);
     assert_eq!(incomplete["code"]["unread_files"], 1);
+    assert!(incomplete["dirty"]["lines_added"].is_null());
+    assert!(svc.facts_history("demo").unwrap()["samples"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["facts"]["dirty"]["lines_added"]
+        .is_null());
     assert!(svc.statistics(Some("demo"), None, None).unwrap()["summary"]["source_code"].is_null());
+
+    // Uncertified older totals remain immutable in storage, but cannot appear as exact values
+    // through current facts, full history, period samples or current/baseline read models.
+    let mut legacy = common::measured_facts(4);
+    legacy["dirty"]
+        .as_object_mut()
+        .unwrap()
+        .remove("line_counts");
+    legacy["dirty"]["lines_added"] = json!(1234);
+    legacy["space"] = json!({"measured_on":svc.today().to_string(),"total_bytes":1234,"dirs":[{"path":"target","bytes":1234}]});
+    svc.store()
+        .save_facts("demo", &svc.now(), "legacy", &legacy)
+        .unwrap();
+    let facts = svc.facts("demo").unwrap();
+    assert!(facts["dirty"]["lines_added"].is_null());
+    assert!(facts["space"]["total_bytes"].is_null());
+    assert!(facts["space"]["dirs"][0]["bytes"].is_null());
+    let history = svc.facts_history("demo").unwrap();
+    let historical = &history["samples"].as_array().unwrap().last().unwrap()["facts"];
+    assert!(historical["dirty"]["lines_added"].is_null());
+    assert!(historical["space"]["total_bytes"].is_null());
+    let stats = svc.statistics(Some("demo"), None, None).unwrap();
+    let project = &stats["projects"][0];
+    assert!(project["current"]["dirty"]["lines_added"].is_null());
+    assert!(project["current"]["space"]["total_bytes"].is_null());
+    assert!(
+        project["samples"].as_array().unwrap().last().unwrap()["dirty"]["lines_added"].is_null()
+    );
+    let raw: String = db
+        .query_row(
+            "SELECT data FROM facts WHERE project_id='demo'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&raw).unwrap(), legacy);
 
     // Complete endpoints cannot bridge a failed or incompatible intermediate observation.
     for barrier in ["failed", "partial", "path", "branch", "method"] {

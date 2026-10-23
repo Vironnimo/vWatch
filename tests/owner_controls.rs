@@ -60,6 +60,13 @@ fn warning_acknowledgments_keep_facts_and_reappear_when_local_risk_changes() {
             dirty["untracked"] = json!(2);
             dirty
         }),
+        ("dirty", {
+            let mut dirty = initial["dirty"].clone();
+            dirty["lines_added"] = Value::Null;
+            dirty["lines_removed"] = Value::Null;
+            dirty["line_counts"] = json!({"ok":false,"partial":true,"errors":["diff_failed"]});
+            dirty
+        }),
     ] {
         save_facts(&svc, &initial);
         svc.set_warning_ack("demo", "no_remote", Some("Weiterhin lokal"))

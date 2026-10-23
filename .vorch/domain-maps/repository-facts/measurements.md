@@ -8,6 +8,8 @@ Use this when changing collection internals or expensive measurement reuse. Publ
 
 `dirty` and extra-checkout measurement in private `working_tree.rs` share the NUL-delimited porcelain decoder, including individual untracked files. Rename/copy records consume the following original-path token; status bytes and destination-path order are preserved. Dirty fingerprints still hash the original status output and bounded file content plus size/high-resolution mtime, so unchanged file/line counts alone do not mean unchanged work. Symlink fingerprints use the link target; source counts exclude symlinks.
 
+Dirty file counts describe successful status enumeration independently of text-line coverage. `dirty.line_counts.ok` certifies both nullable line totals; any failed/invalid tracked numstat output, unread or nonregular untracked file (including a symlink) or exhausted untracked size/file limit makes both totals unknown. Binary files are excluded from text lines. Reads remain bounded even when a file grows after its metadata check. The real-repository contract probes oversized text, an exclusively locked file on Windows and a Git diff failure.
+
 Linked-checkout collection excludes the checkout being measured rather than assuming the first worktree is always the current one. Other checkout heads and dirty fingerprints affect the report basis. Worktree measurement uses bounded parallelism because starting Git dominates its cost. See `tests/facts.rs` for linked-checkout and dirty-work coverage.
 
 CI examines the newest returned run per workflow, ignores Dependabot's dynamic update jobs and selects the worst remaining state. It reads a bounded run list, not an unlimited workflow history. Local-only or skipped measurements must not manufacture a green CI result.
@@ -33,6 +35,8 @@ The `measurement_reuse_*` tests in `tests/facts.rs` compare incremental results 
 ## Space
 
 `space` looks for known rebuildable directories at repository root and one level below; directory traversal does not follow symlinks/junctions. The service retains its dated result between daily measurements. This is an observation API only; any decision to clean or keep a directory happens outside Watchtower.
+
+Discovery, entry/type/metadata and nested enumeration errors propagate into an incomplete result. A directory's bytes and the overall total are exact only when their respective `ok` flag is true; failures produce null, not zero. Complete sibling directories retain their sizes. Only complete same-day results are reused; a partial or uncertified result is retried on refresh. `measurement_quality` adapts older persisted facts and historical read models without completeness evidence to unknown totals; stored history is not rewritten. Exact public payload meanings are in `docs/agent-interface.md` -> Output and error contracts.
 
 ## References
 

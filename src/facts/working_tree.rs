@@ -109,20 +109,21 @@ pub(super) fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     }
 
     let (mut added, mut removed) = (0u64, 0u64);
+    let mut errors = BTreeSet::new();
     // A clean status leaves no lines to count. An unborn branch has no HEAD, but its index still
     // contains staged additions.
-    let baseline = if paths.is_empty() {
-        String::new()
+    let baseline = if modified + deleted == 0 {
+        None
     } else if has_head {
-        "HEAD".to_owned()
+        Some("HEAD".to_owned())
     } else {
-        git(repo, &["hash-object", "-t", "tree", "--stdin"])
-            .unwrap_or_default()
-            .trim()
-            .to_owned()
+        git(repo, &["hash-object", "-t", "tree", "--stdin"]).map(|out| out.trim().to_owned())
     };
-    if !baseline.is_empty() {
-        for line in git(
+    if modified + deleted > 0 && baseline.as_ref().is_none_or(String::is_empty) {
+        errors.insert("diff_failed");
+    }
+    if let Some(baseline) = baseline.filter(|value| !value.is_empty()) {
+        let diff = git(
             repo,
             &[
                 "diff",
@@ -132,33 +133,65 @@ pub(super) fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
                 "--numstat",
                 "--",
             ],
-        )
-        .unwrap_or_default()
-        .lines()
-        {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if let (Some(Ok(a)), Some(Ok(r))) = (
-                parts.first().map(|p| p.parse::<u64>()),
-                parts.get(1).map(|p| p.parse::<u64>()),
-            ) {
-                added += a;
-                removed += r;
+        );
+        match diff {
+            None => {
+                errors.insert("diff_failed");
+            }
+            Some(diff) => {
+                for line in diff.lines() {
+                    let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                    match parts.as_slice() {
+                        ["-", "-", _] => {} // Git excludes binary changes from text line counts.
+                        [a, r, _] => match (a.parse::<u64>(), r.parse::<u64>()) {
+                            (Ok(a), Ok(r)) => {
+                                added += a;
+                                removed += r;
+                            }
+                            _ => {
+                                errors.insert("diff_invalid");
+                            }
+                        },
+                        _ => {
+                            errors.insert("diff_invalid");
+                        }
+                    }
+                }
             }
         }
     }
+    if untracked_paths.len() > MAX_UNTRACKED_FILES {
+        errors.insert("untracked_file_limit");
+    }
     for path in untracked_paths.iter().take(MAX_UNTRACKED_FILES) {
         let full = repo.join(path);
-        let Ok(meta) = std::fs::metadata(&full) else {
+        let Ok(meta) = std::fs::symlink_metadata(&full) else {
+            errors.insert("untracked_read_failed");
             continue;
         };
-        if meta.len() > MAX_UNTRACKED_BYTES {
+        if !meta.is_file() {
+            errors.insert("untracked_unsupported_type");
             continue;
         }
-        if let Ok(data) = std::fs::read(&full) {
-            if !data.contains(&0) {
+        if meta.len() > MAX_UNTRACKED_BYTES {
+            errors.insert("untracked_size_limit");
+            continue;
+        }
+        let mut data = Vec::new();
+        match std::fs::File::open(&full)
+            .and_then(|file| file.take(MAX_UNTRACKED_BYTES + 1).read_to_end(&mut data))
+        {
+            Err(_) => {
+                errors.insert("untracked_read_failed");
+            }
+            Ok(_) if data.len() as u64 > MAX_UNTRACKED_BYTES => {
+                errors.insert("untracked_size_limit");
+            }
+            Ok(_) if !data.contains(&0) => {
                 added += data.iter().filter(|b| **b == b'\n').count() as u64;
                 added += u64::from(!data.is_empty() && !data.ends_with(b"\n"));
             }
+            Ok(_) => {}
         }
     }
 
@@ -185,7 +218,8 @@ pub(super) fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     Some(Dirty {
         value: json!({
             "files": paths.len(), "modified": modified, "untracked": untracked, "deleted": deleted,
-            "lines_added": added, "lines_removed": removed,
+            "lines_added": errors.is_empty().then_some(added), "lines_removed": errors.is_empty().then_some(removed),
+            "line_counts": {"ok":errors.is_empty(), "partial":!errors.is_empty(), "errors":errors},
             "oldest_change": oldest.map(iso), "newest_change": newest.map(iso),
             "fingerprint": fingerprint,
         }),
@@ -470,6 +504,31 @@ pub(super) fn collisions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_tracked_diff_keeps_status_counts_but_cannot_claim_zero_lines() {
+        let repo = tempfile::tempdir().unwrap();
+        let setup = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        setup(&["init", "-q"]);
+        std::fs::write(repo.path().join("staged.txt"), "one\n").unwrap();
+        setup(&["add", "staged.txt"]);
+        // Model HEAD disappearing after the caller discovered it: status still succeeds,
+        // while the actual Git diff against HEAD fails. Collection's final guard is separate.
+        let measured = dirty(repo.path(), true).unwrap().value;
+        assert_eq!(measured["files"], 1);
+        assert_eq!(measured["modified"], 1);
+        assert!(measured["lines_added"].is_null());
+        assert!(measured["lines_removed"].is_null());
+        assert_eq!(measured["line_counts"]["errors"], json!(["diff_failed"]));
+    }
 
     #[test]
     fn porcelain_entries_preserve_status_order_and_rename_copy_destinations() {

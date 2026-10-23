@@ -39,6 +39,8 @@ Every Rust case, UI file and Rust discovery process receives its own fixture dir
 
 On Windows a waiting launcher is assigned to a kill-on-close Job Object before starting the test. Descendants, including detached CLI job workers, stay in that job. A timeout terminates the whole tree; a case that exits while descendants are still running fails and cleans them up. This catches process leaks, not every possible resource leak. Tests must still close database connections and remove their own runtime resources. On other platforms process groups provide teardown; the Windows-specific process contracts still require Windows.
 
+The Cargo build also owns a kill-on-close job, but successful compiler exit is distinct from a test's no-descendants contract: MSVC can leave `vctip.exe` helpers after linking. Build cleanup terminates its remaining helpers and records the outcome in `build/process.json`; it does not turn a successful compilation into a failed test. Discovery and every application test retain strict descendant checks.
+
 Ctrl+C cancels queued cases and signals active workers to terminate their process trees. The run exits with code 130, saves a failed report with explicit `cancelled` outcomes, and retains its fixtures. Cancellation never reports unfinished work as passed.
 
 Successful runs remove only their verified, uniquely created external fixture directory. Failed runs retain it for diagnosis and name it in `report.json`. Logs remain in `.tmp/` for both outcomes. Never remove an entire configured test root to clean up one run. The runner does not alter the owner's installed database, preferences, autostart, PATH or Git identity.

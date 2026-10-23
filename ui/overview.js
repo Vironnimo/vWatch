@@ -38,7 +38,9 @@ function safety(p) {
     const run = streak(p, 'uncommitted');
     const age = run ? run.days : d.oldest_change ? daysSince(d.oldest_change) : 0;
     const since = run && run.days > 0 ? `, ${streakText(run)}` : age > 0 ? `, seit ${days(age)}` : '';
-    out.unsaved = `${num(d.files)} Dateien, +${num(d.lines_added)}/−${num(d.lines_removed)}${since}`;
+    const lines = d.line_counts?.ok === true && Number.isFinite(d.lines_added) && Number.isFinite(d.lines_removed)
+      ? `+${num(d.lines_added)}/−${num(d.lines_removed)}` : 'Zeilenzahl unbekannt (nicht vollständig gemessen)';
+    out.unsaved = `${num(d.files)} Dateien, ${lines}${since}`;
     out.unsavedShort = `${num(d.files)} ${d.files === 1 ? 'Datei' : 'Dateien'} offen${age > 0 ? ` · ${age} T${run && run.trend === 'growing' ? ' ↑' : ''}` : ''}`;
   }
   const unpushed = streak(p, 'unpushed');
@@ -266,16 +268,17 @@ function blockNight() {
 
 // build output and installed packages that can be recreated; freeing them is safe, most of all in resting projects
 function blockSpace() {
-  const list = visible().filter(p => p.facts && p.facts.space && p.facts.space.total_bytes >= 1e8).sort((a, b) => b.facts.space.total_bytes - a.facts.space.total_bytes);
-  const total = list.reduce((a, p) => a + p.facts.space.total_bytes, 0);
-  if (total < 1e9) return '';
+  const list = visible().filter(p => p.facts?.space?.ok !== true || p.facts.space.total_bytes >= 1e8).sort((a, b) => (b.facts?.space?.total_bytes || 0) - (a.facts?.space?.total_bytes || 0));
+  const complete = list.every(p => p.facts?.space?.ok === true && Number.isFinite(p.facts.space.total_bytes));
+  const total = complete ? list.reduce((a, p) => a + p.facts.space.total_bytes, 0) : null;
+  if (complete && total < 1e9) return '';
   const rows = list.map(p => {
-    const sp = p.facts.space, phase = p.card && p.card.phase;
+    const sp = p.facts?.space || {}, phase = p.card && p.card.phase;
     const resting = phase === 'dormant' || phase === 'done' || p.status === 'parked' || p.status === 'done';
-    const dirs = sp.dirs.filter(d => d.bytes >= 1e6).slice(0, 4).map(d => `<button class="linkish mono" type="button" data-external="${esc(p.path + '\\' + d.path.replace(/\//g, '\\'))}" title="Im Explorer öffnen">${esc(d.path)}</button> ${bytes(d.bytes)}`).join(' · ');
-    return `<div class="row${resting ? ' resting' : ''}"><div class="t">${plink(p.id)}${resting ? ' <span class="tag good">ruht, gefahrlos frei</span>' : ''}</div><div class="mono">${bytes(sp.total_bytes)}</div><div class="d">${dirs}</div></div>`;
+    const dirs = (sp.dirs || []).filter(d => d.ok !== true || d.bytes >= 1e6).slice(0, 4).map(d => `<button class="linkish mono" type="button" data-external="${esc(p.path + '\\' + d.path.replace(/\//g, '\\'))}" title="Im Explorer öffnen">${esc(d.path)}</button> ${d.ok === true && Number.isFinite(d.bytes) ? bytes(d.bytes) : 'Größe unbekannt'}`).join(' · ');
+    return `<div class="row${resting ? ' resting' : ''}"><div class="t">${plink(p.id)}${resting ? ' <span class="tag good">ruht</span>' : ''}</div><div class="mono">${sp.ok === true && Number.isFinite(sp.total_bytes) ? bytes(sp.total_bytes) : 'Größe unbekannt'}</div><div class="d">${dirs}</div></div>`;
   }).join('');
-  return mod('space', 'Platz', `${bytes(total)} in Build- und Paketordnern, die sich neu erzeugen lassen. Einmal am Tag gemessen`, `<div class="list">${rows}</div>`);
+  return mod('space', 'Platz', complete ? `${bytes(total)} in Build- und Paketordnern, die sich neu erzeugen lassen. Einmal am Tag gemessen` : 'Gesamtgröße unbekannt: Nicht alle Ordner konnten vollständig gemessen werden.', `<div class="list">${rows}</div>`);
 }
 
 // patterns, synergies and verdicts: what shows only when all projects lie side by side

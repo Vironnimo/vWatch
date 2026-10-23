@@ -366,7 +366,7 @@ const SAMPLE_POINT: &str = "SELECT s.id,s.at,s.path,s.origin,
 fn sample_point(r: &Row) -> Result<Value> {
     Ok(
         json!({"id":r.get::<_,i64>(0)?,"at":r.get::<_,String>(1)?,"path":r.get::<_,Option<String>>(2)?,
-        "origin":r.get::<_,String>(3)?,"facts":super::json(r.get(4)?)}),
+        "origin":r.get::<_,String>(3)?,"facts":crate::facts::measurement_quality(super::json(r.get(4)?))}),
     )
 }
 
@@ -477,7 +477,7 @@ impl Store {
         self.with(|db| {
             db.query_row("SELECT s.id,s.at,s.path,s.origin,s.data,c.data FROM fact_samples s
                 LEFT JOIN fact_payloads c ON c.id=s.code_payload WHERE s.id=?1", [id], |r| {
-                let mut facts = super::json(r.get(4)?);
+                let mut facts = crate::facts::measurement_quality(super::json(r.get(4)?));
                 if let Some(code) = r.get::<_, Option<String>>(5)? {
                     facts["code"] = super::json(code);
                 }
@@ -493,7 +493,7 @@ impl Store {
     ) -> Result<Vec<Value>> {
         self.with(|db| db.prepare("SELECT s.id,project_id,at,fingerprint,path,identity_revision,origin,s.data,c.data,a.data FROM fact_samples s LEFT JOIN fact_payloads c ON c.id=s.code_payload LEFT JOIN fact_payloads a ON a.id=s.activity_payload WHERE (?1 IS NULL OR project_id=?1) AND (?2 IS NULL OR substr(at,1,10)>=?2) AND (?3 IS NULL OR substr(at,1,10)<=?3) ORDER BY at,s.id")?
             .query_map(params![project,since,until], |r| {
-                let mut facts=super::json(r.get(7)?);
+                let mut facts=crate::facts::measurement_quality(super::json(r.get(7)?));
                 if let Some(code)=r.get::<_,Option<String>>(8)? { facts["code"]=super::json(code); }
                 if let Some(activity)=r.get::<_,Option<String>>(9)? { facts["activity"]=super::json(activity); }
                 Ok(json!({"id":r.get::<_,i64>(0)?,"project":r.get::<_,String>(1)?,"at":r.get::<_,String>(2)?,"fingerprint":r.get::<_,String>(3)?,"path":r.get::<_,Option<String>>(4)?,"identity_revision":r.get::<_,Option<i64>>(5)?,"origin":r.get::<_,String>(6)?,"facts":facts}))

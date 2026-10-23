@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, searchEntries, pickResult, openSearch, renderSearchResults,
+const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, searchEntries, pickResult, openSearch, renderSearchResults, blockSpace,
   search: query => { searchQ = query; return searchResults(); },
   ownerEditing: id => projectEditors.has(id),
   allRatings: () => showRated,
@@ -18,6 +18,33 @@ const page = a => a.node('#project-page').innerHTML;
 // one part of the project page, from its heading to the next part
 const group = (html, key) => html.slice(html.indexOf(`id="project-group-${key}"`)).split('<section id="project-group-')[0];
 const click = (a, selector, dataset = {}) => a.dispatch('click', { target: { closest: value => value === selector ? { dataset } : null } });
+
+test('incomplete and unverified line and space totals stay unknown while complete directory sizes remain usable', async () => {
+  const a = await app(undefined, expose), p = a.state.projects[0];
+  for (const verified of [false, undefined]) {
+    p.facts = { is_git: true, dirty: { files: 3, lines_added: 0, lines_removed: 0, line_counts: { ok: verified } },
+      space: { ok: verified, total_bytes: 0, dirs: [{ path: 'target', bytes: 0, ok: false }, { path: 'app/node_modules', bytes: 3e9, ok: true }] } };
+    await a.ui.load(false);
+    const html = a.ui.projectPageHtml(p), space = a.ui.blockSpace();
+    assert.match(html, /3 Dateien, Zeilenzahl unbekannt/);
+    assert.doesNotMatch(html, /\+0\/−0/);
+    assert.match(html, /Größe unbekannt – nicht vollständig gemessen/);
+    assert.match(space, /Gesamtgröße unbekannt/);
+    assert.match(space, /app\/node_modules/);
+    assert.match(space, /3(?:[.,]0)? GB/);
+    assert.doesNotMatch(space, /0 MB/);
+  }
+  p.facts.dirty.line_counts.ok = true;
+  p.facts.space = { ok: true, total_bytes: 0, dirs: [] };
+  const html = a.ui.projectPageHtml(p);
+  assert.match(html, /\+0\/−0/);
+  assert.match(html, /0 MB neu erzeugbar/);
+  p.facts.space = { ok: true, total_bytes: 3e9, dirs: [] };
+  a.state.projects.push({ ...structuredClone(p), id: 'unmeasured', name: 'Not measured', facts: {} });
+  await a.ui.load(false);
+  assert.match(a.ui.blockSpace(), /Gesamtgröße unbekannt/);
+  assert.match(a.ui.blockSpace(), /Not measured/);
+});
 
 test('a project opens as a page beside the project list, with work, handbook and history on one page', async () => {
   const a = await app(undefined, expose), p = a.state.projects[0];
