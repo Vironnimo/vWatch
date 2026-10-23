@@ -207,7 +207,7 @@ fn tree_except(out: &mut String, value: &Value, excluded: &[&str], depth: usize)
                 // Service recipes can contain placeholders. The operating Skill owns
                 // recipes; they are not executable continuations of this output.
                 if excluded.contains(&key.as_str())
-                    || matches!(key.as_str(), "next" | "repair_task" | "undo")
+                    || matches!(key.as_str(), "next" | "repair_task" | "undo" | "undo_token")
                 {
                     continue;
                 }
