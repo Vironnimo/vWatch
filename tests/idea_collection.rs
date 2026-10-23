@@ -5,6 +5,187 @@ use common::{card_with, demo_repo, service};
 use serde_json::json;
 
 #[test]
+fn direct_idea_progress_and_archive_preserve_ratings_tasks_and_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    svc.put_card("demo",card_with(json!({"suggestions":[{"id":"sg-direct","type":"feature","title":"Suche merken","why":"Wiedereinstieg"}]})),false,false).unwrap();
+    let own = svc.add_idea("Eigene Suche").unwrap();
+    for id in ["sg-direct".to_string(), format!("idea:{}", own["id"])] {
+        svc.set_feedback(&id, Some("up"), Some("Gefällt mir"))
+            .unwrap();
+        let rating = svc.feedback(None).unwrap();
+        let initial = svc.idea_status(&id).unwrap();
+        let context = svc.context("demo").unwrap();
+        let set = |action: &str, rev: &str| svc.set_idea_status(&id, action, rev).unwrap();
+        let working = set(
+            "in_progress",
+            initial["idea_status"]["revision"].as_str().unwrap(),
+        );
+        assert_eq!(working["idea_status"]["status"], "in_progress");
+        let task = &working["idea_status"]["task"];
+        assert_eq!(task["history"][0]["actor"], "owner");
+        assert!(task["reported_at"].is_null());
+        if id == "sg-direct" {
+            assert_ne!(
+                context["context_token"],
+                svc.context("demo").unwrap()["context_token"]
+            );
+        }
+        let archived = set(
+            "archived",
+            working["idea_status"]["revision"].as_str().unwrap(),
+        );
+        assert_eq!(archived["idea_status"]["archived"], true);
+        assert_eq!(
+            archived["idea_status"]["task"], *task,
+            "Archive leaves the running assignment intact"
+        );
+        assert!(archived["undo"]
+            .as_str()
+            .unwrap()
+            .contains("restore --revision"));
+        assert_eq!(
+            svc.portfolio_context(&[]).unwrap()["idea_states"][&id]["archived"],
+            true
+        );
+        let restored = set(
+            "restore",
+            archived["idea_status"]["revision"].as_str().unwrap(),
+        );
+        let done = set(
+            "implemented",
+            restored["idea_status"]["revision"].as_str().unwrap(),
+        );
+        assert_eq!(done["idea_status"]["status"], "implemented");
+        assert_eq!(done["idea_status"]["task"]["id"], task["id"]);
+        assert_eq!(done["idea_status"]["task"]["status"], "done");
+        assert!(
+            done["idea_status"]["task"]["reported_at"].is_null(),
+            "No invented agent report"
+        );
+        assert_eq!(svc.feedback(None).unwrap(), rating);
+        let repeated = set(
+            "implemented",
+            done["idea_status"]["revision"].as_str().unwrap(),
+        );
+        assert_eq!(repeated["changed"], false);
+        let open = set("open", done["idea_status"]["revision"].as_str().unwrap());
+        assert_eq!(open["idea_status"]["status"], "open");
+        assert_eq!(open["idea_status"]["task"]["status"], "cancelled");
+        let again = set(
+            "in_progress",
+            open["idea_status"]["revision"].as_str().unwrap(),
+        );
+        assert_eq!(again["idea_status"]["task"]["id"], task["id"]);
+    }
+    svc.put_card("demo", json!({"suggestions":[]}), true, false)
+        .unwrap();
+    assert_eq!(
+        svc.idea_status("sg-direct").unwrap()["idea_status"]["status"],
+        "in_progress"
+    );
+    assert_eq!(
+        svc.tasks(None).unwrap()["tasks"].as_array().unwrap().len(),
+        2
+    );
+    assert!(svc
+        .history(None, Some("proposal"), Some("sg-direct"), None)
+        .unwrap()
+        .to_string()
+        .contains("archived"));
+    svc.put_portfolio(json!({"greeting":"Moin", "new_apps":[{"id":"app-direct","title":"Neue Suche","pitch":"Alle Fundstellen zusammen","because":"Fundstellen liegen in mehreren Projekten"}], "synergies":[{"id":"sy-direct","title":"Suche verbinden","why":"Gemeinsam finden","projects":["demo"]}]}),false,false).unwrap();
+    for id in ["app-direct", "sy-direct"] {
+        let current = svc.idea_status(id).unwrap();
+        let done = svc
+            .set_idea_status(
+                id,
+                "implemented",
+                current["idea_status"]["revision"].as_str().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(done["idea_status"]["status"], "implemented");
+        assert_eq!(done["idea_status"]["task"]["source_id"], id);
+        assert!(done["idea_status"]["task"]["reported_at"].is_null());
+    }
+}
+
+#[test]
+fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    let id = svc.add_idea("Export").unwrap()["item_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let initial = svc.idea_status(&id).unwrap();
+    let working = svc
+        .set_idea_status(
+            &id,
+            "in_progress",
+            initial["idea_status"]["revision"].as_str().unwrap(),
+        )
+        .unwrap();
+    let task = &working["idea_status"]["task"];
+    svc.report_task(
+        task["id"].as_i64().unwrap(),
+        "done",
+        "Export geprüft",
+        "Datei geöffnet",
+    )
+    .unwrap();
+    let stale = svc
+        .set_idea_status(
+            &id,
+            "implemented",
+            working["idea_status"]["revision"].as_str().unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(stale.code, "idea_changed");
+    let current = svc.idea_status(&id).unwrap();
+    assert_eq!(current["idea_status"]["task"]["status"], "review");
+    let done = svc
+        .set_idea_status(
+            &id,
+            "implemented",
+            current["idea_status"]["revision"].as_str().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(done["idea_status"]["task"]["result"], "Export geprüft");
+    let token = svc.portfolio_context(&[]).unwrap()["context_token"].clone();
+    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_archive BEFORE INSERT ON content_history WHEN NEW.after_data LIKE '%archived%' BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
+    assert!(svc
+        .set_idea_status(
+            &id,
+            "archived",
+            done["idea_status"]["revision"].as_str().unwrap()
+        )
+        .is_err());
+    assert_eq!(
+        svc.idea_status(&id).unwrap()["idea_status"]["archived"],
+        false
+    );
+    assert_eq!(token, svc.portfolio_context(&[]).unwrap()["context_token"]);
+    db.execute_batch("DROP TRIGGER fail_archive;").unwrap();
+    svc.set_idea_status(
+        &id,
+        "archived",
+        done["idea_status"]["revision"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_ne!(token, svc.portfolio_context(&[]).unwrap()["context_token"]);
+    assert_eq!(svc.idea_status("missing").unwrap_err().code, "unknown_idea");
+    drop(svc);
+    let reopened = watchtower::Watchtower::open(&tmp.path().join("watchtower.db")).unwrap();
+    assert_eq!(
+        reopened.idea_status(&id).unwrap()["idea_status"]["archived"],
+        true
+    );
+}
+
+#[test]
 fn saved_ideas_keep_their_source_and_first_appearance_after_reports_change() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, clock) = service(tmp.path());
@@ -31,7 +212,23 @@ fn saved_ideas_keep_their_source_and_first_appearance_after_reports_change() {
         }))
         .unwrap();
     assert_eq!(task["task"]["source_snapshot"]["kind"], "suggestion");
+    let source_revision = svc.idea_status("sg-saved").unwrap()["idea_status"]["revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     svc.remove_project("demo").unwrap();
+    let tasks = svc.tasks(None).unwrap();
+    assert_eq!(
+        svc.idea_status("sg-saved").unwrap_err().code,
+        "unknown_idea"
+    );
+    assert_eq!(
+        svc.set_idea_status("sg-saved", "in_progress", &source_revision)
+            .unwrap_err()
+            .code,
+        "unknown_idea"
+    );
+    assert_eq!(svc.tasks(None).unwrap(), tasks);
     let state = svc.state(false).unwrap();
     let rating = &state["feedback"]["sg-saved"];
     assert_eq!(rating["project_id"], "demo");

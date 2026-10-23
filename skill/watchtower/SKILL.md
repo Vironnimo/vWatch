@@ -61,6 +61,7 @@ Write card and brief content in German, address the user as "du", and support fi
 | "Fragen", "was wartet auf mich" | `questions`; `--project <project-id>` for one project |
 | "gut", "später", "Quatsch", "antworten", "abgehakt" | `feedback set`; values `up`, `later`, `down`, `answered`, `done` |
 | "Ideen", "Empfehlungen" | `proposals --category idea` / `proposals --category recommendation`; omit the filter for both; `ideas list/add/update/remove` manages the user's own ideas |
+| Idea "In Umsetzung", "Umgesetzt", "Archivieren", "Zurückholen" | `ideas status <item-id>` reads the status and revision; set `in_progress`, `implemented`, `archived` or `restore` with that revision; see `references/cli.md` under "Owner decisions" |
 | "Statistik" | `statistics --project <project-id>`; omit the project for the portfolio, use `--from` and `--until` for dates |
 | "Änderungsverlauf" | `history list`, `history show <event-id>`; `card compare` / `portfolio compare` compare saved versions; see `references/cli.md` |
 | "Auftrag", "zugewiesen", "Ergebnis prüfen" | `tasks list`, `tasks create`, `tasks report`, `tasks confirm` |
@@ -170,6 +171,7 @@ Context includes reactions and their original item text. Keep an item's `id` onl
 - `up`: keep the direction while useful; remove completed or disproved suggestions.
 - `answered` or question `done`: incorporate the answer where it belongs and remove the question. A focus item marked `done` stays finished unless evidence shows remaining work.
 - An assigned task is unfinished. `review` is an agent's reported result awaiting the user; only task `done` is confirmed. Do not propose assigning the same work again.
+- `idea_states` records implementation separately from ratings: `in_progress` is already underway, `implemented` is confirmed by the user, and `archived` hides the proposal without rejecting its direction. Do not propose the same work again in these states. Change them only at the user's request; report your own implementation through `tasks report`.
 - A recorded decision or warning acknowledgement is deliberate. Respect its reason; report material worsening without repeating the original unwanted proposal.
 - `parked`: describe calmly without pressing to revive. `done`: look for deterioration. Archived projects are excluded from daily runs. Measure progress and the next step against the user's goal and due date.
 - Reactions come only from the user. When evidence settles a question, remove the question; never record feedback, status or goals from your own findings.

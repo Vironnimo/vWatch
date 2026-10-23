@@ -52,6 +52,7 @@ The table covers every registered Tauri command in `src/app.rs`. "Covered" means
 | `set_goal` | `projects goal` | Covered |
 | `add_idea` | `ideas add` | Covered |
 | `update_idea` | `ideas update <id> <text> --revision <revision>` | Covered; guarded edit and undo preserve earlier text |
+| `set_idea_status` | `ideas status <item-id> <status> --revision <revision>` | Covered; direct implementation and reversible archive for all idea sources; omit status to read |
 | `statistics` | `statistics --project <id> --from <date> --until <date>` | Covered; stored measurements, optional filters |
 | `history` | `history list` | Covered; bounded content journal with optional filters |
 | `history_event` | `history show <id>` | Covered; complete old/new content |
@@ -73,7 +74,7 @@ The table covers every registered Tauri command in `src/app.rs`. "Covered" means
 | `data_version` | Each CLI read returns current service state | Excluded UI reload counter; no agent polling loop is required |
 | `ready` | None | Excluded window show/focus lifecycle signal |
 
-Twenty-nine of the thirty-five endpoints have CLI equivalents; six are explicit presentation or OS-setting exclusions. There is no uncovered persisted owner-state operation in this inventory.
+Thirty of the thirty-six endpoints have CLI equivalents; six are explicit presentation or OS-setting exclusions. There is no uncovered persisted owner-state operation in this inventory.
 
 The screen/event-handler pass covers behavior outside those endpoints:
 
@@ -98,6 +99,8 @@ This behavior is covered by 30 passing UI checks, including legacy collapsed val
 The digest follow-up removes raw fact churn from both entries and acknowledgement tokens. Validation: 134 Rust tests, strict Clippy, formatting and 30 UI checks passed. On the same isolated owner-data copy, the real CLI changed four Git-only entries to zero while preserving the read baseline; the window's facts refresh also preserved the digest token. In the installed test window, three labeled report fixtures (progress, open end and question) appeared and were explicitly marked read. The normal window was reopened; production read baseline, display preferences and feedback remained unchanged. Installed binaries and the four Skill files match their sources, including Nabu's existing private Skill scope.
 
 ## Call sequences
+
+Idea lifecycle: `ideas status <item-id>` returns the displayed status and revision; `ideas status <item-id> in_progress|implemented|open|archived|restore --revision <revision>` applies the owner's decision in one atomic transaction. A known revision from overview avoids the read. Progress uses the existing source-linked task and preserves its reports/history; direct completion is an owner event, never a fabricated agent report. Cancelled tasks return ideas to their rating filter instead of counting as implemented. Archiving is independent of progress and feedback, preserves active tasks, is recorded in content history and returns a guarded inverse command. Status revisions include task revisions and archive revisions, so an intervening report or decision rejects stale clicks, including undo. Context tokens include archives; the portfolio basis also changes on archiving/restoring. `idea_states` in overview and contexts tells agents which ideas are underway, implemented or archived. All actions are available on idea cards and in the rating round. The archive filter and search provide restoration. Agents still report results through `tasks report`; lifecycle mutations require the owner's instruction.
 
 Statistics and durable history add a fifth view, `statistics` ("Statistik"), without changing the morning-page priority or read acknowledgement rules. `statistics` reads a selected date range in one call; `history list` returns at most 30 summaries and a continuation; `history show` retrieves one event's full before/after content. `facts history <id>` exposes complete immutable observations. `proposals` exposes independent retained agent proposals. Report omissions do not delete proposals; contexts include omitted retained proposals so agents can reconcile them without an extra mandatory discovery call. Own-idea edits use `ideas list` for the revision, then `ideas update`; they invalidate an earlier assessment and return guarded undo.
 

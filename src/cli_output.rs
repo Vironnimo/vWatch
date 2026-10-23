@@ -662,6 +662,18 @@ pub(super) fn human(command: &str, data: &Value, data_dir: &std::path::Path) -> 
             );
             tree(&mut out, &data["idea"], 0);
         }
+        "ideas.status" => {
+            line(
+                &mut out,
+                0,
+                if data["changed"] == true {
+                    "Idea status saved; rating unchanged."
+                } else {
+                    "Idea status; rating unchanged."
+                },
+            );
+            tree(&mut out, &data["idea_status"], 0);
+        }
         "ideas.remove" => {
             line(
                 &mut out,

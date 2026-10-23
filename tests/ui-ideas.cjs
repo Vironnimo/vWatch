@@ -2,8 +2,63 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea });`;
+const expose = `Object.assign(ui, { renderIdeas, ideaCollection, ideaBucket, setIdeaCategory, setIdeaFilter, openIdeaResult, restoreIdeaProject, addIdea, changeIdeaStatus });`;
 const ids = entries => Array.from(entries, entry => entry.s.id);
+
+test('direct progress and archive actions work without copying or rating, including the round', async () => {
+  const a = await app((command, args, state) => {
+    if (command !== 'set_idea_status') return {};
+    assert.equal(args.revision, state.idea_states.s1.revision);
+    const progress = args.status === 'in_progress' ? 'assigned' : args.status === 'implemented' ? 'done' : 'cancelled';
+    if (args.status === 'archived' || args.status === 'restore') state.idea_states.s1.archived = args.status === 'archived';
+    else state.tasks = [{ id: 1, revision: 1, status: progress, source_id: 's1', title: 'Suggestion', projects: ['sample'] }];
+    state.idea_states.s1.revision += 'x';
+    return { changed: true, idea_status: state.idea_states.s1 };
+  }, expose);
+  a.state.prefs.style = 'ideas';
+  a.state.idea_states = { s1: { status: 'open', archived: false, revision: 'r1' } };
+  await a.ui.load(false);
+  a.ui.startIdeaRound();
+  assert.match(a.node('#round-root').innerHTML, /data-idea-status="in_progress"/);
+  assert.match(a.node('#round-root').innerHTML, /data-idea-status="implemented"/);
+  assert.match(a.node('#round-root').innerHTML, /data-idea-status="archived"/);
+  await a.ui.changeIdeaStatus('s1', 'in_progress', 'r1');
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'assigned');
+  assert.doesNotMatch(a.ui.blockIdeas(), /Suggestion/);
+  assert.match(a.node('#round-root').innerHTML, /Geschafft/);
+  a.ui.setIdeaFilter('assigned');
+  assert.match(a.ui.renderIdeas(), /In Umsetzung/);
+  await a.ui.changeIdeaStatus('s1', 'implemented', 'r1x');
+  a.ui.setIdeaFilter('done');
+  assert.match(a.ui.renderIdeas(), /Suggestion/);
+  await a.ui.changeIdeaStatus('s1', 'archived', 'r1xx');
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'archived');
+  assert.doesNotMatch(a.ui.renderIdeas(), /<div class="t">Suggestion/);
+  a.ui.setIdeaFilter('archived');
+  assert.match(a.ui.renderIdeas(), /Zurückholen/);
+  await a.ui.changeIdeaStatus('s1', 'restore', 'r1xxx');
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'done');
+  await a.ui.changeIdeaStatus('s1', 'open', 'r1xxxx');
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'new');
+  assert.deepEqual(a.state.feedback, {});
+  assert.equal(a.copied.length, 0);
+  assert.equal(a.calls.filter(c => c.command === 'set_feedback' || c.command === 'create_task').length, 0);
+});
+
+test('status conflicts retain the actual state and expose the refreshed result', async () => {
+  const a = await app((command, args, state) => {
+    if (command === 'set_idea_status') {
+      state.tasks[0].result = 'New agent report';
+      throw { code: 'idea_changed' };
+    }
+  }, expose);
+  a.state.idea_states = { s1: { archived: false, revision: 'old' } };
+  a.state.tasks = [{ id: 1, status: 'review', source_id: 's1', projects: ['sample'], title: 'Suggestion' }];
+  a.ui.setIdeaFilter('assigned');
+  await a.ui.changeIdeaStatus('s1', 'implemented', 'old');
+  assert.equal(a.ui.ideaBucket(a.ui.ideaCollection()[0]), 'assigned');
+  assert.match(a.ui.renderIdeas(), /New agent report/);
+});
 
 test('an open snooze has exactly one editor inside its filter and stays pinned in other filters', async () => {
   const a = await app(undefined, expose);
@@ -78,7 +133,7 @@ test('ratings, dated returns and explicit task state have separate reachable fil
   ];
   await a.ui.load(false);
   const buckets = Object.fromEntries(a.ui.ideaCollection().map(e => [e.s.id, a.ui.ideaBucket(e)]));
-  assert.deepEqual(buckets, { fresh: 'new', good: 'up', later: 'later', returned: 'new', rejected: 'down', working: 'assigned', finished: 'done', cancelled: 'done' });
+  assert.deepEqual(buckets, { fresh: 'new', good: 'up', later: 'later', returned: 'new', rejected: 'down', working: 'assigned', finished: 'done', cancelled: 'new' });
   let html = a.ui.renderIdeas();
   assert.match(html, /Title fresh/); assert.match(html, /Wieder da · aufgeschoben bis 07\.10\.2026/);
   assert.doesNotMatch(html, /Title later|Title finished|Title working|Title rejected/);

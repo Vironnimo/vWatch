@@ -64,6 +64,91 @@ fn json_output(output: &Output, code: i32) -> Value {
 }
 
 #[test]
+fn idea_status_processes_preserve_ratings_and_offer_guarded_archive_undo() {
+    let home = tempfile::tempdir().unwrap();
+    let added = json_output(
+        &run(
+            home.path(),
+            &["ideas", "add", "Prüfung für Copy-paste", "--json"],
+        ),
+        0,
+    );
+    let id = added["idea"]["item_id"].as_str().unwrap();
+    let read = json_output(&run(home.path(), &["ideas", "status", id, "--json"]), 0);
+    let rev = read["idea_status"]["revision"].as_str().unwrap();
+    let missing_revision = run(home.path(), &["ideas", "status", id, "implemented"]);
+    assert_eq!(missing_revision.status.code(), Some(2));
+    let unknown = json_output(
+        &run(home.path(), &["ideas", "status", "missing", "--json"]),
+        1,
+    );
+    assert_eq!(unknown["error"]["code"], "unknown_idea");
+    let working = json_output(
+        &run(
+            home.path(),
+            &[
+                "ideas",
+                "status",
+                id,
+                "IN_PROGRESS",
+                "--revision",
+                rev,
+                "--json",
+            ],
+        ),
+        0,
+    );
+    assert_eq!(working["idea_status"]["status"], "in_progress");
+    let rev = working["idea_status"]["revision"].as_str().unwrap();
+    let archived = run(
+        home.path(),
+        &["ideas", "status", id, "archived", "--revision", rev],
+    );
+    assert_eq!(archived.status.code(), Some(0));
+    let text = String::from_utf8(archived.stdout).unwrap();
+    assert!(text.starts_with("Idea status saved"), "{text}");
+    let undo = text
+        .lines()
+        .find_map(|l| l.strip_prefix("Undo: watchtower "))
+        .expect("guarded inverse command");
+    let args = undo.split_whitespace().collect::<Vec<_>>();
+    let restored = run(home.path(), &args);
+    assert_eq!(restored.status.code(), Some(0));
+    let read = json_output(&run(home.path(), &["ideas", "status", id, "--json"]), 0);
+    assert_eq!(read["idea_status"]["archived"], false);
+    assert_eq!(
+        read["idea_status"]["task"]["id"],
+        working["idea_status"]["task"]["id"]
+    );
+    let rev = read["idea_status"]["revision"].as_str().unwrap();
+    let done = json_output(
+        &run(
+            home.path(),
+            &[
+                "ideas",
+                "status",
+                id,
+                "implemented",
+                "--revision",
+                rev,
+                "--json",
+            ],
+        ),
+        0,
+    );
+    assert_eq!(done["idea_status"]["task"]["status"], "done");
+    assert_eq!(
+        json_output(&run(home.path(), &["feedback", "--json"]), 0)["feedback"],
+        json!([])
+    );
+    let invalid = run(
+        home.path(),
+        &["ideas", "status", id, "good", "--revision", rev],
+    );
+    assert_eq!(invalid.status.code(), Some(2));
+}
+
+#[test]
 fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
     let home = tempfile::tempdir().unwrap();
     let svc = watchtower::Watchtower::open(&home.path().join("watchtower.db")).unwrap();

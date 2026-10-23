@@ -236,6 +236,16 @@ async fn add_idea(app: State<'_, AppState>, text: String) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn set_idea_status(
+    app: State<'_, AppState>,
+    id: String,
+    status: String,
+    revision: String,
+) -> Reply {
+    write(&app, move |s| s.set_idea_status(&id, &status, &revision)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn update_idea(app: State<'_, AppState>, id: i64, text: String, revision: i64) -> Reply {
     write(&app, move |s| s.update_idea(id, &text, revision)).await
 }
@@ -436,6 +446,7 @@ pub fn run() {
             set_pref,
             set_status,
             add_idea,
+            set_idea_status,
             update_idea,
             remove_idea,
             restore_idea,

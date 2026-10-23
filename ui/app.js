@@ -441,21 +441,22 @@
 
   function ideaCard(s, projects, projectId, kind, options = {}) {
     if (noteFor === s.id) return noteForm(s.id, s.title);
+    if (!options.collection && ideaClosed(s.id)) return '';
     if (!options.collection && hiddenByRating(s.id)) return '';
     const firstSeen = options.firstSeen || (projectId ? ((byId(projectId) || {}).suggestion_first_seen || {})[s.id] : (S.new_app_first_seen || {})[s.id]);
     const stamp = firstSeen && Number.isFinite(Date.parse(firstSeen)) ? `<time class="faint" datetime="${esc(firstSeen)}" title="Erstmals vorgeschlagen: ${esc(new Date(firstSeen).toLocaleString('de-DE'))}">vorgeschlagen ${esc(new Date(firstSeen).toLocaleDateString('de-DE'))}</time>` : '';
     const task = ideaTask(s.id);
-    const finished = task && ['done', 'cancelled'].includes(task.status);
+    const finished = task && task.status === 'done';
     const returned = S.feedback[s.id]?.value === 'later' && snoozedUntil(S.feedback[s.id]) <= S.today;
     const missingProjects = (projects || []).filter(id => !byId(id));
-    const action = finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(s.id || s.title, { projects: task ? task.projects : projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when });
+    const action = S.idea_states?.[s.id]?.archived ? '' : finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(s.id || s.title, { projects: task ? task.projects : projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when });
     const taskDetails = options.collection && task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${s.id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
     return `<div class="idea${ideaHighlight === s.id ? ' search-hit' : ''}" data-idea-id="${esc(s.id)}" tabindex="-1">${kind ? `<div class="kind">${esc(kind)}${options.retained ? ' · aus früherem Bericht gemerkt' : ''}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
       ${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[s.id]))}</div>` : ''}
       <div class="why">${esc(s.why || s.pitch)}</div>
       ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
       ${s.evidence ? `<details ${foldAttrs(`idea-evidence:${s.id}`)}><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
-      ${myNote(s.id)}
+      ${myNote(s.id)}${ideaStatusActions(s.id)}
       <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
       <div class="taskrow">${stamp}${action}</div>${taskDetails}</div>`;
   }
@@ -649,7 +650,7 @@
 
   const ideaTime = at => Number.isFinite(Date.parse(at)) ? Date.parse(at) : -Infinity;
   const newestIdeas = items => [...items].sort((a, b) => ideaTime(b.firstSeen) - ideaTime(a.firstSeen));
-  const IDEA_FILTERS = { new: 'Neu', up: 'Gut gefunden', later: 'Später', assigned: 'Beauftragt', done: 'Abgeschlossen', down: 'Abgelehnt', all: 'Alle' };
+  const IDEA_FILTERS = { new: 'Neu', up: 'Gut gefunden', later: 'Später', assigned: 'In Umsetzung', done: 'Umgesetzt', archived: 'Archiviert', down: 'Abgelehnt', all: 'Alle' };
   const IDEA_KINDS = { suggestion: 'Aus dem Projekt', new_app: 'Neue App', synergy: 'Querverbindung', owner_idea: 'Deine Idee' };
   const PROPOSAL_CATEGORIES = { idea: 'Ideen', recommendation: 'Empfehlungen' };
   const proposalCategory = (s, kind = 'suggestion') => ['idea', 'recommendation'].includes(s.category) ? s.category
@@ -688,9 +689,39 @@
     return ideaTasksMemo.bySource.get(id) || null;
   }
   function ideaBucket(entry) {
+    if (S.idea_states?.[entry.s.id]?.archived) return 'archived';
     const task = ideaTask(entry.s.id);
-    if (task) return ['assigned', 'blocked', 'review'].includes(task.status) ? 'assigned' : 'done';
+    if (task && ['assigned', 'blocked', 'review'].includes(task.status)) return 'assigned';
+    if (task?.status === 'done') return 'done';
     return ({ up: 'up', later: 'later', down: 'down' })[rated(entry.s.id)] || 'new';
+  }
+  const busyIdeas = new Set();
+  const ideaClosed = id => S.idea_states?.[id]?.archived || ['assigned', 'blocked', 'review', 'done'].includes(ideaTask(id)?.status);
+  function ideaStatusActions(id) {
+    if (!S.idea_states?.[id] && !ideaCollection().some(e => e.s.id === id)) return '';
+    const state = S.idea_states?.[id] || {}, task = ideaTask(id);
+    const progress = task?.status === 'done' ? 'implemented' : ['assigned', 'blocked', 'review'].includes(task?.status) ? 'in_progress' : 'open';
+    const button = (action, label, title) => `<button class="btn" type="button" data-idea-status="${action}" data-idea-target="${esc(id)}" data-idea-revision="${esc(state.revision || '')}" title="${esc(title)}"${busyIdeas.has(id) ? ' disabled' : ''}>${label}</button>`;
+    const actions = state.archived ? button('restore', 'Zurückholen', 'Zurück in die Sammlung; dein bisheriger Stand bleibt erhalten')
+      : (progress === 'open' ? button('in_progress', 'In Umsetzung', 'Die Arbeit läuft bereits, zum Beispiel nach Copy-paste an einen Agent') : '')
+        + (progress !== 'implemented' ? button('implemented', 'Umgesetzt', 'Du bestätigst, dass diese Idee umgesetzt ist') : '')
+        + (progress !== 'open' ? button('open', 'Wieder offen', 'Den Umsetzungsstand zurücknehmen; die Idee bleibt mit ihrer Bewertung erhalten') : '')
+        + button('archived', 'Archivieren', 'Aus den offenen Vorschlägen nehmen; Bewertung und laufende Aufträge bleiben erhalten');
+    const label = state.archived ? 'Archiviert' : progress === 'implemented' ? 'Umgesetzt' : progress === 'in_progress' ? 'In Umsetzung' : '';
+    return `<div class="idea-status-actions" aria-label="Umsetzungsstand">${label ? `<span class="tag">${label}</span>` : ''}${actions}</div>`;
+  }
+  async function changeIdeaStatus(id, status, revision) {
+    if (busyIdeas.has(id)) return;
+    busyIdeas.add(id); render();
+    try {
+      const result = await call('set_idea_status', { id, status, revision });
+      await load(false);
+      const undo = result.changed && ['archived', 'restore'].includes(status) ? () => changeIdeaStatus(id, status === 'archived' ? 'restore' : 'archived', result.idea_status.revision) : null;
+      toast(({ in_progress: 'Unter „In Umsetzung“ gespeichert.', implemented: 'Als umgesetzt bestätigt.', open: 'Die Idee ist wieder offen.', archived: 'Archiviert. Unter „Archiviert“ kannst du sie zurückholen.', restore: 'Aus dem Archiv zurückgeholt.' })[status], undo);
+    } catch (e) {
+      await load(false);
+      toast(e?.code === 'idea_changed' ? 'Der Stand hat sich inzwischen geändert. Prüfe den aktualisierten Eintrag.' : 'Stand nicht bestätigt: ' + errText(e));
+    } finally { busyIdeas.delete(id); render(); }
   }
   function ideaCollection() {
     const entries = new Map(), pf = S.portfolio || {};
@@ -747,12 +778,13 @@
       new: 'Noch ohne Entscheidung oder nach „Später“ wieder da. Neueste zuerst nach ihrem ersten Auftauchen.',
       up: 'Von dir gut gefunden. Ein Auftrag entsteht erst, wenn du ihn bewusst übergibst.',
       later: 'Bis zum gewählten Tag zurückgestellt. Dann erscheinen sie wieder unter „Neu“.',
-      assigned: 'An einen Agent übergebene Vorschläge, einschließlich Blockaden und Ergebnissen zur Prüfung.',
-      done: 'Von dir bestätigte Ergebnisse und beendete Aufträge. Du kannst sie wieder öffnen.',
+      assigned: 'Bereits begonnene oder an einen Agent übergebene Vorschläge, einschließlich Blockaden und Ergebnissen zur Prüfung.',
+      done: 'Von dir als umgesetzt bestätigt. Du kannst den Stand wieder auf offen setzen.',
+      archived: 'Aus den offenen Vorschlägen genommen, ohne deine Bewertung zu ändern. Du kannst sie zurückholen; laufende Aufträge bleiben erhalten.',
       down: 'Von dir abgelehnt. Die Agents sollen diese Vorschläge nicht wieder bringen.',
       all: isIdea ? 'Neue Funktionen, bessere Abläufe, neue Apps und deine eigenen Ideen. Neueste zuerst.' : 'Konkrete nächste Schritte, Pflege und Absicherung. Neueste zuerst.',
     };
-    const empty = { new: `Gerade keine neuen ${label}. Deine gemerkten Vorschläge findest du in den anderen Filtern.`, up: 'Noch kein Vorschlag gut gefunden.', later: 'Keine Vorschläge zurückgestellt.', assigned: 'Noch kein Vorschlag beauftragt.', done: 'Noch keine abgeschlossenen Vorschläge.', down: 'Keine Vorschläge abgelehnt.', all: `Noch keine ${label}.` };
+    const empty = { new: `Gerade keine neuen ${label}. Deine gemerkten Vorschläge findest du in den anderen Filtern.`, up: 'Noch kein Vorschlag gut gefunden.', later: 'Keine Vorschläge zurückgestellt.', assigned: 'Noch kein Vorschlag in Umsetzung.', done: 'Noch keine umgesetzten Vorschläge.', archived: 'Keine Vorschläge archiviert.', down: 'Keine Vorschläge abgelehnt.', all: `Noch keine ${label}.` };
     const roundLabel = freshCount === 1 ? `Neue ${isIdea ? 'Idee' : 'Empfehlung'} bewerten` : `${freshCount} neue ${label} nacheinander bewerten`;
     return `<div class="ideas-page"><header class="ideas-heading"><h1>Ideen & Empfehlungen</h1><nav class="idea-categories" aria-label="Art des Vorschlags">${categories}</nav><p>${isIdea ? 'Was deine Projekte künftig können könnten: neue Funktionen, einfachere Abläufe und neue Anwendungen.' : 'Was jetzt sinnvoll zu tun ist: konkrete nächste Schritte, Pflege und Absicherung.'}</p></header>${isIdea ? ideaAddForm() : ''}${freshCount ? `<div class="idea-round-start"><button class="btn primary" type="button" data-iround-start>${roundLabel}</button><span class="faint">Gut, später oder Quatsch, je eine Taste. Die Agents lernen aus deiner Wahl.</span></div>` : ''}<nav class="idea-filters" aria-label="${label} filtern">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>Offene Eingabe</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
   }
@@ -773,7 +805,7 @@
   function blockIdeas() {
     const fromProjects = visible().flatMap(p => ((p.card || {}).suggestions || []).map(s => ({ s, project: p.id, firstSeen: (p.suggestion_first_seen || {})[s.id] })));
     const apps = ((S.portfolio || {}).new_apps || []).map(s => ({ s, project: null, firstSeen: (S.new_app_first_seen || {})[s.id] }));
-    const items = newestIdeas([...fromProjects, ...apps].filter(({ s }) => s.id === noteFor || !hiddenByRating(s.id)));
+    const items = newestIdeas([...fromProjects, ...apps].filter(({ s }) => s.id === noteFor || (!hiddenByRating(s.id) && !ideaClosed(s.id))));
     const total = items.length, limit = 6;
     // Keep an open response form in place even when new ideas arrive ahead of it.
     const shown = expanded.ideas ? items : items.filter(({ s }, i) => i < limit || s.id === noteFor || s.id === snoozeFor);
@@ -796,14 +828,14 @@
     const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
     const verdict = c ? `<div class="idea-assessment"><span class="faint">Agent-Einschätzung:</span> <span class="tag ${v[1]}">${esc(v[0])}</span><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}</div>` : '<div class="faint">Noch nicht eingeschätzt.</div>';
     const returned = S.feedback[id]?.value === 'later' && snoozedUntil(S.feedback[id]) <= S.today;
-    const finished = task && ['done', 'cancelled'].includes(task.status);
+    const finished = task && task.status === 'done';
     const missingProjects = entry.projects.filter(project => !byId(project));
-    const action = finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(id, { projects: task ? task.projects : entry.projects, title: s.title, why: c?.why || '' });
+    const action = S.idea_states?.[s.id]?.archived ? '' : finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(id, { projects: task ? task.projects : entry.projects, title: s.title, why: c?.why || '' });
     const details = task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
-    return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish" type="button" data-owner-idea-edit="${own.id}">bearbeiten</button><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
+    return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish" type="button" data-owner-idea-edit="${own.id}">bearbeiten</button><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}${ideaStatusActions(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
   }
   function blockParking() {
-    const items = ideaCollection().filter(e => e.own && (e.s.id === noteFor || !hiddenByRating(e.s.id))).map(ownerIdeaCard).join('');
+    const items = ideaCollection().filter(e => e.own && (e.s.id === noteFor || (!hiddenByRating(e.s.id) && !ideaClosed(e.s.id)))).map(ownerIdeaCard).join('');
     return mod('parking', 'Eigene Ideen', 'Halt fest, was du gern bauen oder verbessern würdest', ideaAddForm() + (items ? `<div class="cards2">${items}</div>` : ''));
   }
 
@@ -1169,7 +1201,7 @@
       const choices = ideaRatings().map(([value, label, effect], i) => `<button type="button" class="ropt" data-iround-rate="${value}"><span class="k mono">${i + 1}</span><span><b>${label}</b><span class="muted">${esc(effect)}</span></span></button>`).join('');
       body = `<div class="rproj"><span class="faint">${esc(IDEA_KINDS[entry.kind] || '')}</span>${who}</div>
         <h3>${esc(s.title)}</h3>${s.why || s.pitch ? `<p>${esc(s.why || s.pitch)}</p>` : ''}${s.because ? `<p class="muted"><b>Weil:</b> ${esc(s.because)}</p>` : ''}${entry.assessment ? `<p class="muted"><b>Agent-Einschätzung:</b> ${esc(entry.assessment.why)}</p>` : ''}${s.evidence ? `<div class="qsrc mono">${esc(s.evidence)}</div>` : ''}
-        <div class="ropts">${choices}</div>
+        ${ideaStatusActions(id)}<div class="ropts">${choices}</div>
         <div class="inrow"><input type="text" id="idea-round-note" data-iround-note="${esc(id)}" value="${esc(drafts[id] || '')}" maxlength="300" placeholder="Warum? Optional, die Agents lernen daraus" aria-label="Warum (optional)"></div>
         <div class="actions"><button class="btn" type="button" data-iround-skip>Überspringen</button></div>`;
     }
@@ -1324,7 +1356,7 @@
 
   // ---------- statistics and durable content history ----------
   const HISTORY_KIND = { card: 'Projektbericht', portfolio: 'Gesamtbericht', project: 'Projekt', idea: 'Deine Idee', proposal: 'Agentenidee', task: 'Auftrag', feedback: 'Deine Reaktion', warning: 'Bewusste Entscheidung' };
-  const HISTORY_FIELD = { headline: 'Aktueller Stand', reentry: 'Nächster Schritt', suggestions: 'Vorschläge', waiting_on_you: 'Fragen an dich', open_ends: 'Offene Enden', handbook: 'Handbuch', phase: 'Phase', text: 'Text', name: 'Name', path: 'Ordner', status: 'Status', status_note: 'Statusnotiz', goal: 'Ziel', goal_due: 'Zieldatum', removed_at: 'Entfernt am', value: 'Bewertung', note: 'Notiz', data: 'Inhalt', in_report: 'Im aktuellen Bericht', new_apps: 'Neue Apps', synergies: 'Querverbindungen', focus: 'Fokus', milestones: 'Meilensteine', recent_changes: 'Letzte Änderungen' };
+  const HISTORY_FIELD = { headline: 'Aktueller Stand', reentry: 'Nächster Schritt', suggestions: 'Vorschläge', waiting_on_you: 'Fragen an dich', open_ends: 'Offene Enden', handbook: 'Handbuch', phase: 'Phase', text: 'Text', name: 'Name', path: 'Ordner', status: 'Status', archived: 'Archiviert', status_note: 'Statusnotiz', goal: 'Ziel', goal_due: 'Zieldatum', removed_at: 'Entfernt am', value: 'Bewertung', note: 'Notiz', data: 'Inhalt', in_report: 'Im aktuellen Bericht', new_apps: 'Neue Apps', synergies: 'Querverbindungen', focus: 'Fokus', milestones: 'Meilensteine', recent_changes: 'Letzte Änderungen' };
   const measured = n => typeof n === 'number' ? num(n) : 'unbekannt';
   const signed = n => typeof n === 'number' ? `${n > 0 ? '+' : ''}${num(n)}` : '—';
   const observationDate = at => at ? new Date(at).toLocaleString('de-DE') : 'Zeitpunkt unbekannt';
@@ -2055,6 +2087,8 @@
     if ($('#report-status').open && !t.closest('#report-status')) $('#report-status').open = false;
     const ideaTab = t.closest('[data-idea-filter]');
     if (ideaTab) { setIdeaFilter(ideaTab.dataset.ideaFilter); return; }
+    const ideaStatus = t.closest('[data-idea-status]');
+    if (ideaStatus) { await changeIdeaStatus(ideaStatus.dataset.ideaTarget, ideaStatus.dataset.ideaStatus, ideaStatus.dataset.ideaRevision); return; }
     const categoryTab = t.closest('[data-idea-category]');
     if (categoryTab) { setIdeaCategory(categoryTab.dataset.ideaCategory); return; }
     const ideaProject = t.closest('[data-idea-restore-project]');

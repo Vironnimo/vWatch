@@ -479,6 +479,8 @@ details > summary::-webkit-details-marker { display: none; }
 .idea-assessment { margin-top: 8px; font-size: 13px; }
 .idea-assignment { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
 .idea-assignment > .tracked-task { margin-top: 8px; }
+.idea-status-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.idea-status-actions .btn { padding: 6px 10px; font-size: 13px; }
 .idea.search-hit { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* Review a handoff before either copying it or recording an assignment. */

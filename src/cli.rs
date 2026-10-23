@@ -93,7 +93,7 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<FeedbackCmd>,
     },
-    /// Read or manage the owner's parked ideas; proposals are in cards and portfolio
+    /// Manage own ideas and the implementation/archive status of any idea or recommendation
     #[command(alias = "idea")]
     Ideas {
         #[command(subcommand)]
@@ -318,6 +318,17 @@ enum SettingsCmd {
 
 #[derive(Subcommand)]
 enum IdeasCmd {
+    /// Read an idea's status, or record the owner's implementation/archive decision; ratings stay unchanged
+    Status {
+        /// Item ID from proposals or item_id from ideas list.
+        id: String,
+        /// Omit to read. open reopens the idea; restore leaves the archive. No action starts an agent.
+        #[arg(value_parser = ["open", "in_progress", "implemented", "archived", "restore"], ignore_case = true)]
+        status: Option<String>,
+        /// Revision from ideas status or overview idea_states; required for changes, protecting newer task results.
+        #[arg(long, required_if_eq_any = [("status", "open"), ("status", "in_progress"), ("status", "implemented"), ("status", "archived"), ("status", "restore")], requires = "status")]
+        revision: Option<String>,
+    },
     /// Edit a parked idea, preserving its ID, history and previous text for undo
     Update {
         id: i64,
@@ -718,6 +729,7 @@ impl Cmd {
                 Some(FeedbackCmd::Restore { .. }) => "feedback.restore",
             },
             Cmd::Ideas { action } => match action {
+                IdeasCmd::Status { .. } => "ideas.status",
                 IdeasCmd::Update { .. } => "ideas.update",
                 IdeasCmd::List => "ideas.list",
                 IdeasCmd::Add { .. } => "ideas.add",
@@ -1119,6 +1131,10 @@ fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
             }
         },
         Cmd::Ideas { action } => match action {
+            IdeasCmd::Status { id, status, revision } => match status {
+                Some(status) => svc.set_idea_status(&id, &status.to_ascii_lowercase(), revision.as_deref().ok_or_else(|| WatchtowerError::new("invalid_arguments", "A status change requires --revision from ideas status. Nothing was changed."))?)?,
+                None => svc.idea_status(&id)?,
+            },
             IdeasCmd::Update { id, text, revision } => svc.update_idea(id, &text, revision)?,
             IdeasCmd::List => json!({"ideas": svc.ideas()?}),
             IdeasCmd::Add { text } => json!({"idea": svc.add_idea(&text)?}),

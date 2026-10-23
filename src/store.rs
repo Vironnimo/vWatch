@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS warning_acks(
   at TEXT NOT NULL, PRIMARY KEY(project_id, kind));
 CREATE TABLE IF NOT EXISTS ideas(
   id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, added_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS idea_archives(
+  item_id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL,
+  archived INTEGER NOT NULL, revision INTEGER NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agent_runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT,
   initial TEXT NOT NULL, failures TEXT NOT NULL DEFAULT '{}', result TEXT, outcome TEXT);
@@ -52,6 +55,7 @@ CREATE INDEX IF NOT EXISTS owner_undo_active_scope ON owner_undo(scope) WHERE un
 CREATE TABLE IF NOT EXISTS owner_field_versions(field TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_active_source ON tasks(source_key)
   WHERE source_key IS NOT NULL AND status IN ('assigned', 'blocked', 'review');
+CREATE INDEX IF NOT EXISTS tasks_by_source_id ON tasks(json_extract(data,'$.source_id'),id);
 ";
 
 pub type Result<T> = rusqlite::Result<T>;
@@ -1176,6 +1180,7 @@ fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
     // These owner-facing features are absent in databases from before their migration.
     for (table, query) in [
         ("tasks", "SELECT id,status,revision,data FROM tasks WHERE ?1 IS NULL OR EXISTS(SELECT 1 FROM json_each(data,'$.projects') WHERE value=?1) ORDER BY id"),
+        ("idea_archives", "SELECT item_id,archived,revision FROM idea_archives WHERE ?1 IS NULL OR project_id=?1 OR project_id IS NULL ORDER BY item_id"),
         ("warning_acks", "SELECT project_id,kind,note,basis FROM warning_acks WHERE ?1 IS NULL OR project_id=?1 ORDER BY project_id,kind"),
     ] {
         let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)", [table], |r| r.get(0))?;
@@ -1490,6 +1495,84 @@ fn tracked_task(row: &Row) -> Result<Value> {
     task["status"] = serde_json::json!(row.get::<_, String>("status")?);
     task["revision"] = serde_json::json!(row.get::<_, i64>("revision")?);
     Ok(task)
+}
+
+fn idea_state_snapshot(db: &Connection, id: &str) -> Result<Value> {
+    let tasks = db.prepare("SELECT id,status,revision,data FROM tasks WHERE json_extract(data,'$.source_id')=?1 ORDER BY CASE WHEN status IN ('assigned','blocked','review') THEN 0 ELSE 1 END,id DESC")?
+        .query_map([id], tracked_task)?.collect::<Result<Vec<_>>>()?;
+    let archive = db.query_row("SELECT item_id,project_id,title,archived,revision,at FROM idea_archives WHERE item_id=?1", [id], |r| Ok(serde_json::json!({
+        "item_id":r.get::<_,String>(0)?,"project_id":r.get::<_,Option<String>>(1)?,"title":r.get::<_,String>(2)?,
+        "archived":r.get::<_,bool>(3)?,"revision":r.get::<_,i64>(4)?,"at":r.get::<_,String>(5)?
+    }))).optional()?;
+    let task = tasks.first().cloned().unwrap_or(Value::Null);
+    let status = match task["status"].as_str() {
+        Some("assigned" | "blocked" | "review") => "in_progress",
+        Some("done") => "implemented",
+        _ => "open",
+    };
+    use sha1::{Digest, Sha1};
+    let revision = format!(
+        "is1-{:x}",
+        Sha1::digest(
+            serde_json::json!([id, tasks, archive])
+                .to_string()
+                .as_bytes()
+        )
+    );
+    Ok(
+        serde_json::json!({"item_id":id,"status":status,"archived":archive.as_ref().is_some_and(|a|a["archived"]==true),"revision":revision,"task":task,"archive":archive,"active_tasks":tasks.iter().filter(|t|matches!(t["status"].as_str(),Some("assigned"|"blocked"|"review"))).count()}),
+    )
+}
+
+impl Store {
+    pub fn idea_state(&self, id: &str) -> Result<Value> {
+        self.with(|db| idea_state_snapshot(db, id))
+    }
+
+    pub fn idea_archives(&self) -> Result<Vec<Value>> {
+        self.with(|db| db.prepare("SELECT item_id,project_id,title,archived,revision FROM idea_archives ORDER BY item_id")?
+            .query_map([], |r| Ok(serde_json::json!({"item_id":r.get::<_,String>(0)?,"project_id":r.get::<_,Option<String>>(1)?,"title":r.get::<_,String>(2)?,"archived":r.get::<_,bool>(3)?,"revision":r.get::<_,i64>(4)?})))?.collect())
+    }
+
+    /// The displayed state, task update and archive history share one transaction.
+    pub fn set_idea_state(
+        &self,
+        id: &str,
+        action: &str,
+        revision: &str,
+        seed: &Value,
+        at: &str,
+    ) -> Result<Option<Value>> {
+        self.with(|db| {
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let before = idea_state_snapshot(&tx, id)?;
+            if before["revision"] != revision { return Ok(None); }
+            let archive_action = matches!(action, "archived" | "restore");
+            let changed = if archive_action { before["archived"] != (action == "archived") } else { before["status"] != action };
+            if changed && archive_action {
+                let archived = action == "archived";
+                tx.execute("INSERT INTO idea_archives(item_id,project_id,title,archived,revision,at) VALUES(?1,?2,?3,?4,1,?5) ON CONFLICT(item_id) DO UPDATE SET archived=excluded.archived,revision=revision+1,at=excluded.at", params![id,seed["project_id"].as_str(),seed["title"].as_str(),archived,at])?;
+                let own = id.strip_prefix("idea:");
+                tx.execute("INSERT INTO content_history(entity,entity_id,project_id,at,operation,origin,before_data,after_data) VALUES(?1,?2,?3,?4,'update','write',?5,?6)", params![if own.is_some(){"idea"}else{"proposal"},own.unwrap_or(id),seed["project_id"].as_str(),at,serde_json::json!({"title":seed["title"],"archived":before["archived"]}).to_string(),serde_json::json!({"title":seed["title"],"archived":archived}).to_string()])?;
+            } else if changed {
+                let status = match action { "in_progress" => "assigned", "implemented" => "done", _ => "cancelled" };
+                let mut task = if before["task"].is_null() { seed["task"].clone() } else { before["task"].clone() };
+                task["status"] = serde_json::json!(status);
+                task["updated_at"] = serde_json::json!(at);
+                task["completed_at"] = if status == "done" { serde_json::json!(at) } else { Value::Null };
+                task["history"].as_array_mut().expect("task history").push(serde_json::json!({"actor":"owner","status":status,"at":at,"action":"idea_status"}));
+                if let Some(task_id) = task["id"].as_i64() {
+                    task["revision"] = serde_json::json!(task["revision"].as_i64().unwrap_or(0)+1);
+                    tx.execute("UPDATE tasks SET status=?2,revision=revision+1,data=?3 WHERE id=?1", params![task_id,status,task.to_string()])?;
+                } else {
+                    tx.execute("INSERT INTO tasks(status,source_key,data) VALUES(?1,?2,?3)", params![status,seed["source_key"].as_str(),task.to_string()])?;
+                }
+            }
+            let after = idea_state_snapshot(&tx, id)?;
+            tx.commit()?;
+            Ok(Some(serde_json::json!({"changed":changed,"state":after})))
+        })
+    }
 }
 
 impl Store {
