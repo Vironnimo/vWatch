@@ -23,7 +23,7 @@ scripts/ + .githooks/ -> developer checks and checkout lifecycle
 
 `Watchtower` in `service.rs` owns application behavior; CLI and Tauri adapt it rather than implementing competing behavior. The optional `desktop` feature contains Tauri dependencies and the GUI binary; the console/core build works without it. The default `custom-protocol` feature serves embedded `ui/` assets, with no development HTTP server or port allocation.
 
-Use 1,000 physical lines as a soft source-file review threshold, not an automatic refactor requirement. Split large owners into cohesive private units behind the same public interface when the task benefits; do not replace a large file with arbitrary chunks, pass-through layers or compressed formatting. Several inherited owners exceed this threshold; the maps locate their existing internal seams.
+Use 1,000 physical lines as a soft source-file review threshold, not an automatic refactor requirement. Split large owners into cohesive private units behind the same public interface when the task benefits; do not replace a large file with arbitrary chunks, pass-through layers or compressed formatting. The large owners use private units behind their existing interfaces; the maps locate those responsibilities.
 
 **Observation boundary:** facts are measured, interpretation is authored. Repository measurements are read-only; unknown or incomplete values stay distinguishable from zero. Fingerprints decide whether interpretation needs renewal, not whether every informational measurement changed (repository-facts map).
 
@@ -42,7 +42,7 @@ How to read the maps: `AGENTS.md` -> Load context for the task.
 | application.md | `src/service.rs`, `src/service/`, `src/cards.rs` | Shared behavior, report schemas, owner decisions, runs and read models |
 | persistence.md | `src/store.rs`, `src/store/` | SQLite migrations, identity, atomic guards, history and Undo |
 | repository-facts.md | `src/facts.rs`, `src/facts/` | Read-only repository observations, CI, bounded statistics and fingerprints |
-| agent-interface.md | `src/main.rs`, `src/cli*.rs`, `skill/watchtower/`, `docs/agent-interface.md` | Console protocol, continuation, recovery, runtime instructions and capability parity |
+| agent-interface.md | `src/main.rs`, `src/cli*.rs`, `src/cli/`, `src/cli_output/`, `skill/watchtower/`, `docs/agent-interface.md` | Console protocol, continuation, recovery, runtime instructions and capability parity |
 | desktop.md | `ui/`, `src/app.rs`, `src/bin/watchtower-ui.rs`, `src/system.rs` | Owner window, Tauri lifecycle and Windows integration |
 | development.md | `scripts/`, `.githooks/`, build configuration, test infrastructure | Pinned tools, static commit checks, worktrees, local verification and installation |
 
