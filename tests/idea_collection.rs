@@ -225,7 +225,7 @@ fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
         fresh["idea_status"]["revision"]
     );
     assert_eq!(state["idea_states"][&id]["task"]["id"], newer["id"]);
-    svc.store().create_tracked_task(None, &legacy).unwrap();
+    let (latest, _) = svc.store().create_tracked_task(None, &legacy).unwrap();
     assert_eq!(
         svc.set_idea_status(
             &id,
@@ -235,6 +235,46 @@ fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
         .unwrap_err()
         .code,
         "ambiguous_idea_tasks"
+    );
+    // Legacy sources can have several active Tasks and a newer terminal Task.
+    // Selection prefers active work, then the newest ID within that group.
+    for (task, status) in [
+        (&original, "review"),
+        (&newer, "blocked"),
+        (&latest, "done"),
+    ] {
+        let task_id = task["id"].as_i64().unwrap();
+        let mut current = svc.store().task(task_id).unwrap().unwrap();
+        let revision = current["revision"].as_i64().unwrap();
+        current["status"] = json!(status);
+        assert!(svc
+            .store()
+            .replace_task(task_id, revision, status, &current)
+            .unwrap());
+    }
+    let selected = svc.idea_status(&id).unwrap();
+    assert_eq!(
+        selected["idea_status"]["task"]["id"], newer["id"],
+        "newest active Task wins"
+    );
+    assert_eq!(selected["idea_status"]["task"]["status"], "blocked");
+    assert_eq!(selected["idea_status"]["status"], "in_progress");
+    assert_eq!(
+        svc.state(false).unwrap()["idea_states"][&id]["task"]["id"],
+        newer["id"]
+    );
+    let task_id = newer["id"].as_i64().unwrap();
+    let mut current = svc.store().task(task_id).unwrap().unwrap();
+    let revision = current["revision"].as_i64().unwrap();
+    current["status"] = json!("done");
+    assert!(svc
+        .store()
+        .replace_task(task_id, revision, "done", &current)
+        .unwrap());
+    assert_eq!(
+        svc.idea_status(&id).unwrap()["idea_status"]["task"]["id"],
+        original["id"],
+        "older active work outranks newer completed Tasks"
     );
     assert_eq!(svc.idea_status("missing").unwrap_err().code, "unknown_idea");
     drop(svc);
