@@ -4,24 +4,23 @@
 //! repository. The GitHub CI lookup is optional and uses the `gh` CLI when it is
 //! installed and the repository has a github.com remote.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
+mod process;
 mod statistics;
+mod working_tree;
+
+use process::{git, run};
+use working_tree::{branches, collisions, dirty, night, worktrees};
 
 pub const WEEKS: usize = 26;
-const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
-const MAX_UNTRACKED_FILES: usize = 20_000;
-const MAX_UNTRACKED_BYTES: u64 = 2_000_000;
-const MAX_FINGERPRINT_BYTES: u64 = 20_000_000;
 /// Folders a build or package manager recreates; their size is space the owner could free.
 const REBUILDABLE: &[&str] = &[
     "target",
@@ -34,8 +33,6 @@ const REBUILDABLE: &[&str] = &[
     ".gradle",
     ".dart_tool",
 ];
-/// The overnight view starts at this local hour of the previous day.
-const EVENING_HOUR: u32 = 18;
 const DOC_FILES: &[&str] = &[
     "README.md",
     "AGENTS.md",
@@ -47,212 +44,6 @@ const DOC_FILES: &[&str] = &[
     ".vorch/PROJECT.md",
     ".vorch/FLAGGED.md",
 ];
-
-/// Keep every descendant in a private job, including after its parent exits.
-/// Suspending before assignment closes the race with a fast-spawning child.
-#[cfg(windows)]
-fn spawn_contained(
-    cmd: &mut Command,
-) -> std::io::Result<(std::process::Child, std::os::windows::io::OwnedHandle)> {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-    use std::os::windows::process::CommandExt;
-    use windows_sys::Win32::System::Diagnostics::ProcessSnapshotting::{
-        PssCaptureSnapshot, PssFreeSnapshot, PssWalkMarkerCreate, PssWalkMarkerFree,
-        PssWalkSnapshot, HPSS, HPSSWALK, PSS_CAPTURE_THREADS, PSS_THREAD_ENTRY, PSS_WALK_THREADS,
-    };
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, OpenThread, ResumeThread, CREATE_NO_WINDOW, CREATE_SUSPENDED,
-        THREAD_SUSPEND_RESUME,
-    };
-
-    // PSS descriptors require their own cleanup APIs, not CloseHandle. The
-    // snapshot belongs to this caller even though it describes the child.
-    struct ThreadSnapshot {
-        snapshot: HPSS,
-        marker: HPSSWALK,
-    }
-    impl Drop for ThreadSnapshot {
-        fn drop(&mut self) {
-            unsafe {
-                if !self.marker.is_null() {
-                    PssWalkMarkerFree(self.marker);
-                }
-                if !self.snapshot.is_null() {
-                    PssFreeSnapshot(GetCurrentProcess(), self.snapshot);
-                }
-            }
-        }
-    }
-
-    // All handles are owned locally and non-inheritable. Closing the last job
-    // handle terminates its processes on success, timeout and setup failure.
-    let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if job.is_null() {
-        return Err(std::io::Error::last_os_error());
-    }
-    let job = unsafe { OwnedHandle::from_raw_handle(job) };
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if unsafe {
-        SetInformationJobObject(
-            job.as_raw_handle(),
-            JobObjectExtendedLimitInformation,
-            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-            std::mem::size_of_val(&limits) as u32,
-        )
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    let mut child = cmd
-        .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
-        .spawn()?;
-    let resume = || -> std::io::Result<()> {
-        if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        // Stable Child does not expose its primary thread handle. Capture only
-        // this still-suspended process, avoiding a scan of every system thread.
-        let mut snapshot = ThreadSnapshot {
-            snapshot: std::ptr::null_mut(),
-            marker: std::ptr::null_mut(),
-        };
-        let status = unsafe {
-            PssCaptureSnapshot(
-                child.as_raw_handle(),
-                PSS_CAPTURE_THREADS,
-                0,
-                &mut snapshot.snapshot,
-            )
-        };
-        if status != 0 {
-            return Err(std::io::Error::from_raw_os_error(status as i32));
-        }
-        let status = unsafe { PssWalkMarkerCreate(std::ptr::null(), &mut snapshot.marker) };
-        if status != 0 {
-            return Err(std::io::Error::from_raw_os_error(status as i32));
-        }
-        let mut entry: PSS_THREAD_ENTRY = unsafe { std::mem::zeroed() };
-        let status = unsafe {
-            PssWalkSnapshot(
-                snapshot.snapshot,
-                PSS_WALK_THREADS,
-                snapshot.marker,
-                (&mut entry as *mut PSS_THREAD_ENTRY).cast(),
-                std::mem::size_of_val(&entry) as u32,
-            )
-        };
-        if status != 0 {
-            return Err(std::io::Error::from_raw_os_error(status as i32));
-        }
-        let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.ThreadId) };
-        if thread.is_null() {
-            return Err(std::io::Error::last_os_error());
-        }
-        let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
-        if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
-    };
-    if let Err(error) = resume() {
-        // Assignment itself may have failed, leaving the child outside the
-        // job. It is still suspended and cannot have spawned descendants.
-        let _ = child.kill();
-        let _ = child.try_wait();
-        return Err(error);
-    }
-    Ok((child, job))
-}
-
-/// Run a program without a console window. Returns (success, stdout or stderr).
-fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -> (bool, String) {
-    let mut cmd = Command::new(program);
-    cmd.args(args)
-        .current_dir(cwd)
-        .envs([
-            ("GIT_TERMINAL_PROMPT", "0"),
-            ("GCM_INTERACTIVE", "never"),
-            ("GIT_PAGER", "cat"),
-            ("PAGER", "cat"),
-            ("GH_PROMPT_DISABLED", "1"),
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    let (mut child, _job) = match spawn_contained(&mut cmd) {
-        Ok(spawned) => spawned,
-        Err(e) => return (false, e.to_string()),
-    };
-    #[cfg(not(windows))]
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => return (false, e.to_string()),
-    };
-    let reader = |mut pipe: Box<dyn Read + Send>| {
-        let (send, receive) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            let _ = send.send(buf);
-        });
-        receive
-    };
-    let out = reader(Box::new(child.stdout.take().expect("piped stdout")));
-    let err = reader(Box::new(child.stderr.take().expect("piped stderr")));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            _ => break None,
-        }
-    };
-    // A hook or other descendant may keep the pipes open after its parent exits.
-    // The deadline therefore covers both the process and its output readers.
-    if let Some(status) = status {
-        if let (Ok(out), Ok(err)) = (
-            out.recv_timeout(deadline.saturating_duration_since(Instant::now())),
-            err.recv_timeout(deadline.saturating_duration_since(Instant::now())),
-        ) {
-            return if status.success() {
-                (true, String::from_utf8_lossy(&out).into_owned())
-            } else {
-                (false, String::from_utf8_lossy(&err).into_owned())
-            };
-        }
-    }
-    if child.kill().is_ok() {
-        #[cfg(windows)]
-        let _ = child.try_wait();
-        #[cfg(not(windows))]
-        let _ = child.wait();
-    }
-    (false, format!("{program} timed out"))
-}
-
-fn git(repo: &Path, args: &[&str]) -> Option<String> {
-    let mut full = vec![
-        "--no-optional-locks",
-        "-c",
-        "core.quotepath=off",
-        "-c",
-        "diff.autoRefreshIndex=false",
-        "-c",
-        "i18n.logOutputEncoding=utf-8",
-    ];
-    full.extend_from_slice(args);
-    match run("git", &full, repo, GIT_TIMEOUT) {
-        (true, out) => Some(out),
-        _ => None,
-    }
-}
 
 fn iso(t: SystemTime) -> String {
     DateTime::<Utc>::from(t)
@@ -408,323 +199,6 @@ fn upstream(repo: &Path) -> (Value, Value, Value, Value) {
     (json!(up.trim()), ahead, behind, json!(oldest))
 }
 
-struct Dirty {
-    value: Value,
-    newest: Option<SystemTime>,
-    paths: Vec<String>,
-    mtimes: Vec<SystemTime>,
-}
-
-/// The paths in `git status --porcelain=v1 -z` output, untracked files included.
-fn parse_status_paths(raw: &str) -> Vec<String> {
-    let tokens: Vec<&str> = raw.split('\0').collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = tokens[i];
-        i += 1;
-        if token.len() < 4 || !token.is_char_boundary(3) {
-            continue;
-        }
-        if token[..2].contains('R') || token[..2].contains('C') {
-            i += 1;
-        }
-        out.push(token[3..].to_owned());
-    }
-    out
-}
-
-/// Notice edits even when file and line counts stay the same. Content reads are bounded;
-/// larger files still contribute their full size and high-resolution modification time.
-/// Also returns each path's modification time, following symlinks, so callers need no second pass.
-fn dirty_fingerprint<'a>(
-    repo: &Path,
-    raw: &str,
-    paths: impl Iterator<Item = &'a str>,
-) -> (Value, Vec<Option<SystemTime>>) {
-    if raw.is_empty() {
-        return (Value::Null, Vec::new());
-    }
-    let mut hash = Sha1::new();
-    hash.update(raw.as_bytes());
-    let mut remaining = MAX_FINGERPRINT_BYTES;
-    let mut mtimes = Vec::new();
-    for path in paths {
-        hash.update(path.as_bytes());
-        let full = repo.join(path);
-        let mut mtime = None;
-        if let Ok(meta) = std::fs::symlink_metadata(&full) {
-            hash.update(meta.len().to_le_bytes());
-            if let Ok(at) = meta.modified() {
-                mtime = Some(at);
-                let at = DateTime::<Utc>::from(at);
-                hash.update(at.timestamp().to_le_bytes());
-                hash.update(at.timestamp_subsec_nanos().to_le_bytes());
-            }
-            if meta.is_symlink() {
-                mtime = std::fs::metadata(&full).and_then(|m| m.modified()).ok();
-                if let Ok(target) = std::fs::read_link(&full) {
-                    hash.update(target.to_string_lossy().as_bytes());
-                }
-            } else if meta.is_file() && meta.len() <= MAX_UNTRACKED_BYTES && meta.len() <= remaining
-            {
-                if let Ok(file) = std::fs::File::open(full) {
-                    let mut data = Vec::new();
-                    if file.take(remaining).read_to_end(&mut data).is_ok() {
-                        remaining -= data.len() as u64;
-                        hash.update(data);
-                    }
-                }
-            }
-        }
-        mtimes.push(mtime);
-    }
-    (json!(format!("{:x}", hash.finalize())), mtimes)
-}
-
-fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
-    let raw = git(
-        repo,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    let tokens: Vec<&str> = raw.split('\0').collect();
-    let (mut modified, mut untracked, mut deleted) = (0u64, 0u64, 0u64);
-    let mut paths: Vec<&str> = Vec::new();
-    let mut untracked_paths: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = tokens[i];
-        i += 1;
-        if token.len() < 4 || !token.is_char_boundary(3) {
-            continue;
-        }
-        let (xy, path) = (&token[..2], &token[3..]);
-        if xy.contains('R') || xy.contains('C') {
-            i += 1; // the original path of a rename or copy follows
-        }
-        if xy == "??" {
-            untracked += 1;
-            untracked_paths.push(path);
-        } else if xy.contains('D') {
-            deleted += 1;
-        } else {
-            modified += 1;
-        }
-        paths.push(path);
-    }
-
-    let (mut added, mut removed) = (0u64, 0u64);
-    // A clean status leaves no lines to count. An unborn branch has no HEAD, but its index still
-    // contains staged additions.
-    let baseline = if paths.is_empty() {
-        String::new()
-    } else if has_head {
-        "HEAD".to_owned()
-    } else {
-        git(repo, &["hash-object", "-t", "tree", "--stdin"])
-            .unwrap_or_default()
-            .trim()
-            .to_owned()
-    };
-    if !baseline.is_empty() {
-        for line in git(
-            repo,
-            &[
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                &baseline,
-                "--numstat",
-                "--",
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if let (Some(Ok(a)), Some(Ok(r))) = (
-                parts.first().map(|p| p.parse::<u64>()),
-                parts.get(1).map(|p| p.parse::<u64>()),
-            ) {
-                added += a;
-                removed += r;
-            }
-        }
-    }
-    for path in untracked_paths.iter().take(MAX_UNTRACKED_FILES) {
-        let full = repo.join(path);
-        let Ok(meta) = std::fs::metadata(&full) else {
-            continue;
-        };
-        if meta.len() > MAX_UNTRACKED_BYTES {
-            continue;
-        }
-        if let Ok(data) = std::fs::read(&full) {
-            if !data.contains(&0) {
-                added += data.iter().filter(|b| **b == b'\n').count() as u64;
-                added += u64::from(!data.is_empty() && !data.ends_with(b"\n"));
-            }
-        }
-    }
-
-    // Files copied in keep far older mtimes, so only edits after the last commit date the work;
-    // when every file is older, the work is at risk since that commit.
-    let last_commit = if has_head && !paths.is_empty() {
-        git(repo, &["log", "-1", "--format=%ct"])
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
-    } else {
-        None
-    };
-    let (fingerprint, mtimes) = dirty_fingerprint(repo, &raw, paths.iter().copied());
-    let mtimes: Vec<SystemTime> = mtimes.into_iter().flatten().collect();
-    let after_commit = mtimes
-        .iter()
-        .copied()
-        .filter(|t| last_commit.is_none_or(|c| *t > c));
-    let (oldest, newest) = match (after_commit.clone().min(), after_commit.max()) {
-        (Some(oldest), Some(newest)) => (Some(oldest), Some(newest)),
-        _ if mtimes.is_empty() => (None, None),
-        _ => (last_commit, last_commit),
-    };
-    Some(Dirty {
-        value: json!({
-            "files": paths.len(), "modified": modified, "untracked": untracked, "deleted": deleted,
-            "lines_added": added, "lines_removed": removed,
-            "oldest_change": oldest.map(iso), "newest_change": newest.map(iso),
-            "fingerprint": fingerprint,
-        }),
-        newest,
-        paths: paths.iter().map(|p| (*p).to_owned()).collect(),
-        mtimes,
-    })
-}
-
-/// Measure `items` in order on a few threads. Starting git dominates per-checkout measurements, so
-/// repositories with many worktrees would otherwise wait on one process after another.
-fn parallel<T: Sync, R: Send>(items: &[T], measure: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    const THREADS: usize = 4;
-    let size = items.len().div_ceil(THREADS).max(1);
-    std::thread::scope(|scope| {
-        let parts: Vec<_> = items
-            .chunks(size)
-            .map(|chunk| scope.spawn(|| chunk.iter().map(&measure).collect::<Vec<R>>()))
-            .collect();
-        parts
-            .into_iter()
-            .flat_map(|part| {
-                part.join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-            })
-            .collect()
-    })
-}
-
-/// An extra checkout's uncommitted paths and their modification times, read once per measurement.
-struct Checkout {
-    dir: PathBuf,
-    branch: Option<String>,
-    paths: Vec<String>,
-    mtimes: Vec<Option<SystemTime>>,
-}
-
-/// The extra worktrees, plus the status of each one that exists for the overnight and collision views.
-fn worktrees(repo: &Path) -> (Value, Vec<Checkout>) {
-    let mut items: Vec<Value> = Vec::new();
-    for line in git(repo, &["worktree", "list", "--porcelain"])
-        .unwrap_or_default()
-        .lines()
-    {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            items.push(json!({"path": path, "branch": null, "head": null, "prunable": false}));
-        } else if let Some(current) = items.last_mut() {
-            if let Some(head) = line.strip_prefix("HEAD ") {
-                current["head"] = json!(head);
-            } else if let Some(branch) = line.strip_prefix("branch ") {
-                current["branch"] = json!(branch.strip_prefix("refs/heads/").unwrap_or(branch));
-            } else if line.starts_with("prunable") {
-                current["prunable"] = json!(true);
-            }
-        }
-    }
-    let current = std::fs::canonicalize(repo).ok();
-    let mut extra: Vec<Value> = items
-        .into_iter()
-        .filter(|item| {
-            let path = item["path"].as_str().unwrap_or("");
-            current.is_none() || std::fs::canonicalize(path).ok() != current
-        })
-        .collect();
-    let statuses = parallel(&extra, |item| {
-        let path = PathBuf::from(item["path"].as_str().unwrap_or(""));
-        let exists = path.is_dir();
-        let raw = if exists {
-            git(
-                &path,
-                &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            )
-        } else {
-            None
-        };
-        let paths = raw.as_deref().map(parse_status_paths);
-        let (fingerprint, mtimes) = match (raw.as_deref(), paths.as_ref()) {
-            (Some(raw), Some(paths)) => {
-                dirty_fingerprint(&path, raw, paths.iter().map(String::as_str))
-            }
-            _ => (Value::Null, Vec::new()),
-        };
-        (path, exists, paths, fingerprint, mtimes)
-    });
-    let mut checkouts = Vec::new();
-    for (item, (path, exists, paths, fingerprint, mtimes)) in extra.iter_mut().zip(statuses) {
-        item["dirty_files"] = json!(paths.as_ref().map(Vec::len));
-        item["dirty_fingerprint"] = fingerprint;
-        if exists {
-            checkouts.push(Checkout {
-                branch: item["branch"].as_str().map(str::to_owned),
-                dir: path,
-                paths: paths.unwrap_or_default(),
-                mtimes,
-            });
-        }
-    }
-    let prunable = extra
-        .iter()
-        .filter(|w| w["prunable"] == json!(true))
-        .count();
-    (
-        json!({"count": extra.len(), "prunable": prunable, "items": extra}),
-        checkouts,
-    )
-}
-
-fn branches(repo: &Path, current: Option<&str>) -> Value {
-    let fmt = "--format=%(refname:short)\t%(committerdate:short)\t%(objectname)";
-    let merged = git(repo, &["branch", "--merged", "HEAD", fmt]).unwrap_or_default();
-    let merged_count = merged
-        .lines()
-        .filter_map(|l| l.split('\t').next())
-        .filter(|n| !n.is_empty() && Some(*n) != current)
-        .count();
-    let mut unmerged = Vec::new();
-    for line in git(repo, &["branch", "--no-merged", "HEAD", fmt])
-        .unwrap_or_default()
-        .lines()
-    {
-        let mut parts = line.split('\t');
-        let (name, last, head) = (
-            parts.next().unwrap_or(""),
-            parts.next().unwrap_or(""),
-            parts.next().unwrap_or(""),
-        );
-        let text = |s: &str| if s.is_empty() { Value::Null } else { json!(s) };
-        if !name.is_empty() {
-            unmerged.push(json!({"name": name, "last": text(last), "head": text(head)}));
-        }
-    }
-    json!({"merged_count": merged_count, "unmerged": unmerged})
-}
-
 /// The newest tag reachable from HEAD, its date and how many commits came after it.
 fn release(repo: &Path) -> Value {
     let Some(tag) = git(repo, &["describe", "--tags", "--abbrev=0"])
@@ -737,149 +211,6 @@ fn release(repo: &Path) -> Value {
     let since = git(repo, &["rev-list", "--count", &format!("{tag}..HEAD")])
         .and_then(|n| n.trim().parse::<u64>().ok());
     json!({"tag": tag, "date": date, "commits_since": since})
-}
-
-/// What happened since yesterday evening: commits on every local branch (worktrees included),
-/// their size, reverts among them, and uncommitted files edited in that time.
-fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[Checkout]) -> Value {
-    let evening = today
-        .pred_opt()
-        .and_then(|d| d.and_hms_opt(EVENING_HOUR, 0, 0))
-        .and_then(|t| Local.from_local_datetime(&t).earliest());
-    let Some(evening) = evening else {
-        return Value::Null;
-    };
-    let since = SystemTime::from(evening);
-    let log = git(
-        repo,
-        &[
-            "log",
-            "--branches",
-            &format!("--since-as-filter={}", evening.to_rfc3339()),
-            &format!("--until={today}T23:59:59"),
-            "--format=%x1e%s",
-            "--shortstat",
-            "--root",
-            "--diff-merges=off",
-            "--no-ext-diff",
-            "--no-textconv",
-        ],
-    )
-    .unwrap_or_default();
-    let (mut commits, mut reverts, mut added, mut removed) = (0u64, 0u64, 0u64, 0u64);
-    for entry in log.split('\u{1e}').filter(|e| !e.trim().is_empty()) {
-        commits += 1;
-        if entry.trim_start().starts_with("Revert") {
-            reverts += 1;
-        }
-        for part in entry
-            .lines()
-            .skip(1) // The commit subject can itself look like a shortstat line.
-            .filter(|l| l.contains("changed"))
-            .flat_map(|l| l.split(','))
-        {
-            let n: u64 = part
-                .split_whitespace()
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0);
-            if part.contains("insertion") {
-                added += n;
-            } else if part.contains("deletion") {
-                removed += n;
-            }
-        }
-    }
-    let touched = dirty.mtimes.iter().filter(|t| **t >= since).count()
-        + checkouts
-            .iter()
-            .flat_map(|c| c.mtimes.iter().flatten())
-            .filter(|t| **t >= since)
-            .count();
-    json!({"since": iso(since), "commits": commits, "lines_added": added, "lines_removed": removed, "reverts": reverts, "uncommitted_touched": touched})
-}
-
-/// Files that two lines of work change at once: the main checkout's uncommitted files, each extra
-/// worktree (uncommitted plus committed on its branch) and each unmerged branch without a worktree.
-/// These shared files may need coordination before merging.
-fn collisions(
-    repo: &Path,
-    base: Option<&str>,
-    dirty: &Dirty,
-    checkouts: &[Checkout],
-    branches: &Value,
-) -> Value {
-    let base = base.filter(|b| *b != "HEAD");
-    let diff = |dir: &Path, range: String| -> Vec<String> {
-        git(
-            dir,
-            &[
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--name-only",
-                "-z",
-                &range,
-            ],
-        )
-        .map(|o| {
-            o.split('\0')
-                .filter(|path| !path.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-    };
-    let mut lines: Vec<(Value, BTreeSet<String>)> = Vec::new();
-    lines.push((
-        json!({"kind": "main", "name": base.unwrap_or("HEAD")}),
-        dirty.paths.iter().cloned().collect(),
-    ));
-    let committed = match base {
-        Some(b) => parallel(checkouts, |c| diff(&c.dir, format!("{b}...HEAD"))),
-        None => Vec::new(),
-    };
-    let mut committed = committed.into_iter();
-    let mut in_worktree: Vec<String> = Vec::new();
-    for checkout in checkouts {
-        let dir = checkout.dir.as_path();
-        let branch = checkout.branch.clone();
-        let mut files: BTreeSet<String> = checkout.paths.iter().cloned().collect();
-        files.extend(committed.next().into_iter().flatten());
-        let name = branch.clone().unwrap_or_else(|| {
-            dir.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        });
-        in_worktree.extend(branch);
-        lines.push((json!({"kind": "worktree", "name": name}), files));
-    }
-    if let Some(b) = base {
-        let names: Vec<&str> = branches["unmerged"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|br| br["name"].as_str())
-            .filter(|name| !name.is_empty() && !in_worktree.iter().any(|w| w == name))
-            .collect();
-        let changed = parallel(&names, |name| diff(repo, format!("{b}...{name}")));
-        for (name, files) in names.into_iter().zip(changed) {
-            lines.push((
-                json!({"kind": "branch", "name": name}),
-                files.into_iter().collect(),
-            ));
-        }
-    }
-    let mut out = Vec::new();
-    for (i, (a, fa)) in lines.iter().enumerate() {
-        for (b, fb) in &lines[i + 1..] {
-            let shared: Vec<&String> = fa.intersection(fb).collect();
-            if !shared.is_empty() {
-                out.push(json!({"a": a, "b": b, "count": shared.len(), "files": shared.iter().take(5).collect::<Vec<_>>()}));
-            }
-        }
-    }
-    json!(out)
 }
 
 fn dir_size(dir: &Path) -> u64 {
@@ -1086,6 +417,18 @@ pub fn collect_reusing(
     with_ci: bool,
     previous: Option<&Value>,
 ) -> Value {
+    collect_at_checkpoint(path, today, with_ci, previous, || {})
+}
+
+/// The local checkpoint lets contract tests change repository identity after reading it,
+/// without depending on process timing or exposing a production fault switch.
+fn collect_at_checkpoint(
+    path: &str,
+    today: NaiveDate,
+    with_ci: bool,
+    previous: Option<&Value>,
+    before_identity_check: impl FnOnce(),
+) -> Value {
     let repo = Path::new(path);
     if !repo.is_dir() {
         return json!({"ok": false, "error": "path_missing", "is_git": false});
@@ -1173,6 +516,7 @@ pub fn collect_reusing(
         "code": code,
         "activity": activity,
     });
+    before_identity_check();
     if head != trimmed(git(repo, &["rev-parse", "HEAD"]))
         || branch != trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]))
     {
@@ -1308,63 +652,57 @@ pub fn fingerprint(facts: &Value) -> String {
 mod tests {
     use super::*;
 
-    #[cfg(windows)]
     #[test]
-    fn command_timeout_includes_descendant_output_pipes() {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-            TH32CS_SNAPPROCESS,
-        };
-
+    fn collection_rejects_a_head_or_branch_changed_during_measurement() {
         let dir = tempfile::tempdir().unwrap();
-        // A unique executable name identifies only this test's descendants,
-        // even when the intermediary cmd.exe has already exited.
-        let name = format!("watchtower-timeout-{}.exe", std::process::id());
-        let system = std::env::var_os("SystemRoot").unwrap();
-        std::fs::copy(
-            Path::new(&system).join("System32/ping.exe"),
-            dir.path().join(&name),
-        )
-        .unwrap();
-        let running = || {
-            let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-            assert_ne!(snapshot, INVALID_HANDLE_VALUE);
-            let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
-            let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-            entry.dwSize = std::mem::size_of_val(&entry) as u32;
-            let mut more = unsafe { Process32FirstW(snapshot.as_raw_handle(), &mut entry) };
-            while more != 0 {
-                let end = entry.szExeFile.iter().position(|c| *c == 0).unwrap();
-                if String::from_utf16_lossy(&entry.szExeFile[..end]) == name {
-                    return true;
-                }
-                more = unsafe { Process32NextW(snapshot.as_raw_handle(), &mut entry) };
-            }
-            false
-        };
-        for command in [
-            format!("{name} -n 4 127.0.0.1"),
-            format!("start \"\" /B {name} -n 4 127.0.0.1"),
-        ] {
-            let started = Instant::now();
-            let result = run(
-                "cmd.exe",
-                &["/D", "/C", &command],
-                dir.path(),
-                Duration::from_millis(100),
-            );
-            assert_eq!(result, (false, "cmd.exe timed out".to_owned()));
+        let write_git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_AUTHOR_DATE", "2026-09-29T10:00:00Z")
+                .env("GIT_COMMITTER_DATE", "2026-09-29T10:00:00Z")
+                .output()
+                .unwrap();
             assert!(
-                started.elapsed() < Duration::from_secs(2),
-                "the output pipes exceeded the command's timeout: {command}"
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
             );
-            let settled_by = Instant::now() + Duration::from_millis(250);
-            while running() && Instant::now() < settled_by {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            assert!(!running(), "a descendant outlived the command: {command}");
+        };
+        write_git(&["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+        write_git(&["add", "main.rs"]);
+        write_git(&["commit", "-q", "-m", "initial"]);
+        let today = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+        let path = dir.path().to_str().unwrap();
+        let initial = collect(path, today, false);
+        assert_eq!(initial["ok"], true);
+        assert_eq!(initial["code"]["ok"], true);
+        assert_eq!(initial["code"]["source_code"], 1);
+        for change in [
+            vec!["commit", "-q", "--allow-empty", "-m", "new head"],
+            vec!["checkout", "-q", "-b", "other"],
+        ] {
+            let measured = collect_at_checkpoint(path, today, false, None, || {
+                write_git(&change);
+            });
+            assert_eq!(measured["ok"], false, "{change:?}");
+            assert_eq!(measured["is_git"], true);
+            assert_eq!(measured["error"], "repository_changed_during_measurement");
+            assert_eq!(measured["code"]["ok"], false);
+            assert_eq!(measured["code"]["partial"], true);
+            assert_eq!(
+                measured["code"]["source_code"],
+                initial["code"]["source_code"]
+            );
         }
     }
 

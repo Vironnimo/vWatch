@@ -4,7 +4,8 @@ This domain measures repository state and supplies the factual basis for Watchto
 
 ## Overview
 
-- `src/facts.rs` owns Git/process collection, CI lookup, local working-tree and side-work measurements, rebuildable-space measurement, and the basis/fingerprint used by due detection.
+- `src/facts.rs` owns collection/reuse coordination, shared commit history, CI lookup, rebuildable-space measurement, and the basis/fingerprint used by due detection.
+- Private `src/facts/process.rs` owns bounded command execution and read-only Git configuration; `src/facts/working_tree.rs` owns status/dirty measurements, side checkouts/branches, overnight work and collisions. Their interfaces remain inside the facts owner.
 - `src/facts/statistics.rs` owns working-tree code/language counts and reconstructed daily activity/hotspots. It does not store observations or compare saved documents.
 - `src/service.rs` selects and refreshes watched projects, supplies previous measurements, carries daily space measurements forward and persists results. `src/store/history.rs` retains observations; `src/service/statistics.rs` assembles history and coverage-aware comparisons. See `application.md` and `persistence.md` before changing those responsibilities.
 - The desktop renders measurements directly; agents supply interpretation separately. A configured remote is not proof of a backup, and unavailable measurements must remain distinguishable from measured zero.
@@ -33,7 +34,7 @@ Remote URL user-info is stripped before storing the remote list. Keep credential
 
 ## Constraints & Gotchas
 
-`tests/facts.rs` owns real temporary-repository contracts, including unchanged index state, unborn branches, linked checkouts, same-sized dirty edits, collisions and equivalence between reused/full measurements. Unit tests in `src/facts.rs` cover subprocess/CI parsing details. Extend the owning behavior test rather than adding tests that only mirror helpers.
+`tests/facts.rs` owns real temporary-repository contracts, including unchanged index state, unborn branches, linked checkouts, same-sized dirty edits, collisions and equivalence between reused/full measurements. Local unit contracts cover subprocess containment, porcelain records, CI parsing and a controlled HEAD/branch mutation at collection's final identity checkpoint. Extend the owning behavior test rather than adding tests that only mirror helpers.
 
 Use the fixed test date and isolated fixture setup from `tests/common/mod.rs` and `development.md`. Temporary non-repositories must not discover a parent checkout through Git traversal. Fixture Git writes create test inputs; they are not permission for the production collector to mutate watched repositories.
 

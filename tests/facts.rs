@@ -22,6 +22,15 @@ fn facts_describe_history_backup_and_unsaved_work() {
         ],
     );
     std::fs::write(repo.join("f0.txt"), "changed\nand more\n").unwrap();
+    let edited_at = chrono::DateTime::parse_from_rfc3339("2026-09-30T14:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    std::fs::File::options()
+        .write(true)
+        .open(repo.join("f0.txt"))
+        .unwrap()
+        .set_modified(edited_at.into())
+        .unwrap();
     std::fs::write(repo.join("new.txt"), "a\nb\nc\n").unwrap();
     // a file copied in from an old archive keeps its ancient mtime
     let archived =
@@ -89,15 +98,17 @@ fn facts_describe_history_backup_and_unsaved_work() {
         (Some(2 + 3), Some(1))
     );
     // only files edited after the last commit (2026-09-29 10:00) date the unsaved work
-    assert!(
-        d["oldest_change"].as_str().unwrap() > "2026-09-29T12",
-        "{}",
-        d["oldest_change"]
+    assert_eq!(
+        d["oldest_change"],
+        edited_at.format("%Y-%m-%dT%H:%M:%SZ").to_string()
     );
     // uncommitted edits count as work
     assert_eq!(
         f["last_work"].as_str().unwrap(),
-        chrono::Local::now().date_naive().to_string()
+        edited_at
+            .with_timezone(&chrono::Local)
+            .date_naive()
+            .to_string()
     );
 
     // with an upstream that has only the first commit, the two later ones are unpushed
@@ -147,11 +158,8 @@ fn fingerprint_changes_with_new_work() {
         before
     );
     std::fs::write(repo.join("f0.txt"), "edited\n").unwrap();
-    assert_ne!(
-        facts::fingerprint(&facts::collect(path, today(), false)),
-        before
-    );
     let edited = facts::fingerprint(&facts::collect(path, today(), false));
+    assert_ne!(edited, before);
     let modified = std::fs::metadata(repo.join("f0.txt"))
         .unwrap()
         .modified()
@@ -220,6 +228,13 @@ fn measuring_a_repository_never_refreshes_its_index() {
 fn linked_checkout_excludes_itself_and_tracks_dirty_work_in_other_checkouts() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = common::demo_repo(tmp.path());
+    let copy_source: String = (0..100)
+        .map(|i| format!("line {i} original text\n"))
+        .collect();
+    std::fs::write(repo.join("source.txt"), &copy_source).unwrap();
+    common::git(&repo, &["add", "source.txt"]);
+    common::git(&repo, &["commit", "-q", "-m", "copy source"]);
+    common::git(&repo, &["config", "status.renames", "copies"]);
     let wt = tmp.path().join("linked");
     common::git(
         &repo,
@@ -236,13 +251,39 @@ fn linked_checkout_excludes_itself_and_tracks_dirty_work_in_other_checkouts() {
     let before = facts::collect(linked_path, today(), false);
     assert_eq!(before["worktrees"]["count"], 1);
     assert_eq!(before["worktrees"]["items"][0]["branch"], "main");
-    std::fs::write(repo.join("f0.txt"), "other checkout\n").unwrap();
+    common::git(&repo, &["mv", "f0.txt", "renamed.txt"]);
+    std::fs::write(repo.join("renamed.txt"), "other checkout\n").unwrap();
+    std::fs::write(repo.join("copied.txt"), &copy_source).unwrap();
+    std::fs::write(
+        repo.join("source.txt"),
+        copy_source.replace("line 0 original", "line 0 changed"),
+    )
+    .unwrap();
+    common::git(&repo, &["add", "source.txt", "copied.txt"]);
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(status.contains("C  copied.txt\0source.txt\0"), "{status:?}");
+    assert!(status.contains("RM renamed.txt\0f0.txt\0"), "{status:?}");
     let after = facts::collect(linked_path, today(), false);
     assert_ne!(facts::fingerprint(&before), facts::fingerprint(&after));
-    assert_eq!(after["night"]["uncommitted_touched"], 1);
+    assert_eq!(after["worktrees"]["items"][0]["dirty_files"], 3);
+    let direct = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(direct["dirty"]["files"], 3);
+    assert_eq!(direct["dirty"]["modified"], 3);
+    assert_eq!(direct["dirty"]["untracked"], 0);
+    assert_eq!(
+        direct["dirty"]["fingerprint"],
+        after["worktrees"]["items"][0]["dirty_fingerprint"]
+    );
+    assert_eq!(after["night"]["uncommitted_touched"], 3);
     assert_eq!(after["collisions"], serde_json::json!([]));
     let second_before = facts::fingerprint(&after);
-    std::fs::write(repo.join("f0.txt"), "next variation\n").unwrap();
+    std::fs::write(repo.join("renamed.txt"), "next variation\n").unwrap();
     assert_ne!(
         second_before,
         facts::fingerprint(&facts::collect(linked_path, today(), false))
