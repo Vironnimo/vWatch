@@ -63,6 +63,11 @@ pub fn skill_dir() -> PathBuf {
 /// Write the embedded Skill next to the exe, touching only files whose content differs.
 pub fn export_skill() -> std::io::Result<PathBuf> {
     let dir = skill_dir();
+    export_skill_to(&dir)?;
+    Ok(dir)
+}
+
+fn export_skill_to(dir: &Path) -> std::io::Result<()> {
     for (rel, content) in SKILL_FILES {
         let path = dir.join(rel);
         if std::fs::read_to_string(&path).is_ok_and(|current| current == *content) {
@@ -73,7 +78,7 @@ pub fn export_skill() -> std::io::Result<PathBuf> {
         }
         std::fs::write(&path, content)?;
     }
-    Ok(dir)
+    Ok(())
 }
 
 /// What the settings panel shows.
@@ -222,5 +227,87 @@ pub fn set_agent_access(on: bool) -> std::io::Result<()> {
         Err(std::io::Error::other(
             "PATH changes are only available on Windows",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_skill_export_is_exact_idempotent_and_separate_from_data_home() {
+        let scratch = tempfile::tempdir().unwrap();
+        let exported = scratch.path().join("program/skill/watchtower");
+        assert_eq!(
+            SKILL_FILES
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            [
+                "SKILL.md",
+                "references/cli.md",
+                "references/card-guide.md",
+                "references/portfolio-guide.md"
+            ]
+        );
+        export_skill_to(&exported).unwrap();
+        let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for (relative, content) in SKILL_FILES {
+            let path = exported.join(relative);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), *content);
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        let custom = exported.join("owner-notes.txt");
+        std::fs::write(&custom, "Keep private installation notes").unwrap();
+        export_skill_to(&exported).unwrap();
+        for (relative, _) in SKILL_FILES {
+            assert_eq!(
+                std::fs::metadata(exported.join(relative))
+                    .unwrap()
+                    .modified()
+                    .unwrap(),
+                old
+            );
+        }
+        std::fs::write(exported.join("references/cli.md"), "stale export").unwrap();
+        export_skill_to(&exported).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(exported.join("references/cli.md")).unwrap(),
+            SKILL_FILES[1].1
+        );
+        assert_eq!(
+            std::fs::read_to_string(custom).unwrap(),
+            "Keep private installation notes"
+        );
+
+        // No export or OS integration is performed against the real executable.
+        // The override selects data only; resolving it must not create folders.
+        let original = std::env::var_os("WATCHTOWER_HOME");
+        struct RestoreHome(Option<std::ffi::OsString>);
+        impl Drop for RestoreHome {
+            fn drop(&mut self) {
+                if let Some(value) = &self.0 {
+                    std::env::set_var("WATCHTOWER_HOME", value);
+                } else {
+                    std::env::remove_var("WATCHTOWER_HOME");
+                }
+            }
+        }
+        let _restore = RestoreHome(original);
+        let data = scratch.path().join("data-only");
+        let installed_skill = skill_dir();
+        std::env::set_var("WATCHTOWER_HOME", &data);
+        assert_eq!(data_path(), data);
+        assert!(!data.exists());
+        assert_eq!(skill_dir(), installed_skill);
+        assert_eq!(skill_dir(), app_dir().join("skill/watchtower"));
+        assert_eq!(data_dir(), data);
+        assert!(data.is_dir());
+        assert!(!data.join("skill").exists());
     }
 }
