@@ -89,8 +89,10 @@ cargo run --bin Watchtower -- due --no-refresh # the CLI from source
 cargo test --no-default-features # the core and CLI without desktop dependencies
 ```
 
-- Set `WATCHTOWER_HOME` to a scratch folder when running from source, so test data stays out of the installed app. Copy the installed `data\watchtower.db` there to try changes on real data.
-- Build into the one `target\` folder. Never set `CARGO_TARGET_DIR` to a second folder (each is a full rebuild of several gigabytes) and never put logs, screenshots or scripts into `target\`; use your scratch folder.
+- Use the repository-root `.tmp/` for all development scratch files: temporary scripts, logs, screenshots, payloads, database copies and test fixtures. Create task-specific subfolders there; do not use the operating system's temp folder.
+- Cargo sets `TEMP`, `TMP` and `TMPDIR` to this checkout's `.tmp/`. For tools launched outside Cargo, set those variables to the same absolute path in the command's process environment (see README); do not change user or machine environment settings.
+- Set `WATCHTOWER_HOME` to a task-specific folder under `.tmp/` when running from source, so test data stays out of the installed app. Copy the installed `data\watchtower.db` there to try changes on real data.
+- Build into the one `target\` folder. Never set `CARGO_TARGET_DIR` to a second folder (each is a full rebuild of several gigabytes) and never put logs, screenshots or scripts into `target\`; use `.tmp/`.
 - Install with `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`. It closes the running window; start it again afterwards. Do not install while an agent is using the installed CLI.
 - Tests guard contracts (service behavior, CLI JSON, facts), not individual changes. Extend the test that owns a behavior before adding a new one. Keep them fast and deterministic with the fixed clock and temporary repositories.
 - Verify UI changes in the running window. Do not change the owner's preferences (style, hidden sections) or leave ratings, replies or ticks behind while testing; `watchtower feedback` must show no test entries afterwards.

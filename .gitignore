@@ -1,2 +1,4 @@
 /target/
 /gen/
+/.tmp/*
+!/.tmp/.gitkeep

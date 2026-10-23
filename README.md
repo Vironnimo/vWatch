@@ -96,6 +96,19 @@ cargo test --no-default-features
 cargo run --bin Watchtower -- due --no-refresh
 ```
 
-Run the window from source with `cargo run`; set `WATCHTOWER_HOME` to a scratch folder to keep test data out of the installed app.
+Run the window from source with `cargo run`; set `WATCHTOWER_HOME` to a task-specific folder under `.tmp/` to keep test data out of the installed app.
+
+All development scratch files belong in the repository-root `.tmp/`, whose contents are ignored by Git. Cargo configures `TEMP`, `TMP` and `TMPDIR` there for builds, tests and `cargo run`. Run Cargo from this checkout so it loads `.cargo/config.toml`. For other tools, set the same variables in the current PowerShell process from the repository root:
+
+```powershell
+$repoTemp = (New-Item -ItemType Directory -Force -Path .tmp).FullName
+$env:TEMP = $repoTemp
+$env:TMP = $repoTemp
+$env:TMPDIR = $repoTemp
+$env:GIT_CEILING_DIRECTORIES = $repoTemp
+$env:WATCHTOWER_HOME = Join-Path $repoTemp 'dev-instance'
+```
+
+Use task-specific subfolders for temporary scripts, logs, screenshots, payloads and database copies. `GIT_CEILING_DIRECTORIES` (also configured by Cargo) prevents temporary folders without their own repository from discovering Watchtower's parent Git repository. Keep build output in the existing `target/` folder.
 
 The UI behavior tests use Node's built-in test runner and need no browser packages.

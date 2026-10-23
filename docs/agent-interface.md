@@ -14,17 +14,17 @@ Build the console without desktop dependencies:
 cargo build --no-default-features --bin Watchtower
 ```
 
-Use an absolute scratch folder for development calls. This example reads an isolated instance from the repository root:
+Use an absolute scratch folder under the repository's `.tmp/` for development calls. This example reads an isolated instance from the repository root:
 
 ```powershell
-$env:WATCHTOWER_HOME = Join-Path $env:TEMP 'watchtower-agent-interface'
+$env:WATCHTOWER_HOME = Join-Path (Get-Location).Path '.tmp/watchtower-agent-interface'
 & ./target/debug/Watchtower.exe projects list
 ```
 
 Git Bash equivalent:
 
 ```bash
-WATCHTOWER_HOME="$LOCALAPPDATA/Temp/watchtower-agent-interface" ./target/debug/Watchtower.exe projects list
+WATCHTOWER_HOME="$PWD/.tmp/watchtower-agent-interface" ./target/debug/Watchtower.exe projects list
 ```
 
 The global `--data-dir <folder>` overrides `WATCHTOWER_HOME`. Non-default instances identify themselves in text and JSON. Printed continuations preserve the selected instance through an opaque `--instance` locator; copy them unchanged. The locator is an encoded path, not a secret or permission grant.

@@ -1,0 +1,8 @@
+# Keep build and test scratch files inside this checkout, even when the shell
+# already points TEMP or TMP at the operating system's temporary directory.
+[env]
+TEMP = { value = ".tmp", relative = true, force = true }
+TMP = { value = ".tmp", relative = true, force = true }
+TMPDIR = { value = ".tmp", relative = true, force = true }
+# Temporary folders without their own .git must not discover this repository.
+GIT_CEILING_DIRECTORIES = { value = ".tmp", relative = true, force = true }
