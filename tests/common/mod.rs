@@ -105,3 +105,14 @@ pub fn remove_history_schema(db: &rusqlite::Connection) {
     }
     db.execute_batch("DROP TABLE IF EXISTS fact_samples; DROP TABLE IF EXISTS fact_payloads; DROP TABLE IF EXISTS proposals; DROP TABLE IF EXISTS content_history; DROP TABLE IF EXISTS history_migrations;").unwrap();
 }
+
+/// Complete controlled measurement for service-only transition/history contracts.
+pub fn measured_facts(lines: u64) -> Value {
+    json!({"ok":true,"is_git":true,"head":"fixture-head","branch":"main","has_remote":true,
+        "commits":{"total":1,"weeks":[]},"remotes":[],"upstream":"origin/main","ahead":0,"behind":0,"unpushed_since":null,
+        "dirty":{"files":0,"lines_added":0,"lines_removed":0,"fingerprint":"clean"},
+        "worktrees":{"items":[]},"branches":{"unmerged":[]},"release":null,"night":[],"collisions":[],
+        "ci":{"state":"skipped"},"docs_mtime":{},"last_work":null,
+        "code":{"ok":true,"partial":false,"method":"tokei","source_code":lines,"languages":[{"language":"Python","category":"source","code":lines}]},
+        "activity":{"ok":true,"from":"2026-09-01","through":"2026-10-02","days":[{"date":"2026-09-29","commits":1,"added":1,"removed":0}],"hotspots":[]}})
+}

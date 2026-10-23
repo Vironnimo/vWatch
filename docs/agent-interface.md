@@ -2,6 +2,8 @@
 
 Watchtower's console CLI and desktop window call the same service. People and agents read the same ordinary text; programs explicitly request complete JSON. The operating Skill teaches the daily observation run and user-requested owner actions without database access, GUI automation or a mandatory discovery call.
 
+Owner-change JSON receipts expose an opaque `undo_token` alongside the compatible `undo` command. Desktop callers pass the token directly to `undo`; text callers keep copying the printed command. Overview `idea_states` entries carry the selected Task content together with its guarded source revision, so consumers do not select independently from another Task list.
+
 This document records capability coverage, call sequences, recovery contracts and validation scope. Update it with the CLI, desktop handlers and `skill/watchtower/` when those contracts change.
 
 ## Entry points and test instances
