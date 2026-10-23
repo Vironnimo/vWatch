@@ -677,6 +677,16 @@ fn facts_problems_are_failures_while_other_due_projects_remain_actionable() {
         !measured.contains("Error: -"),
         "successful measurement has no error diagnostic"
     );
+    std::fs::write(repo.join("large-draft.txt"), vec![b'x'; 2_000_001]).unwrap();
+    let (status, measured) = run(&home, &["facts", "refresh", "demo", "--no-ci"]);
+    assert_eq!(status, 0, "repository Facts remain readable: {measured}");
+    assert!(
+        measured.contains("Incomplete measurements") && measured.contains("dirty_lines"),
+        "{measured}"
+    );
+    let (status, shown) = run(&home, &["facts", "show", "demo"]);
+    assert_eq!(status, 0, "{shown}");
+    assert!(shown.contains("unknown, not zero"), "{shown}");
     svc.store()
         .add_project(
             "missing",

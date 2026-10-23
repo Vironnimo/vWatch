@@ -237,6 +237,21 @@ fn contexts_report_how_long_risks_and_items_have_lasted() {
     assert_eq!(brief["owner_response"]["open_questions"], 1);
     assert_eq!(brief["owner_response"]["oldest_open_question_days"], 8);
     assert_eq!(brief["owner_response"]["reactions_last_14_days"], 0);
+    // A bounded line scan losing coverage must not compare a file count with a line count.
+    std::fs::write(repo.join("large-draft.txt"), "line\n".repeat(100)).unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    clock.advance(Duration::days(1));
+    std::fs::write(repo.join("large-draft.txt"), vec![b'x'; 2_000_001]).unwrap();
+    svc.refresh_facts(None, false).unwrap();
+    let streaks = svc.context("demo").unwrap()["risk_streaks"].clone();
+    let streak = streaks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "uncommitted")
+        .unwrap();
+    assert!(streak["now"]["lines_added"].is_null());
+    assert_eq!(streak["trend"], "steady");
 }
 
 #[test]

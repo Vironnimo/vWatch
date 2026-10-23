@@ -183,7 +183,7 @@ impl Store {
                     Ok(StoredFacts {
                         collected_at: r.get(0)?,
                         fingerprint: r.get(1)?,
-                        data: json(r.get(2)?),
+                        data: crate::facts::measurement_quality(json(r.get(2)?)),
                     })
                 },
             )

@@ -544,7 +544,7 @@ impl Watchtower {
             data["space"] = match before
                 .as_ref()
                 .map(|b| &b.data["space"])
-                .filter(|s| s["measured_on"] == today.to_string())
+                .filter(|s| s["ok"] == true && s["measured_on"] == today.to_string())
             {
                 Some(space) => space.clone(),
                 None => facts::space(&project.path, today),
@@ -562,6 +562,10 @@ impl Watchtower {
             "id": project.id,
             "ok": data["ok"].as_bool().unwrap_or(false),
             "error": data.get("error").cloned().unwrap_or(Value::Null),
+            "incomplete_measurements": if data["ok"] == true {
+                [("dirty_lines", data["dirty"]["line_counts"]["ok"] == true), ("rebuildable_space", data["space"]["ok"] == true)]
+                    .into_iter().filter_map(|(name, ok)| (!ok).then_some(name)).collect::<Vec<_>>()
+            } else { Vec::new() },
             "changed": before.is_none_or(|b| b.fingerprint != fp),
         }))
     }

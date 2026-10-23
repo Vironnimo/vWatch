@@ -107,8 +107,14 @@ fn warning_ack_applies(key: &str, before: &Value, now: &Value) -> bool {
                 && ["files", "lines_added", "lines_removed"]
                     .iter()
                     .all(|field| {
-                        now["dirty"][*field].as_u64().unwrap_or(0)
-                            <= before["dirty"][*field].as_u64().unwrap_or(0)
+                        match (
+                            now["dirty"][*field].as_u64(),
+                            before["dirty"][*field].as_u64(),
+                        ) {
+                            (Some(now), Some(before)) => now <= before,
+                            (None, None) => true,
+                            _ => false,
+                        }
                     })
         }
         "worktrees" => now["items"]
@@ -206,10 +212,10 @@ fn amount(kind: &str, o: &RiskObservation) -> Value {
 
 fn trend(kind: &str, then: &RiskObservation, now: &RiskObservation) -> Value {
     let (a, b) = match kind {
-        "uncommitted" => (
-            then.lines_added.or(then.dirty_files),
-            now.lines_added.or(now.dirty_files),
-        ),
+        "uncommitted" => match (then.lines_added, now.lines_added) {
+            (Some(then), Some(now)) => (Some(then), Some(now)),
+            _ => (then.dirty_files, now.dirty_files),
+        },
         "unpushed" => (then.ahead, now.ahead),
         _ => return Value::Null,
     };

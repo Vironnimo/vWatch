@@ -190,7 +190,7 @@ fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest()
         .unwrap();
     let base = json!({
         "ok": true, "is_git": true, "has_remote": true, "head": "first",
-        "dirty": {"files": 0}, "ahead": 0, "ci": {"state": "green"},
+        "dirty": {"files": 0,"lines_added":0,"lines_removed":0,"line_counts":{"ok":true,"partial":false,"errors":[]}}, "ahead": 0, "ci": {"state": "green"},
         "branches": {"unmerged": []}, "worktrees": {"items": []},
     });
     svc.store()
@@ -208,7 +208,7 @@ fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest()
     assert_eq!(viewed["total"], 1);
     let busy = json!({
         "ok": true, "is_git": true, "has_remote": false, "head": "second",
-        "dirty": {"files": 3}, "ahead": 6, "ci": {"state": "red"},
+        "dirty": {"files": 3,"lines_added":0,"lines_removed":0,"line_counts":{"ok":true,"partial":false,"errors":[]}}, "ahead": 6, "ci": {"state": "red"},
         "branches": {"unmerged": [{"name": "feature"}]},
         "worktrees": {"items": [{"path": "C:/work/feature", "head": "topic", "dirty_files": 2, "prunable": true}]},
     });
@@ -225,6 +225,14 @@ fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest()
             f
         }),
         ("failed", json!({"ok": false, "error": "path_missing"})),
+        ("incomplete_lines", {
+            let mut f = busy.clone();
+            f["dirty"]["lines_added"] = Value::Null;
+            f["dirty"]["lines_removed"] = Value::Null;
+            f["dirty"]["line_counts"] =
+                json!({"ok":false,"partial":true,"errors":["untracked_size_limit"]});
+            f
+        }),
         ("clean", base),
         ("busy_again", busy),
     ] {

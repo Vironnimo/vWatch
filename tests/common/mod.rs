@@ -110,7 +110,7 @@ pub fn remove_history_schema(db: &rusqlite::Connection) {
 pub fn measured_facts(lines: u64) -> Value {
     json!({"ok":true,"is_git":true,"head":"fixture-head","branch":"main","has_remote":true,
         "commits":{"total":1,"weeks":[]},"remotes":[],"upstream":"origin/main","ahead":0,"behind":0,"unpushed_since":null,
-        "dirty":{"files":0,"lines_added":0,"lines_removed":0,"fingerprint":"clean"},
+        "dirty":{"files":0,"lines_added":0,"lines_removed":0,"line_counts":{"ok":true,"partial":false,"errors":[]},"fingerprint":"clean"},
         "worktrees":{"items":[]},"branches":{"unmerged":[]},"release":null,"night":[],"collisions":[],
         "ci":{"state":"skipped"},"docs_mtime":{},"last_work":null,
         "code":{"ok":true,"partial":false,"method":"tokei","source_code":lines,"languages":[{"language":"Python","category":"source","code":lines}]},

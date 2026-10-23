@@ -213,49 +213,136 @@ fn release(repo: &Path) -> Value {
     json!({"tag": tag, "date": date, "commits_since": since})
 }
 
-fn dir_size(dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|e| match e.file_type() {
-            Ok(t) if t.is_dir() => dir_size(&e.path()),
-            Ok(t) if t.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
-            _ => 0, // symlinks and junctions are not followed
-        })
-        .sum()
+fn dir_size(
+    dir: &Path,
+    read_dir: &impl Fn(&Path) -> std::io::Result<std::fs::ReadDir>,
+) -> std::io::Result<u64> {
+    let mut bytes = 0;
+    for entry in read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            continue;
+        }
+        bytes += if kind.is_dir() {
+            dir_size(&entry.path(), read_dir)?
+        } else if kind.is_file() {
+            entry.metadata()?.len()
+        } else {
+            0
+        };
+    }
+    Ok(bytes)
 }
 
 /// Space in folders a build or package manager recreates, at the top of the repository and one level
 /// below. Walking them is slow, so Watchtower measures this once a day.
 pub fn space(path: &str, today: NaiveDate) -> Value {
+    space_with(path, today, &|dir| std::fs::read_dir(dir))
+}
+
+fn space_with(
+    path: &str,
+    today: NaiveDate,
+    read_dir: &impl Fn(&Path) -> std::io::Result<std::fs::ReadDir>,
+) -> Value {
     let repo = Path::new(path);
-    let mut found: Vec<(String, u64)> = Vec::new();
+    let mut found: Vec<Value> = Vec::new();
+    let issue = |path: &str, error: &std::io::Error| {
+        json!({"path":path,"reason":match error.kind() {
+            std::io::ErrorKind::PermissionDenied => "permission_denied",
+            std::io::ErrorKind::NotFound => "not_found",
+            _ => "read_failed",
+        }})
+    };
     let mut look = |dir: &Path, prefix: &str| {
+        let mut errors = Vec::new();
         for name in REBUILDABLE {
             let candidate = dir.join(name);
-            if candidate.is_dir() && !candidate.is_symlink() {
-                found.push((format!("{prefix}{name}"), dir_size(&candidate)));
+            let relative = format!("{prefix}{name}");
+            let measured = match std::fs::symlink_metadata(&candidate) {
+                Ok(meta) if meta.is_dir() && !meta.is_symlink() => dir_size(&candidate, read_dir),
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => Err(error),
+            };
+            match measured {
+                Ok(bytes) if bytes > 0 => {
+                    found.push(json!({"path":relative,"bytes":bytes,"ok":true}))
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    errors.push(issue(&relative, &error));
+                    found.push(json!({"path":relative,"bytes":null,"ok":false}));
+                }
             }
         }
+        errors
     };
-    look(repo, "");
-    if let Ok(entries) = std::fs::read_dir(repo) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type().is_ok_and(|t| t.is_dir())
-                && !name.starts_with('.')
-                && !REBUILDABLE.contains(&name.as_str())
-            {
-                look(&entry.path(), &format!("{name}/"));
+    let mut errors = look(repo, "");
+    match read_dir(repo) {
+        Err(error) => errors.push(issue(".", &error)),
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Err(error) => errors.push(issue(".", &error)),
+                    Ok(entry) => {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        match entry.file_type() {
+                            Ok(kind)
+                                if kind.is_dir()
+                                    && !kind.is_symlink()
+                                    && !name.starts_with('.')
+                                    && !REBUILDABLE.contains(&name.as_str()) =>
+                            {
+                                errors.extend(look(&entry.path(), &format!("{name}/")))
+                            }
+                            Err(error) => errors.push(issue(&name, &error)),
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
     }
-    found.retain(|f| f.1 > 0);
-    found.sort_by_key(|f| std::cmp::Reverse(f.1));
-    let total: u64 = found.iter().map(|(_, n)| n).sum();
-    json!({"measured_on": today.to_string(), "total_bytes": total, "dirs": found.iter().map(|(p, n)| json!({"path": p, "bytes": n})).collect::<Vec<_>>()})
+    found.sort_by_key(|f| std::cmp::Reverse(f["bytes"].as_u64()));
+    let total: u64 = found.iter().filter_map(|f| f["bytes"].as_u64()).sum();
+    json!({"measured_on": today.to_string(), "ok":errors.is_empty(), "partial":!errors.is_empty(), "errors":errors,
+        "total_bytes":errors.is_empty().then_some(total), "dirs":found})
+}
+
+/// Older observations have no evidence that these submeasurements completed. Adapt reads without
+/// rewriting retained history or treating their previous partial-looking totals as measured zero.
+pub(crate) fn measurement_quality(mut facts: Value) -> Value {
+    if let Some(dirty) = facts.get_mut("dirty").filter(|value| value.is_object()) {
+        if dirty["line_counts"]["ok"] != true {
+            dirty["lines_added"] = Value::Null;
+            dirty["lines_removed"] = Value::Null;
+            if !dirty["line_counts"].is_object() {
+                dirty["line_counts"] =
+                    json!({"ok":false,"partial":false,"errors":["not_measured"]});
+            }
+        }
+    }
+    if let Some(space) = facts.get_mut("space").filter(|value| value.is_object()) {
+        if space["ok"] != true {
+            space["total_bytes"] = Value::Null;
+            if !space["ok"].is_boolean() {
+                space["ok"] = json!(false);
+                space["partial"] = json!(false);
+                space["errors"] = json!([{"path":".","reason":"not_measured"}]);
+            }
+        }
+        if let Some(dirs) = space["dirs"].as_array_mut() {
+            for dir in dirs {
+                if dir["ok"] != true {
+                    dir["bytes"] = Value::Null;
+                    dir["ok"] = json!(false);
+                }
+            }
+        }
+    }
+    facts
 }
 
 /// "owner/repo" of a github.com remote URL (https or ssh form).
@@ -651,6 +738,47 @@ pub fn fingerprint(facts: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn space_totals_require_complete_discovery_and_directory_walks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let denied = tmp.path().join("target/denied");
+        std::fs::create_dir_all(&denied).unwrap();
+        std::fs::create_dir_all(tmp.path().join("app/node_modules")).unwrap();
+        std::fs::write(denied.join("payload"), b"abc").unwrap();
+        std::fs::write(tmp.path().join("app/node_modules/package"), b"12345").unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 10, 23).unwrap();
+        let full = space(tmp.path().to_str().unwrap(), day);
+        assert_eq!(full["ok"], true);
+        assert_eq!(full["total_bytes"], 8);
+        // Inject only the OS enumeration failure; the real discovery, other directory walk,
+        // aggregation and public payload path run normally without changing machine ACLs.
+        let partial = space_with(tmp.path().to_str().unwrap(), day, &|path| {
+            if path == denied {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            } else {
+                std::fs::read_dir(path)
+            }
+        });
+        assert_eq!(partial["ok"], false);
+        assert_eq!(partial["partial"], true);
+        assert!(partial["total_bytes"].is_null());
+        assert_eq!(
+            partial["dirs"],
+            json!([{"path":"app/node_modules","bytes":5,"ok":true},{"path":"target","bytes":null,"ok":false}])
+        );
+        assert_eq!(
+            partial["errors"],
+            json!([{"path":"target","reason":"permission_denied"}])
+        );
+        let missing = space(tmp.path().join("missing").to_str().unwrap(), day);
+        assert!(missing["total_bytes"].is_null());
+        assert_eq!(missing["errors"][0]["path"], ".");
+        let empty = tempfile::tempdir().unwrap();
+        let empty = space(empty.path().to_str().unwrap(), day);
+        assert_eq!(empty["total_bytes"], 0);
+        assert_eq!(empty["ok"], true);
+    }
 
     #[test]
     fn collection_rejects_a_head_or_branch_changed_during_measurement() {

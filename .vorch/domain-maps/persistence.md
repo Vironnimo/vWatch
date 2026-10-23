@@ -14,6 +14,8 @@ Project IDs are durable identity. Names and paths can change while cards, feedba
 
 Card versions count saves within one project; portfolio versions follow their stored row IDs. A version is not a wall-clock timestamp. Owner feedback and task snapshots can outlive the current report. Retained proposals are stored independently of whether the latest report lists them; omission is not deletion.
 
+Facts read models apply the repository-facts owner's completeness adapter to uncertified line/space totals, including period and detailed historical reads. Raw observations and their stored fingerprints remain unchanged; see `repository-facts/measurements.md`. Risk queries do not certify line counts from historical Card bases that lack measurement provenance.
+
 Content history and facts observations are append-only evidence. Normal current-state mutation, legacy normalization and restoration have different semantics; see `persistence/transactions-and-history.md` before changing their relationship. Store queries often return structured JSON, but schema validation and business transitions stay in the application service.
 
 ## Interfaces

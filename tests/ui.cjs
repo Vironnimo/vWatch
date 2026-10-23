@@ -715,7 +715,8 @@ test('routine Git stays neutral while acknowledging a collision reduces attentio
   await a.ui.saveWarning('sample', 'no_remote');
   assert.equal(a.ui.risk(p), before);
   assert.match(a.node('#view').innerHTML, /bewusst ohne Remote/);
-  assert.match(a.node('#view').innerHTML, /2 Dateien, \+0\/−0/);
+  assert.match(a.node('#view').innerHTML, /2 Dateien, Zeilenzahl unbekannt/);
+  assert.doesNotMatch(a.node('#view').innerHTML, /\+0\/−0/);
   a.ui.openProject('sample');
   assert.match(a.node('#project-page').innerHTML, /Intentionally local/);
   await a.ui.saveWarning('sample', 'no_remote', true);

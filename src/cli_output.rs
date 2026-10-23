@@ -370,7 +370,13 @@ fn refresh_item(out: &mut String, item: &Value, depth: usize) {
         depth + 1,
         &format!("{}: facts {state}.", text(&item["id"])),
     );
-    for key in ["error", "warning", "warnings", "hint"] {
+    for key in [
+        "error",
+        "warning",
+        "warnings",
+        "hint",
+        "incomplete_measurements",
+    ] {
         if let Some(value) = item.get(key).filter(|value| match value {
             Value::Null => false,
             Value::String(text) => !text.is_empty(),

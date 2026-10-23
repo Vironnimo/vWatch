@@ -77,6 +77,14 @@ Sources: `skill/watchtower/references/card-guide.md`, `skill/watchtower/referenc
 | CLI reference: `Omitting a field and sending null differ` | Keep default/merge semantics separate from explicit nullable values. |
 | CLI reference: `Restored evidence stays historical, so the document can remain due.` | Restoring wording does not establish a fresh review. |
 | CLI reference: `A missing measurement is unknown, not zero.` | Avoid fabricated activity or size baselines. |
+| CLI reference and readable Facts: `Incomplete line or space measurements are unknown, not zero.` | Prevent a partial scan from becoming an exact zero-work or zero-space claim. |
+| Readable Facts: `Complete directory sizes remain usable even when the overall space measurement is incomplete.` | Preserve verified sibling evidence without presenting its sum as the repository total. |
+| CLI reference: `dirty.lines_added` and `dirty.lines_removed` are null unless | Identify the certification and reason fields needed before citing text-line totals. |
+| CLI reference: `Binary files do not contribute text lines.` | Distinguish excluded binary changes from a failed text measurement. |
+| CLI reference: `space.total_bytes` is null unless | Keep per-directory certification separate from the overall discovery/walk result. |
+| CLI reference: `Missing completeness flags do not establish a complete measurement.` | Do not infer certification from an older observation's numeric fields. |
+| CLI reference: `Incomplete space measurements are retried on the next facts refresh.` | Explain the existing recovery call without inventing a cleanup or permission-changing operation. |
+| CLI reference: `Refresh receipts name these optional gaps` | Separate readable repository Facts from optional measurement coverage. |
 
 ## CLI help, outcomes and recovery
 
