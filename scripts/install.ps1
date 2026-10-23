@@ -10,8 +10,15 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $Target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Target)
 
-cargo build --release --bins --manifest-path (Join-Path $repo 'Cargo.toml')
-if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+# Cargo discovers .cargo/config.toml from its working directory, not from
+# --manifest-path. Keep the checkout's scratch paths even when called elsewhere.
+Push-Location -LiteralPath $repo
+try {
+    cargo build --release --bins
+    if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+} finally {
+    Pop-Location
+}
 
 $cliExe = Join-Path $Target 'Watchtower.exe'
 $guiExe = Join-Path $Target 'Watchtower-UI.exe'
