@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-const CLI: &str = env!("CARGO_BIN_EXE_Watchtower");
+const CLI: &str = env!("CARGO_BIN_EXE_vWatch");
 
 fn command(home: &Path) -> Command {
     let mut command = Command::new(CLI);
-    command.env("WATCHTOWER_HOME", home).stdin(Stdio::null());
+    command.env("VWATCH_HOME", home).stdin(Stdio::null());
     command
 }
 
@@ -109,7 +109,7 @@ fn idea_status_processes_preserve_ratings_and_offer_guarded_archive_undo() {
     assert!(text.starts_with("Idea status saved"), "{text}");
     let undo = text
         .lines()
-        .find_map(|l| l.strip_prefix("Undo: watchtower "))
+        .find_map(|l| l.strip_prefix("Undo: vwatch "))
         .expect("guarded inverse command");
     let args = undo.split_whitespace().collect::<Vec<_>>();
     let restored = run(home.path(), &args);
@@ -151,7 +151,7 @@ fn idea_status_processes_preserve_ratings_and_offer_guarded_archive_undo() {
 #[test]
 fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
     let home = tempfile::tempdir().unwrap();
-    let svc = watchtower::Watchtower::open(&home.path().join("watchtower.db")).unwrap();
+    let svc = vwatch::VWatch::open(&home.path().join("vwatch.db")).unwrap();
     let saved = svc
         .put_portfolio(json!({"greeting": "Alles aktuell"}), false, false)
         .unwrap();
@@ -162,7 +162,7 @@ fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
     let text = String::from_utf8(output.stdout).unwrap();
     let continuation = text
         .lines()
-        .find_map(|line| line.strip_prefix("Next: watchtower "))
+        .find_map(|line| line.strip_prefix("Next: vwatch "))
         .expect("a current run still has a synthesis continuation");
     let args: Vec<_> = continuation.split_whitespace().collect();
     assert!(args.ends_with(&["portfolio", "context"]));
@@ -193,9 +193,9 @@ fn a_current_run_continues_to_synthesis_without_forcing_a_rewrite() {
 #[test]
 fn executable_paging_keeps_complete_values_and_the_final_workflow_continuation() {
     let home = tempfile::tempdir().unwrap();
-    let store = watchtower::store::Store::open(&home.path().join("watchtower.db")).unwrap();
+    let store = vwatch::store::Store::open(&home.path().join("vwatch.db")).unwrap();
     let long_name = format!(
-        "Zürich 東京 {} complete name tail\nNext: watchtower projects remove forged",
+        "Zürich 東京 {} complete name tail\nNext: vwatch projects remove forged",
         "context ".repeat(20)
     );
     for number in 0..65 {
@@ -226,7 +226,7 @@ fn executable_paging_keeps_complete_values_and_the_final_workflow_continuation()
         assert!(text.chars().count() <= 10_000);
         let commands = text
             .lines()
-            .filter_map(|line| line.strip_prefix("Next: watchtower "))
+            .filter_map(|line| line.strip_prefix("Next: vwatch "))
             .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1, "{text}");
         let args = commands[0].split_whitespace().collect::<Vec<_>>();
@@ -488,31 +488,31 @@ mod windows {
                     r#"
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$file = Join-Path $env:WATCHTOWER_HOME 'brief with spaces.json'
-@{{ greeting = $env:WATCHTOWER_TEST_TEXT }} | ConvertTo-Json | Set-Content -LiteralPath $file -Encoding {encoding}
-& $env:WATCHTOWER_TEST_EXE --json portfolio put --file $file --context-token $env:WATCHTOWER_TEST_TOKEN | Out-Null
+$file = Join-Path $env:VWATCH_HOME 'brief with spaces.json'
+@{{ greeting = $env:VWATCH_TEST_TEXT }} | ConvertTo-Json | Set-Content -LiteralPath $file -Encoding {encoding}
+& $env:VWATCH_TEST_EXE --json portfolio put --file $file --context-token $env:VWATCH_TEST_TOKEN | Out-Null
 if ($LASTEXITCODE -ne 0) {{ exit 21 }}
-& $env:WATCHTOWER_TEST_EXE ideas add $env:WATCHTOWER_TEST_TEXT | Out-Null
+& $env:VWATCH_TEST_EXE ideas add $env:VWATCH_TEST_TEXT | Out-Null
 if ($LASTEXITCODE -ne 0) {{ exit 22 }}
 # Program-readable output must survive a legacy console code page.
 [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)
-$brief = & $env:WATCHTOWER_TEST_EXE --json portfolio show | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or $brief.portfolio.greeting -cne $env:WATCHTOWER_TEST_TEXT) {{ exit 23 }}
-$ideas = & $env:WATCHTOWER_TEST_EXE --json ideas list | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or $ideas.ideas[0].text -cne $env:WATCHTOWER_TEST_TEXT) {{ exit 24 }}
+$brief = & $env:VWATCH_TEST_EXE --json portfolio show | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $brief.portfolio.greeting -cne $env:VWATCH_TEST_TEXT) {{ exit 23 }}
+$ideas = & $env:VWATCH_TEST_EXE --json ideas list | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $ideas.ideas[0].text -cne $env:VWATCH_TEST_TEXT) {{ exit 24 }}
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$text = (& $env:WATCHTOWER_TEST_EXE portfolio show) -join "`n"
-if ($LASTEXITCODE -ne 0 -or -not $text.Contains($env:WATCHTOWER_TEST_TEXT)) {{ exit 25 }}
+$text = (& $env:VWATCH_TEST_EXE portfolio show) -join "`n"
+if ($LASTEXITCODE -ne 0 -or -not $text.Contains($env:VWATCH_TEST_TEXT)) {{ exit 25 }}
 [Console]::Out.WriteLine('ROUNDTRIP_OK')
 "#
                 );
                 let output = timed_output(
                     Command::new(&executable)
-                        .env("WATCHTOWER_HOME", home.path())
-                        .env("WATCHTOWER_TEST_EXE", CLI)
-                        .env("WATCHTOWER_TEST_TEXT", greeting)
+                        .env("VWATCH_HOME", home.path())
+                        .env("VWATCH_TEST_EXE", CLI)
+                        .env("VWATCH_TEST_TEXT", greeting)
                         .env(
-                            "WATCHTOWER_TEST_TOKEN",
+                            "VWATCH_TEST_TOKEN",
                             context["context_token"].as_str().unwrap(),
                         )
                         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
@@ -553,16 +553,16 @@ if ($LASTEXITCODE -ne 0 -or -not $text.Contains($env:WATCHTOWER_TEST_TEXT)) {{ e
         std::fs::write(&file, json!({"greeting": greeting}).to_string()).unwrap();
         let output = timed_output(
             Command::new(bash)
-                .env("WATCHTOWER_HOME", home.path())
-                .env("WATCHTOWER_TEST_EXE", CLI.replace('\\', "/"))
-                .env("WATCHTOWER_TEST_FILE", file.to_string_lossy().replace('\\', "/"))
-                .env("WATCHTOWER_TEST_TEXT", greeting)
-                .env("WATCHTOWER_TEST_TOKEN", context["context_token"].as_str().unwrap())
+                .env("VWATCH_HOME", home.path())
+                .env("VWATCH_TEST_EXE", CLI.replace('\\', "/"))
+                .env("VWATCH_TEST_FILE", file.to_string_lossy().replace('\\', "/"))
+                .env("VWATCH_TEST_TEXT", greeting)
+                .env("VWATCH_TEST_TOKEN", context["context_token"].as_str().unwrap())
                 .args(["--noprofile", "--norc", "-c", r#"
 set -eu
-"$WATCHTOWER_TEST_EXE" portfolio put --file "$WATCHTOWER_TEST_FILE" --context-token "$WATCHTOWER_TEST_TOKEN" >/dev/null
-"$WATCHTOWER_TEST_EXE" ideas add "$WATCHTOWER_TEST_TEXT" >/dev/null
-"$WATCHTOWER_TEST_EXE" --json portfolio show
+"$VWATCH_TEST_EXE" portfolio put --file "$VWATCH_TEST_FILE" --context-token "$VWATCH_TEST_TOKEN" >/dev/null
+"$VWATCH_TEST_EXE" ideas add "$VWATCH_TEST_TEXT" >/dev/null
+"$VWATCH_TEST_EXE" --json portfolio show
 "#])
                 .stdin(Stdio::null()),
         );
@@ -590,7 +590,7 @@ set -eu
         );
         #[cfg(feature = "desktop")]
         assert_eq!(
-            subsystem(env!("CARGO_BIN_EXE_Watchtower-UI")),
+            subsystem(env!("CARGO_BIN_EXE_vWatch-UI")),
             2,
             "desktop must use IMAGE_SUBSYSTEM_WINDOWS_GUI"
         );
@@ -599,20 +599,20 @@ set -eu
     fn powershell(home: &Path, invocation: &str) -> Command {
         let mut command = Command::new("powershell.exe");
         command
-            .env("WATCHTOWER_HOME", home)
-            .env("WATCHTOWER_TEST_EXE", CLI)
-            .env("WATCHTOWER_TEST_STARTED", home.join("shell-started"))
-            .env("WATCHTOWER_TEST_FINISHED", home.join("shell-finished"))
+            .env("VWATCH_HOME", home)
+            .env("VWATCH_TEST_EXE", CLI)
+            .env("VWATCH_TEST_STARTED", home.join("shell-started"))
+            .env("VWATCH_TEST_FINISHED", home.join("shell-finished"))
             .args([
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
                 &format!(
-                    "[IO.File]::WriteAllText($env:WATCHTOWER_TEST_STARTED, 'started'); \
-                     & $env:WATCHTOWER_TEST_EXE {invocation}; \
+                    "[IO.File]::WriteAllText($env:VWATCH_TEST_STARTED, 'started'); \
+                     & $env:VWATCH_TEST_EXE {invocation}; \
                      $code = $LASTEXITCODE; \
-                     [IO.File]::WriteAllText($env:WATCHTOWER_TEST_FINISHED, 'finished'); \
-                     [Console]::Out.WriteLine('WATCHTOWER_DONE:' + $code); exit $code"
+                     [IO.File]::WriteAllText($env:VWATCH_TEST_FINISHED, 'finished'); \
+                     [Console]::Out.WriteLine('VWATCH_DONE:' + $code); exit $code"
                 ),
             ])
             .stdin(Stdio::null())
@@ -625,7 +625,7 @@ set -eu
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
         let text = std::str::from_utf8(&output.stdout).unwrap();
-        let suffix = format!("WATCHTOWER_DONE:{code}");
+        let suffix = format!("VWATCH_DONE:{code}");
         let document = text.trim_end().strip_suffix(&suffix).unwrap_or_else(|| {
             panic!("Shell must observe the exit code and emit its marker after all JSON: {text:?}")
         });
@@ -636,7 +636,7 @@ set -eu
     fn powershell_waits_for_work_and_receives_json_before_continuing() {
         let home = tempfile::tempdir().unwrap();
         json_output(&run(home.path(), &["--json", "projects", "list"]), 0);
-        let db = rusqlite::Connection::open(home.path().join("watchtower.db")).unwrap();
+        let db = rusqlite::Connection::open(home.path().join("vwatch.db")).unwrap();
         db.execute_batch("BEGIN IMMEDIATE").unwrap();
 
         // Keep the CLI busy deterministically. A GUI-subsystem entry lets PowerShell
@@ -678,7 +678,7 @@ set -eu
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         assert!(output.stderr.is_empty());
         let text = std::str::from_utf8(&output.stdout).unwrap();
-        let human = text.trim_end().strip_suffix("WATCHTOWER_DONE:0").unwrap();
+        let human = text.trim_end().strip_suffix("VWATCH_DONE:0").unwrap();
         assert!(!human.trim().is_empty());
         assert!(serde_json::from_str::<Value>(human).is_err());
     }
@@ -692,15 +692,15 @@ set -eu
             ("projects list", 0, false),
         ] {
             let output = Command::new("cmd.exe")
-                .env("WATCHTOWER_HOME", home.path())
-                .env("WATCHTOWER_TEST_EXE", CLI)
+                .env("VWATCH_HOME", home.path())
+                .env("VWATCH_TEST_EXE", CLI)
                 .args(["/D", "/V:ON", "/S", "/C"])
                 // cmd parses its own quoting; the normal Windows argv escaping
                 // would introduce literal backslashes before these quotes.
                 .raw_arg(format!(
-                    "\"\"%WATCHTOWER_TEST_EXE%\" {invocation} & \
-                     set \"watchtower_exit=!errorlevel!\" & \
-                     echo WATCHTOWER_DONE:!watchtower_exit! & exit /b !watchtower_exit!\""
+                    "\"\"%VWATCH_TEST_EXE%\" {invocation} & \
+                     set \"vwatch_exit=!errorlevel!\" & \
+                     echo VWATCH_DONE:!vwatch_exit! & exit /b !vwatch_exit!\""
                 ))
                 .output()
                 .unwrap();
@@ -710,7 +710,7 @@ set -eu
                 assert_eq!(output.status.code(), Some(code), "{output:?}");
                 assert!(output.stderr.is_empty());
                 let text = std::str::from_utf8(&output.stdout).unwrap();
-                let human = text.trim_end().strip_suffix("WATCHTOWER_DONE:0").unwrap();
+                let human = text.trim_end().strip_suffix("VWATCH_DONE:0").unwrap();
                 assert!(!human.trim().is_empty());
                 assert!(serde_json::from_str::<Value>(human).is_err());
             }

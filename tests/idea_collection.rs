@@ -163,7 +163,7 @@ fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
         .unwrap();
     assert_eq!(done["idea_status"]["task"]["result"], "Export geprüft");
     let token = svc.portfolio_context(&[]).unwrap()["context_token"].clone();
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute_batch("CREATE TRIGGER fail_archive BEFORE INSERT ON content_history WHEN NEW.after_data LIKE '%archived%' BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
     assert!(svc
         .set_idea_status(
@@ -278,7 +278,7 @@ fn direct_completion_guards_new_agent_reports_and_saves_atomically() {
     );
     assert_eq!(svc.idea_status("missing").unwrap_err().code, "unknown_idea");
     drop(svc);
-    let reopened = watchtower::Watchtower::open(&tmp.path().join("watchtower.db")).unwrap();
+    let reopened = vwatch::VWatch::open(&tmp.path().join("vwatch.db")).unwrap();
     assert_eq!(
         reopened.idea_status(&id).unwrap()["idea_status"]["archived"],
         true
@@ -358,7 +358,7 @@ fn task_sources_recover_legacy_idea_kinds_without_inventing_them() {
         .unwrap();
     assert_eq!(created["task"]["source_snapshot"]["kind"], "suggestion");
     // Simulate a task written by the older app, before source snapshots existed.
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute(
         "UPDATE tasks SET data = json_remove(data, '$.source_snapshot')",
         [],

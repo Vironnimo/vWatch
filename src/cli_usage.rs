@@ -11,7 +11,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::service::{Result, WatchtowerError};
+use crate::service::{Result, VWatchError};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const RETAIN_EVENTS: usize = 20_000;
@@ -123,7 +123,7 @@ fn events(data_dir: &Path) -> Result<(Vec<Event>, usize, bool)> {
     let file = match File::open(path(data_dir)) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), 0, false)),
-        Err(_) => return Err(WatchtowerError::new("usage_unreadable", "The local command metadata log cannot be read. No project or document was changed.")
+        Err(_) => return Err(VWatchError::new("usage_unreadable", "The local command metadata log cannot be read. No project or document was changed.")
             .hint("Check read access to the cli-usage.jsonl file in the selected data folder. The database remains separate from this optional log.")),
     };
     let mut retained = std::collections::VecDeque::new();
@@ -165,7 +165,7 @@ fn events(data_dir: &Path) -> Result<(Vec<Event>, usize, bool)> {
 
 pub fn report(data_dir: &Path, since: Option<&str>) -> Result<Value> {
     let since = since.map(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| {
-        WatchtowerError::new("invalid_date", "The usage start date must be an ISO date (YYYY-MM-DD). No data was changed.")
+        VWatchError::new("invalid_date", "The usage start date must be an ISO date (YYYY-MM-DD). No data was changed.")
             .hint("Supply an unambiguous calendar date, or omit --since for the retained metadata. Dates select recorded calls on or after that UTC date.")
     })).transpose()?;
     let (events, invalid, truncated) = events(data_dir)?;
@@ -279,7 +279,7 @@ pub fn activity(data_dir: &Path) -> Result<Value> {
     Ok(
         json!({"activity":calls,"total_recorded_calls":total,"order":"newest first",
         "note":"A returned exit code records that command's result, not completion of a whole agent run. An unfinished or missing record never proves that nothing changed. After a stopped command, inspect its job or the current project, document or run before repeating a write.",
-        "next":"watchtower jobs list", "invalid_log_lines":invalid,"older_events_omitted":truncated}),
+        "next":"vwatch jobs list", "invalid_log_lines":invalid,"older_events_omitted":truncated}),
     )
 }
 

@@ -1,10 +1,10 @@
 # Glossary
 
-Shared Watchtower terms that can be confused with the coding agent's own environment. Mechanisms and payloads belong to the named domain map.
+Shared vWatch terms that can be confused with the coding agent's own environment. Mechanisms and payloads belong to the named domain map.
 
 ## Project
 
-A watched repository with a stable Watchtower identity, owner intent and retained interpretation (application). It is not the coding agent's current checkout; moving its folder does not create another Project.
+A watched repository with a stable vWatch identity, owner intent and retained interpretation (application). It is not the coding agent's current checkout; moving its folder does not create another Project.
 
 ## Facts
 
@@ -28,7 +28,7 @@ An opaque guard tying a document write to the context the agent read (persistenc
 
 ## Run
 
-A recorded Watchtower observation cycle covering project review and portfolio synthesis (application). It is not the shell process or the coding agent's chat.
+A recorded vWatch observation cycle covering project review and portfolio synthesis (application). It is not the shell process or the coding agent's chat.
 
 ## Task
 
@@ -56,8 +56,8 @@ The owner's explicit acceptance of the displayed report snapshot as read (applic
 
 ## Undo
 
-A guarded reversal of a saved Watchtower change that must preserve intervening work (persistence). It is not permission to reset the whole database or replay a mutation blindly.
+A guarded reversal of a saved vWatch change that must preserve intervening work (persistence). It is not permission to reset the whole database or replay a mutation blindly.
 
 ## Operating Skill
 
-The instructions Watchtower exports for external agents using the installed CLI (agent-interface). It is separate from this repository's Vorch development rules.
+The instructions vWatch exports for external agents using the installed CLI (agent-interface). It is separate from this repository's Vorch development rules.

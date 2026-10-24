@@ -1,12 +1,12 @@
 # Application
 
-Watchtower's shared service turns measured repository state, agent documents and owner decisions into the morning overview and the next agent context.
+vWatch's shared service turns measured repository state, agent documents and owner decisions into the morning overview and the next agent context.
 
 ## Overview
 
-`src/service.rs` owns application behavior through `Watchtower`; both the console and desktop adapters call it. Add behavior here or in its existing child modules, rather than creating separate rules in `src/cli.rs` and `src/app.rs`. `src/cards.rs` owns the card/portfolio schema, defaults and validation, not persistence or project lookup.
+`src/service.rs` owns application behavior through `VWatch`; both the console and desktop adapters call it. Add behavior here or in its existing child modules, rather than creating separate rules in `src/cli.rs` and `src/app.rs`. `src/cards.rs` owns the card/portfolio schema, defaults and validation, not persistence or project lookup.
 
-Private units under `src/service/` keep the same `Watchtower` owner: `projects.rs` coordinates identity and measurements, `documents.rs` owns validation/writes/recovery, `context.rs` assembles agent evidence, `freshness.rs` compares bases, `owner_state.rs` validates feedback/preferences, `ideas.rs` projects idea status, `tasks.rs` owns assignment transitions, `runs.rs` records observation cycles, and `reading.rs` assembles indexes, unread changes and window state. Existing `signals.rs`, `statistics.rs` and `undo.rs` keep their focused derivation, history-comparison and recovery roles. The root owns construction, injected dependencies, errors and shared value conventions. Keep repository measurement in `repository-facts.md`, SQL and atomic guards in `persistence.md`, transport/output in `agent-interface.md`, and presentation in `desktop.md`.
+Private units under `src/service/` keep the same `VWatch` owner: `projects.rs` coordinates identity and measurements, `documents.rs` owns validation/writes/recovery, `context.rs` assembles agent evidence, `freshness.rs` compares bases, `owner_state.rs` validates feedback/preferences, `ideas.rs` projects idea status, `tasks.rs` owns assignment transitions, `runs.rs` records observation cycles, and `reading.rs` assembles indexes, unread changes and window state. Existing `signals.rs`, `statistics.rs` and `undo.rs` keep their focused derivation, history-comparison and recovery roles. The root owns construction, injected dependencies, errors and shared value conventions. Keep repository measurement in `repository-facts.md`, SQL and atomic guards in `persistence.md`, transport/output in `agent-interface.md`, and presentation in `desktop.md`.
 
 ## Data Model
 
@@ -16,8 +16,8 @@ Documents carry stable item IDs that attach feedback, assignments and earlier ap
 
 ## Interfaces
 
-- The service returns `serde_json::Value` read models and `WatchtowerError` with a stable code, message and optional recovery hint. CLI envelopes/rendering belong to the agent interface; the service must describe the actual saved effect. Changing a command-visible result, owner capability or recovery behavior also requires the capability mapping in `docs/agent-interface.md`.
-- `Watchtower::with_parts` injects the Store, clock and repository collector. Extend the existing contract tests using `tests/common/mod.rs`; use this seam for deterministic time and measurement behavior rather than starting the production app against owner data.
+- The service returns `serde_json::Value` read models and `VWatchError` with a stable code, message and optional recovery hint. CLI envelopes/rendering belong to the agent interface; the service must describe the actual saved effect. Changing a command-visible result, owner capability or recovery behavior also requires the capability mapping in `docs/agent-interface.md`.
+- `VWatch::with_parts` injects the Store, clock and repository collector. Extend the existing contract tests using `tests/common/mod.rs`; use this seam for deterministic time and measurement behavior rather than starting the production app against owner data.
 - `state(visit)` and `open_project` distinguish owner visits from ordinary reads. The window consumes service state; it does not infer saved decisions from rendered content. Unread content, stale interpretation and measured warnings remain separate signals.
 - `versioned_state` reads the Store's change version before assembling state. The cross-connection notification contract is owned by `persistence.md` -> Interfaces; preserve that ordering so a concurrent write cannot become invisible to the window.
 

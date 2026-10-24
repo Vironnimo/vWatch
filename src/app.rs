@@ -1,4 +1,4 @@
-//! The Watchtower window: a Tauri shell around `ui/` that reaches the service through commands.
+//! The vWatch window: a Tauri shell around `ui/` that reaches the service through commands.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -8,11 +8,11 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::service::{Watchtower, WatchtowerError};
+use crate::service::{VWatch, VWatchError};
 use crate::system;
 
 struct AppState {
-    service: Arc<Watchtower>,
+    service: Arc<VWatch>,
     /// Counts the window's own write commands, which the database's data
     /// version does not see.
     writes: Arc<AtomicU64>,
@@ -26,11 +26,7 @@ fn version(data: i64, writes: u64) -> Value {
 
 /// The window state with the version it reflects. Both counters are read
 /// before the state, so a write the state misses always changes the version.
-fn versioned_state(
-    s: &Watchtower,
-    writes: &AtomicU64,
-    visit: bool,
-) -> Result<Value, WatchtowerError> {
+fn versioned_state(s: &VWatch, writes: &AtomicU64, visit: bool) -> Result<Value, VWatchError> {
     let own = writes.load(Ordering::SeqCst);
     let (mut state, data) = s.versioned_state(visit)?;
     state["data_version"] = version(data, own);
@@ -46,7 +42,7 @@ fn internal(e: impl std::fmt::Display) -> Value {
 /// Run service work off the UI thread.
 async fn work<F>(state: &State<'_, AppState>, f: F) -> Reply
 where
-    F: FnOnce(&Watchtower) -> Result<Value, WatchtowerError> + Send + 'static,
+    F: FnOnce(&VWatch) -> Result<Value, VWatchError> + Send + 'static,
 {
     let svc = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || f(&svc))
@@ -59,7 +55,7 @@ where
 /// command failed, so the page reloads unless it already loaded a newer state.
 async fn write<F>(state: &State<'_, AppState>, f: F) -> Reply
 where
-    F: FnOnce(&Watchtower) -> Result<Value, WatchtowerError> + Send + 'static,
+    F: FnOnce(&VWatch) -> Result<Value, VWatchError> + Send + 'static,
 {
     let result = work(state, f).await;
     state.writes.fetch_add(1, Ordering::SeqCst);
@@ -415,7 +411,7 @@ fn show_main(app: &AppHandle) {
 pub fn run() {
     let data = system::data_dir();
     let db = system::db_path(&data);
-    let service = Watchtower::open(&db).expect("Watchtower cannot open its database");
+    let service = VWatch::open(&db).expect("vWatch cannot open its database");
     let _ = system::export_skill();
 
     tauri::Builder::default()
@@ -467,7 +463,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Watchtower")
+                .title("vWatch")
                 .inner_size(1280.0, 880.0)
                 .min_inner_size(720.0, 520.0)
                 .center()
@@ -487,5 +483,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("Watchtower could not start its window");
+        .expect("vWatch could not start its window");
 }

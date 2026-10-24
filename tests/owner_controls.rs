@@ -3,9 +3,9 @@ mod common;
 use chrono::Duration;
 use common::{card, demo_repo, service};
 use serde_json::{json, Value};
-use watchtower::Watchtower;
+use vwatch::VWatch;
 
-fn warning(svc: &Watchtower, key: &str) -> Value {
+fn warning(svc: &VWatch, key: &str) -> Value {
     let warnings = svc.project_warnings("demo").unwrap();
     warnings
         .as_array()
@@ -16,12 +16,12 @@ fn warning(svc: &Watchtower, key: &str) -> Value {
         .clone()
 }
 
-fn save_facts(svc: &Watchtower, facts: &Value) {
+fn save_facts(svc: &VWatch, facts: &Value) {
     svc.store()
         .save_facts(
             "demo",
             &svc.now(),
-            &watchtower::facts::fingerprint(facts),
+            &vwatch::facts::fingerprint(facts),
             facts,
         )
         .unwrap();
@@ -205,7 +205,7 @@ fn warning_acknowledgments_require_a_reason_and_can_be_withdrawn() {
     assert_eq!(svc.store().facts("demo").unwrap().unwrap().data, facts);
 }
 
-fn suggestion(svc: &Watchtower) -> String {
+fn suggestion(svc: &VWatch) -> String {
     svc.put_card("demo", card(), false, false).unwrap()["items"][0]["id"]
         .as_str()
         .unwrap()
@@ -302,7 +302,7 @@ fn legacy_snoozes_keep_the_original_deadline_after_migration_and_note_edits() {
     svc.set_feedback(&id, Some("later"), Some("Ursprünglicher Aufschub"))
         .unwrap();
     drop(svc);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     common::remove_history_schema(&db);
     db.execute_batch("ALTER TABLE feedback DROP COLUMN snoozed_until;")
         .unwrap();

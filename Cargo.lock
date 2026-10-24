@@ -4892,6 +4892,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "vwatch"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "tokei",
+ "windows-sys 0.59.0",
+ "winreg",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4992,26 +5012,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "watchtower"
-version = "0.2.0"
-dependencies = [
- "chrono",
- "clap",
- "rusqlite",
- "serde",
- "serde_json",
- "sha1",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "tempfile",
- "tokei",
- "windows-sys 0.59.0",
- "winreg",
 ]
 
 [[package]]

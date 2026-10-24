@@ -1,6 +1,6 @@
 # Persistence
 
-The Store keeps Watchtower's shared SQLite state, durable evidence and concurrency guarantees consistent across console and desktop processes.
+The Store keeps vWatch's shared SQLite state, durable evidence and concurrency guarantees consistent across console and desktop processes.
 
 ## Overview
 

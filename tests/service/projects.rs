@@ -190,7 +190,7 @@ fn status_and_registration_rules() {
 #[test]
 fn database_errors_distinguish_retryable_locks_from_access_and_corruption() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("watchtower.db");
+    let path = tmp.path().join("vwatch.db");
     let writable = rusqlite::Connection::open(&path).unwrap();
     writable
         .execute_batch("CREATE TABLE example (id INTEGER);")
@@ -198,7 +198,7 @@ fn database_errors_distinguish_retryable_locks_from_access_and_corruption() {
     let readonly =
         rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();
-    let error = watchtower::WatchtowerError::from(
+    let error = vwatch::VWatchError::from(
         readonly
             .execute("INSERT INTO example VALUES (1)", [])
             .unwrap_err(),
@@ -211,7 +211,7 @@ fn database_errors_distinguish_retryable_locks_from_access_and_corruption() {
     let contender = rusqlite::Connection::open(&path).unwrap();
     contender.busy_timeout(std::time::Duration::ZERO).unwrap();
     writable.execute_batch("BEGIN IMMEDIATE;").unwrap();
-    let error = watchtower::WatchtowerError::from(
+    let error = vwatch::VWatchError::from(
         contender
             .execute("INSERT INTO example VALUES (2)", [])
             .unwrap_err(),
@@ -224,7 +224,7 @@ fn database_errors_distinguish_retryable_locks_from_access_and_corruption() {
     let damaged = tmp.path().join("damaged.db");
     let bytes = b"This is not a SQLite database.";
     std::fs::write(&damaged, bytes).unwrap();
-    let error = match watchtower::Watchtower::open(&damaged) {
+    let error = match vwatch::VWatch::open(&damaged) {
         Ok(_) => panic!("An invalid database must not be opened or replaced."),
         Err(error) => error,
     };
@@ -394,7 +394,7 @@ fn project_update_validation_is_atomic_and_old_databases_stay_current() {
     svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
         .unwrap();
     drop(svc);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     common::remove_history_schema(&db);
     db.execute_batch("ALTER TABLE projects DROP COLUMN identity_revision;")
         .unwrap();
@@ -427,7 +427,7 @@ fn project_update_validation_is_atomic_and_old_databases_stay_current() {
         assert_eq!(svc.context("demo").unwrap()["context_token"], token);
     }
     // Older cards with no owner basis also become due after a same-clock rename.
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute(
         "UPDATE cards SET owner_basis = NULL WHERE project_id = 'demo'",
         [],

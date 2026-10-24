@@ -93,11 +93,11 @@ pub(super) fn feedback_summary(reactions: &[Feedback]) -> Value {
         .collect()
 }
 
-impl Watchtower {
+impl VWatch {
     // ---------- feedback and preferences ----------
     /// Records the owner's reaction to an item of the current cards or brief: a rating
     /// (`up`, `later`, `down`) of a suggestion or idea, `answered` (the answer is the note)
-    /// or `done` for a question, `done` for a focus item. Watchtower keeps the item as it read,
+    /// or `done` for a question, `done` for a focus item. vWatch keeps the item as it read,
     /// so agents still see what was rated after it left the card. `value: None` withdraws
     /// the reaction; `note: None` keeps the note already stored.
     pub fn set_feedback(
@@ -124,7 +124,7 @@ impl Watchtower {
             return self.write_feedback(item_id, None, None, None, true);
         };
         let invalid = || {
-            WatchtowerError::new("invalid_feedback", "The previous reaction must contain value, note and an optional snoozed_until date.")
+            VWatchError::new("invalid_feedback", "The previous reaction must contain value, note and an optional snoozed_until date.")
             .hint("Restore the exact reaction snapshot captured before the change.")
         };
         let object = snapshot.as_object().ok_or_else(invalid)?;
@@ -156,7 +156,7 @@ impl Watchtower {
         restore: bool,
     ) -> Result<Value> {
         let invalid_snooze = || {
-            WatchtowerError::new(
+            VWatchError::new(
                 "invalid_snooze",
                 "A snooze date must be a future date as YYYY-MM-DD and only applies to later.",
             )
@@ -192,7 +192,7 @@ impl Watchtower {
             match (self.find_item(item_id)?, &existing) {
                 (Some((project, item)), _) => (project, Some(item)),
                 (None, Some(f)) => (f.project_id.clone(), f.item.clone()),
-                (None, None) => return Err(WatchtowerError::new(
+                (None, None) => return Err(VWatchError::new(
                     "unknown_item",
                     format!("No current card, brief or owner idea has an item with id '{item_id}'."),
                 )
@@ -206,7 +206,7 @@ impl Watchtower {
             .unwrap_or("suggestion");
         let allowed = reactions_for(kind);
         if !allowed.contains(&value) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_feedback",
                 format!("'{value}' does not fit a {kind}."),
             )
@@ -253,7 +253,7 @@ impl Watchtower {
                 },
             )?
             .ok_or_else(|| {
-                WatchtowerError::new(
+                VWatchError::new(
                     "answer_missing",
                     "An answer needs its text. Nothing was changed.",
                 )
@@ -363,7 +363,7 @@ impl Watchtower {
     pub fn set_warning_ack(&self, id: &str, key: &str, note: Option<&str>) -> Result<Value> {
         self.project(id)?;
         if !["no_remote", "ci_none", "worktrees"].contains(&key) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_warning",
                 "This warning cannot be acknowledged.",
             )
@@ -371,7 +371,7 @@ impl Watchtower {
         }
         let note = note.map(str::trim);
         if note.is_some_and(|note| note.is_empty() || note.chars().count() > 600) {
-            return Err(WatchtowerError::new("invalid_warning", "An acknowledgement needs a reason of 1 to 600 characters.")
+            return Err(VWatchError::new("invalid_warning", "An acknowledgement needs a reason of 1 to 600 characters.")
                 .hint("Explain why the measured condition is intentional, or omit the note to withdraw the acknowledgement."));
         }
         let warnings = self.project_warnings(id)?;
@@ -381,7 +381,7 @@ impl Watchtower {
             .flatten()
             .find(|warning| warning["key"] == key);
         if note.is_some() && current.is_none() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "warning_not_present",
                 "This measured warning is not present.",
             )
@@ -414,7 +414,7 @@ impl Watchtower {
                 }) =>
             {
                 Err(
-                    WatchtowerError::new("invalid_pref", "Invalid style. Nothing was changed.")
+                    VWatchError::new("invalid_pref", "Invalid style. Nothing was changed.")
                         .hint("Use handover, board, ideas or statistics."),
                 )
             }
@@ -425,7 +425,7 @@ impl Watchtower {
                         .all(|m| m.as_str().is_some_and(|m| MODULES.contains(&m)))
                 }) =>
             {
-                Err(WatchtowerError::new(
+                Err(VWatchError::new(
                     "invalid_pref",
                     "hidden_modules must contain existing module ids. Nothing was changed.",
                 )
@@ -434,7 +434,7 @@ impl Watchtower {
                     MODULES.join(", ")
                 )))
             }
-            key if !PREFS.contains(&key) => Err(WatchtowerError::new(
+            key if !PREFS.contains(&key) => Err(VWatchError::new(
                 "invalid_pref",
                 format!("Unknown preference '{key}'. Nothing was changed."),
             )

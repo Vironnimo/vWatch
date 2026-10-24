@@ -83,7 +83,7 @@ pub(super) fn human(command: &str, data: &Value, data_dir: &std::path::Path) -> 
     if matches!(command, "context" | "portfolio.context") {
         if let Some(instruction) = data["next"]
             .as_str()
-            .filter(|value| !value.starts_with("watchtower "))
+            .filter(|value| !value.starts_with("vwatch "))
         {
             line(&mut out, 0, &escaped(instruction));
         }
@@ -317,7 +317,7 @@ fn table(out: &mut String, rows: &[Value], scope: &str, order: &str, columns: &[
     }
 }
 fn safe_command(command: &str) -> bool {
-    command.starts_with("watchtower ")
+    command.starts_with("vwatch ")
         && !command.chars().any(char::is_control)
         && !command.contains(['<', '>'])
 }

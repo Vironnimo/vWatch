@@ -10,8 +10,8 @@ Use when the owner requests installation of finished work. There is no remote re
    powershell -ExecutionPolicy Bypass -File scripts/install.ps1
    ```
 
-   Both release binaries go to `%LOCALAPPDATA%/Programs/Watchtower`. The script preserves data/preferences and updates the Start menu link. Existing enabled autostart can be retargeted to the GUI; it is not newly enabled. Leave autostart and PATH choices intact.
-4. Start the installed `Watchtower-UI.exe` again. Verify changed behavior with the live-testing workflow, using separate data for mutations.
+   Both release binaries go to `%LOCALAPPDATA%/Programs/vWatch`. The script preserves data/preferences and updates the Start menu link. Existing enabled autostart can be retargeted to the GUI; it is not newly enabled. Leave autostart and PATH choices intact.
+4. Start the installed `vWatch-UI.exe` again. Verify changed behavior with the live-testing workflow, using separate data for mutations.
 5. `status` exports four embedded Skill files beside the executable. For an agent application's separate installed copy, locate and preserve its actual scope. Private installations stay private unless the owner requests otherwise. Preserve unrelated private adaptations.
 6. Report binaries/Skill copies updated, verification and any partial failure. A failed later step does not roll back earlier saved effects.
 

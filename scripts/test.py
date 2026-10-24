@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Watchtower's Rust and UI contracts with bounded, isolated processes."""
+"""Run vWatch's Rust and UI contracts with bounded, isolated processes."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def isolated_environment(base: dict[str, str], folder: Path) -> dict[str, str]:
     # Hooks and shell config must not leak an index, identity or failure injection.
     env = {
         key: value for key, value in base.items()
-        if not key.upper().startswith(("GIT_", "WATCHTOWER_"))
+        if not key.upper().startswith(("GIT_", "VWATCH_"))
         and key.upper() not in {"XDG_CONFIG_HOME", "NODE_OPTIONS", "NODE_PATH", "EMAIL"}
     }
     home, temp = folder / "home", folder / "tmp"
@@ -180,7 +180,7 @@ def isolated_environment(base: dict[str, str], folder: Path) -> dict[str, str]:
         # Git ignores a ceiling equal to its starting directory. Use the case
         # parent so commands started directly in TEMP or HOME stay contained.
         "GIT_CEILING_DIRECTORIES": str(folder), "GIT_TERMINAL_PROMPT": "0",
-        "WATCHTOWER_HOME": str(folder / "watchtower"), "WATCHTOWER_TEST_INSTANCE": "1",
+        "VWATCH_HOME": str(folder / "vwatch"), "VWATCH_TEST_INSTANCE": "1",
     })
     return env
 

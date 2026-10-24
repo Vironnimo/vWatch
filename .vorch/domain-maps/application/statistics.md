@@ -8,7 +8,7 @@ Working-tree size comparison needs two complete measurements. From its chosen ba
 
 Dirty file counts remain usable when text-line measurement fails. Risk growth compares certified lines only when both observations provide them, otherwise the same file-count unit. Unknown line counts are not zero and cannot prove an acknowledged risk stayed within its former measured bounds. Historical line/space read normalization belongs to repository-facts; raw observation retention belongs to persistence.
 
-Git activity is reconstructed evidence, separate from observations of working-tree state. Historical reconstruction windows can cover dates before Watchtower first observed a project. A newer reconstruction replaces the dates it covers, including days absent after a rebase. Totals are available only when merged coverage spans the entire requested period; gaps are not zero-activity days. Hotspots retain their own coverage dates.
+Git activity is reconstructed evidence, separate from observations of working-tree state. Historical reconstruction windows can cover dates before vWatch first observed a project. A newer reconstruction replaces the dates it covers, including days absent after a rebase. Totals are available only when merged coverage spans the entire requested period; gaps are not zero-activity days. Hotspots retain their own coverage dates.
 
 Confirmed task completions count owner `done` transitions in task history, not agent reports requesting review. Card and portfolio comparisons use saved raw document versions; they must not apply today's reading projection to rewrite what was recorded. Detailed history, facts history and proposals are reads, not implicit visits or owner actions.
 

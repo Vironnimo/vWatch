@@ -136,14 +136,14 @@ catch { if ($_.Exception.Message -ne 'probe complete') { throw } }
                     self.assertEqual(Path(observed["build"]["cwd"]), checkout)
                     self.assertEqual(observed["build"]["args"],
                                      ["build", "--release", "--bins", "--target-dir", str(self.repo / "target")])
-                    for copied, binary in zip(observed["copies"], ("Watchtower.exe", "Watchtower-UI.exe"), strict=True):
+                    for copied, binary in zip(observed["copies"], ("vWatch.exe", "vWatch-UI.exe"), strict=True):
                         self.assertEqual(Path(copied["source"]), self.repo / "target" / "release" / binary)
                         self.assertEqual(Path(copied["destination"]), self.base / "installation" / binary)
                     self.assertFalse((checkout / "target").exists())
 
     def test_delete_preserves_ignored_data_and_unmerged_commits(self):
         task = self.create()
-        data = task / ".tmp" / "watchtower.db"
+        data = task / ".tmp" / "vwatch.db"
         data.parent.mkdir()
         data.write_bytes(b"owner data")
         with self.assertRaises(worktree.WorktreeError):
@@ -166,7 +166,7 @@ catch { if ($_.Exception.Message -ne 'probe complete') { throw } }
         self.git("add", "a.txt", cwd=task)
         self.git("commit", "-m", "test: task", cwd=task)
         (self.repo / "b.txt").write_text("unfinished owner work\n")
-        data = task / ".tmp" / "watchtower.db"
+        data = task / ".tmp" / "vwatch.db"
         data.parent.mkdir()
         data.write_bytes(b"keep")
         result = worktree.merge(self.trees, argparse.Namespace(name="task", message=None, wait_timeout=1))
@@ -262,17 +262,17 @@ class TestRunner(unittest.TestCase):
     def test_isolation_removes_inherited_owner_config_and_rejects_forbidden_roots(self):
         hostile = dict(os.environ, HOME="owner-home", USERPROFILE="owner-profile",
                        GIT_INDEX_FILE="owner-index", GIT_AUTHOR_NAME="owner-name",
-                       WATCHTOWER_FAULT_INJECT="1", NODE_OPTIONS="--require owner-code",
+                       VWATCH_FAULT_INJECT="1", NODE_OPTIONS="--require owner-code",
                        NODE_PATH="owner-libraries", EMAIL="owner@example.invalid",
                        XDG_CONFIG_HOME="owner-config")
         env = test_runner.isolated_environment(hostile, self.base / "case")
-        for key in ("GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "WATCHTOWER_FAULT_INJECT",
+        for key in ("GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "VWATCH_FAULT_INJECT",
                     "NODE_OPTIONS", "NODE_PATH", "EMAIL", "XDG_CONFIG_HOME"):
             self.assertNotIn(key, env)
         for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
-                    "WATCHTOWER_HOME", "GIT_CONFIG_GLOBAL", "GIT_CEILING_DIRECTORIES"):
+                    "VWATCH_HOME", "GIT_CONFIG_GLOBAL", "GIT_CEILING_DIRECTORIES"):
             self.assertTrue(Path(env[key]).is_relative_to(self.base))
-        self.assertEqual(env["WATCHTOWER_TEST_INSTANCE"], "1")
+        self.assertEqual(env["VWATCH_TEST_INSTANCE"], "1")
         self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         subprocess.run(["git", "init", "--template=", str(self.base)],

@@ -1,6 +1,6 @@
 # Repository facts
 
-This domain measures repository state and supplies the factual basis for Watchtower's reports without interpreting or changing the watched repositories.
+This domain measures repository state and supplies the factual basis for vWatch's reports without interpreting or changing the watched repositories.
 
 ## Overview
 

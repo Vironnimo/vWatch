@@ -4,17 +4,17 @@ use std::sync::Barrier;
 
 use common::{card, card_with, demo_repo, make_repo, service};
 use serde_json::{json, Value};
-use watchtower::service::Result;
-use watchtower::Watchtower;
+use vwatch::service::Result;
+use vwatch::VWatch;
 
-fn card_token(svc: &Watchtower, id: &str) -> String {
+fn card_token(svc: &VWatch, id: &str) -> String {
     svc.context(id).unwrap()["context_token"]
         .as_str()
         .expect("card context carries a token")
         .to_owned()
 }
 
-fn portfolio_token(svc: &Watchtower) -> String {
+fn portfolio_token(svc: &VWatch) -> String {
     svc.portfolio_context(&[]).unwrap()["context_token"]
         .as_str()
         .expect("portfolio context carries a token")
@@ -32,7 +32,7 @@ fn one_winner(results: &[Result<Value>], rejection: &str) -> usize {
     results.iter().position(|r| r.is_ok()).unwrap()
 }
 
-fn rejected_card_leaves_state(svc: &Watchtower, token: &str) {
+fn rejected_card_leaves_state(svc: &VWatch, token: &str) {
     let before = svc.card("demo").unwrap();
     let history = svc.store().card_history("demo").unwrap();
     let feedback = svc.feedback(None).unwrap();
@@ -53,7 +53,7 @@ fn rejected_card_leaves_state(svc: &Watchtower, token: &str) {
     assert_eq!(svc.due(14, false).unwrap(), due);
 }
 
-fn rejected_portfolio_leaves_state(svc: &Watchtower, token: &str) {
+fn rejected_portfolio_leaves_state(svc: &VWatch, token: &str) {
     let before = svc.portfolio().unwrap();
     let feedback = svc.feedback(None).unwrap();
     let due = svc.due(14, false).unwrap();
@@ -239,7 +239,7 @@ fn stale_card_writes_preserve_new_owner_instructions_facts_and_cards() {
 
     let token = card_token(&svc, "demo");
     facts.data["head"] = json!("new-head");
-    let fingerprint = watchtower::facts::fingerprint(&facts.data);
+    let fingerprint = vwatch::facts::fingerprint(&facts.data);
     assert_ne!(fingerprint, facts.fingerprint);
     svc.store()
         .save_facts("demo", &svc.now(), &fingerprint, &facts.data)
@@ -559,7 +559,7 @@ fn simultaneous_first_opens_create_one_complete_database() {
                     let barrier = &barrier;
                     scope.spawn(move || {
                         barrier.wait();
-                        watchtower::store::Store::open(path).and_then(|store| store.projects())
+                        vwatch::store::Store::open(path).and_then(|store| store.projects())
                     })
                 })
                 .collect();

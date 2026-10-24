@@ -2,7 +2,7 @@
 """Run pinned, offline development checks in the current checkout.
 
 No command installs tools, changes source, stages files, or uses the installed
-Watchtower data. Cargo dependencies must already be cached for --offline.
+vWatch data. Cargo dependencies must already be cached for --offline.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def environment(root: Path, name: str) -> dict[str, str]:
     env.update({
         "TEMP": str(scratch), "TMP": str(scratch), "TMPDIR": str(scratch),
         "GIT_CEILING_DIRECTORIES": str(root.resolve() / ".tmp"),
-        "WATCHTOWER_HOME": str(scratch / "watchtower-home"),
+        "VWATCH_HOME": str(scratch / "vwatch-home"),
         "CARGO_NET_OFFLINE": "true", "PYTHONDONTWRITEBYTECODE": "1",
     })
     return env

@@ -126,9 +126,9 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
         .unwrap()
         .iter()
         .any(|f| f["id"] == fid && f["item"]["kind"] == "focus" && f["project"] == "demo"));
-    // cards written before questions had ids get them when Watchtower opens
+    // cards written before questions had ids get them when vWatch opens
     let stored = svc.store().latest_card("other").unwrap().unwrap();
-    let basis = watchtower::store::CardBasis {
+    let basis = vwatch::store::CardBasis {
         fingerprint: &stored.fingerprint,
         head: None,
         ci: None,
@@ -143,7 +143,7 @@ fn owner_reactions_reach_agents_with_what_they_were_about() {
             &card_with(json!({"waiting_on_you": [{"title": "Alt?"}]})),
         )
         .unwrap();
-    let reopened = watchtower::Watchtower::open(&tmp.path().join("watchtower.db")).unwrap();
+    let reopened = vwatch::VWatch::open(&tmp.path().join("vwatch.db")).unwrap();
     assert!(
         reopened.card("other").unwrap()["card"]["waiting_on_you"][0]["id"]
             .as_str()

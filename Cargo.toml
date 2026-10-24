@@ -1,22 +1,22 @@
 [package]
-name = "watchtower"
+name = "vwatch"
 version = "0.2.0"
 edition = "2021"
 description = "Morning overview of all your agent-built software projects"
 publish = false
-default-run = "Watchtower-UI"
+default-run = "vWatch-UI"
 
 [lib]
-name = "watchtower"
+name = "vwatch"
 path = "src/lib.rs"
 
 [[bin]]
-name = "Watchtower"
+name = "vWatch"
 path = "src/main.rs"
 
 [[bin]]
-name = "Watchtower-UI"
-path = "src/bin/watchtower-ui.rs"
+name = "vWatch-UI"
+path = "src/bin/vwatch-ui.rs"
 required-features = ["desktop"]
 
 [features]

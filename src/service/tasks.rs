@@ -2,7 +2,7 @@
 use super::*;
 // An assigned task keeps its own snapshot; rewriting cards never loses the handoff.
 
-impl Watchtower {
+impl VWatch {
     pub fn create_task(&self, payload: Value) -> Result<Value> {
         let object = payload
             .as_object()
@@ -100,7 +100,7 @@ impl Watchtower {
     pub fn report_task_document(&self, id: i64, payload: Value) -> Result<Value> {
         self.tracked_task(id)?;
         let invalid = |message: String| {
-            WatchtowerError::new("invalid_task", format!("{message} No task was changed."))
+            VWatchError::new("invalid_task", format!("{message} No task was changed."))
                 .hint("Send a report object with status (done or blocked), result text, and evidence text. Evidence is required for done and can be omitted for blocked.")
         };
         let object = payload
@@ -134,7 +134,7 @@ impl Watchtower {
         let target = match status {
             "done" => "review",
             "blocked" => "blocked",
-            _ => return Err(WatchtowerError::new("invalid_task_status", "Agents report a task as done or blocked.")
+            _ => return Err(VWatchError::new("invalid_task_status", "Agents report a task as done or blocked.")
                 .hint("Use done with a result and evidence; completion still needs the owner's confirmation.")),
         };
         let result = task_text(&json!({"result": result}), "result", true, 4000)?;
@@ -151,7 +151,7 @@ impl Watchtower {
             return Ok(json!({"task":task,"already_reported":true}));
         }
         if !active_task(&task) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_task_transition",
                 "This task is already closed.",
             )
@@ -182,12 +182,12 @@ impl Watchtower {
 
     fn change_task_status(&self, id: i64, status: &str, revision: Option<i64>) -> Result<Value> {
         if !matches!(status, "assigned" | "done" | "cancelled") {
-            return Err(WatchtowerError::new("invalid_task_status", "Owner task status must be assigned, done or cancelled.")
+            return Err(VWatchError::new("invalid_task_status", "Owner task status must be assigned, done or cancelled.")
                 .hint("assigned reopens a task; done confirms its reported result; cancelled closes it without completion."));
         }
         let mut task = self.tracked_task(id)?;
         if revision.is_some_and(|revision| task["revision"] != revision) {
-            return Err(WatchtowerError::new("task_changed", "The task changed since it was displayed.")
+            return Err(VWatchError::new("task_changed", "The task changed since it was displayed.")
                 .hint("Reload the task and read its latest result before confirming, reopening or cancelling it."));
         }
         if task["status"] == status {
@@ -196,7 +196,7 @@ impl Watchtower {
         if (status == "done" && task["status"] != "review")
             || (status == "cancelled" && task["status"] == "done")
         {
-            return Err(WatchtowerError::new("invalid_task_transition", "This task cannot make that transition.")
+            return Err(VWatchError::new("invalid_task_transition", "This task cannot make that transition.")
                 .hint("Confirm done only after an agent report is ready for review. Reopen a completed task before cancelling it."));
         }
         if status == "assigned"
@@ -206,7 +206,7 @@ impl Watchtower {
                     && task_source_key(other) == task_source_key(&task)
             })
         {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_task_transition",
                 "Another active task already tracks this source.",
             )
@@ -242,7 +242,7 @@ impl Watchtower {
                 )
             })
             .collect();
-        Err(WatchtowerError::new(
+        Err(VWatchError::new(
             "unknown_task",
             format!("Task {id} does not exist. No task was changed."),
         )
@@ -258,7 +258,7 @@ impl Watchtower {
                 },
                 choices.join(", "),
                 if tasks.len() > choices.len() {
-                    " Use `watchtower tasks list` for all tasks."
+                    " Use `vwatch tasks list` for all tasks."
                 } else {
                     ""
                 }
@@ -272,12 +272,12 @@ impl Watchtower {
         record_task_transition(&mut task, status, event);
         let saved = self.store.replace_task(id, revision, status, &task).map_err(|error| {
             if matches!(&error, rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ErrorCode::ConstraintViolation) {
-                WatchtowerError::new("invalid_task_transition", "Another active task already tracks this source.")
+                VWatchError::new("invalid_task_transition", "Another active task already tracks this source.")
                     .hint("Reload the tasks before continuing.")
             } else { error.into() }
         })?;
         if !saved {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "task_changed",
                 "The task changed while this update was being saved.",
             )
@@ -308,19 +308,17 @@ pub(super) fn active_task(task: &Value) -> bool {
     )
 }
 
-fn task_error(message: impl Into<String>) -> WatchtowerError {
-    WatchtowerError::new("invalid_task", message)
+fn task_error(message: impl Into<String>) -> VWatchError {
+    VWatchError::new("invalid_task", message)
         .hint("Use projects (an array of ids), title, and optional source_id, why, evidence and done_when text.")
 }
 
 fn task_text(payload: &Value, field: &str, required: bool, max: usize) -> Result<String> {
     let invalid = |message: String| {
-        WatchtowerError::new("invalid_task", format!("{message} No task was changed.")).hint(
-            format!(
-                "Send {field} as {}text with at most {max} characters.",
-                if required { "nonempty " } else { "" }
-            ),
-        )
+        VWatchError::new("invalid_task", format!("{message} No task was changed.")).hint(format!(
+            "Send {field} as {}text with at most {max} characters.",
+            if required { "nonempty " } else { "" }
+        ))
     };
     let text = match payload.get(field) {
         None | Some(Value::Null) if !required => "",

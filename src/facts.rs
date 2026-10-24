@@ -236,7 +236,7 @@ fn dir_size(
 }
 
 /// Space in folders a build or package manager recreates, at the top of the repository and one level
-/// below. Walking them is slow, so Watchtower measures this once a day.
+/// below. Walking them is slow, so vWatch measures this once a day.
 pub fn space(path: &str, today: NaiveDate) -> Value {
     space_with(path, today, &|dir| std::fs::read_dir(dir))
 }

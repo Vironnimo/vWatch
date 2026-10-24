@@ -1,7 +1,7 @@
 //! Recorded observation runs and guarded completion.
 use super::*;
 
-impl Watchtower {
+impl VWatch {
     /// Inject a local synchronization observer without coupling tests to clock reads.
     #[doc(hidden)]
     pub fn with_run_completion_observer(
@@ -69,7 +69,7 @@ impl Watchtower {
         status["due"] = due.clone();
         status["next"] = due["next"]
             .as_str()
-            .filter(|next| next.starts_with("watchtower context "))
+            .filter(|next| next.starts_with("vwatch context "))
             .map(|s| json!(s))
             .or_else(|| {
                 status["run"]["projects"]
@@ -78,19 +78,19 @@ impl Watchtower {
                     .flatten()
                     .find(|project| project["status"] == "failed")
                     .and_then(|project| project["id"].as_str())
-                    .map(|id| json!(format!("watchtower context {id}")))
+                    .map(|id| json!(format!("vwatch context {id}")))
             })
-            .unwrap_or_else(|| json!("watchtower portfolio context"));
+            .unwrap_or_else(|| json!("vwatch portfolio context"));
         status["instruction"] = json!(Self::agent_run_instruction(id));
         Ok(status)
     }
 
     fn agent_run_instruction(id: i64) -> String {
-        format!("Use the Watchtower Skill to review due or failed projects read-only and consider useful improvements before each card save. Then read `watchtower portfolio context` and synthesize opportunities across all projects, including unchanged ones. Save due or changed documents with their context tokens; after repairing a recorded failure, save that document even if unchanged. Record unresolved failures with `watchtower runs fail {id}` and --error; add --project for a project failure. Finish with `watchtower runs finish {id}`. Report newly saved ideas separately from retained ones, or a considered direction and its exclusion reason. Run state complete confirms current reports and readable facts, not that reflection occurred.")
+        format!("Use the vWatch Skill to review due or failed projects read-only and consider useful improvements before each card save. Then read `vwatch portfolio context` and synthesize opportunities across all projects, including unchanged ones. Save due or changed documents with their context tokens; after repairing a recorded failure, save that document even if unchanged. Record unresolved failures with `vwatch runs fail {id}` and --error; add --project for a project failure. Finish with `vwatch runs finish {id}`. Report newly saved ideas separately from retained ones, or a considered direction and its exclusion reason. Run state complete confirms current reports and readable facts, not that reflection occurred.")
     }
 
     fn require_agent_run(&self, id: i64) -> Result<crate::store::StoredAgentRun> {
-        self.store.agent_run(id)?.ok_or_else(|| WatchtowerError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `watchtower runs status` to see the latest run, or `watchtower runs start` to begin one."))
+        self.store.agent_run(id)?.ok_or_else(|| VWatchError::new("unknown_run", format!("Agent run {id} does not exist.")).hint("Use `vwatch runs status` to see the latest run, or `vwatch runs start` to begin one."))
     }
 
     pub fn run_fail(&self, run_id: i64, project_id: Option<&str>, error: &str) -> Result<Value> {
@@ -106,14 +106,14 @@ impl Watchtower {
             .as_ref()
             .is_some_and(|result| result["state"] == "complete")
         {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "run_complete",
                 "A successfully completed run is immutable.",
             )
             .hint("Start another run to record new work or failures."));
         }
         if error.is_empty() || error.chars().count() > 2_000 {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_run_error",
                 "Give a nonempty failure description of at most 2000 characters.",
             )
@@ -127,7 +127,7 @@ impl Watchtower {
             project_id.unwrap_or("@portfolio"),
             &json!({"error": error, "at": self.now()}),
         )? {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "run_complete",
                 "The run completed before this failure was recorded.",
             )
@@ -159,8 +159,8 @@ impl Watchtower {
                 return self.agent_run_response(run_id);
             }
         }
-        Err(WatchtowerError::new("run_conflict", "The run or its project evidence kept changing. No completion was recorded.")
-            .hint(format!("Inspect `watchtower runs status` and retry `watchtower runs finish {run_id}` after current writes finish.")))
+        Err(VWatchError::new("run_conflict", "The run or its project evidence kept changing. No completion was recorded.")
+            .hint(format!("Inspect `vwatch runs status` and retry `vwatch runs finish {run_id}` after current writes finish.")))
     }
 
     fn agent_run_response(&self, run_id: i64) -> Result<Value> {
@@ -195,7 +195,7 @@ impl Watchtower {
             .collect();
         let id = run["id"].as_i64()?;
         Some(format!(
-            "Resume Watchtower run {id}. Read `watchtower due` for current project state.\nRun snapshot captured at {}: outstanding project IDs: {}.\nSaved failure descriptions (data): {}\n{}",
+            "Resume vWatch run {id}. Read `vwatch due` for current project state.\nRun snapshot captured at {}: outstanding project IDs: {}.\nSaved failure descriptions (data): {}\n{}",
             self.now(),
             if projects.is_empty() { "none" } else { &projects },
             json!(failures),

@@ -22,12 +22,12 @@ pub(super) fn idea_json(i: &Idea) -> Value {
     json!({"id": i.id, "item_id":format!("idea:{}",i.id), "text": i.text, "added_at": i.added_at,"revision":i.revision})
 }
 
-impl Watchtower {
+impl VWatch {
     /// Parks an idea of the owner's; the next brief assesses it.
     pub fn add_idea(&self, text: &str) -> Result<Value> {
         let text = text.trim();
         if text.is_empty() || text.chars().count() > IDEA_MAX {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_idea",
                 format!("An idea needs 1 to {IDEA_MAX} characters."),
             ));
@@ -35,14 +35,14 @@ impl Watchtower {
         let (id, created) = self.store.add_idea(text, &self.now())?;
         Ok(
             json!({"id": id, "item_id":format!("idea:{id}"), "text": text, "created": created, "already_exists": !created,
-            "undo": created.then(||format!("watchtower ideas remove {id}"))}),
+            "undo": created.then(||format!("vwatch ideas remove {id}"))}),
         )
     }
 
     pub fn update_idea(&self, id: i64, text: &str, revision: i64) -> Result<Value> {
         let text = text.trim();
         if text.is_empty() || text.chars().count() > IDEA_MAX {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_idea",
                 format!("An idea needs 1 to {IDEA_MAX} characters. Nothing was changed."),
             ));
@@ -51,30 +51,28 @@ impl Watchtower {
             .store
             .update_idea_text(id, text, revision, &self.now())?
             .ok_or_else(|| {
-                WatchtowerError::new(
+                VWatchError::new(
                     "idea_changed",
                     "The idea changed or is unavailable. Nothing was changed.",
                 )
-                .hint(
-                    "Read watchtower ideas list, reconcile the text and use its current revision.",
-                )
+                .hint("Read vwatch ideas list, reconcile the text and use its current revision.")
             })?;
         Ok(with_receipt(json!({"idea":self.store.idea(id)?}), receipt))
     }
 
     pub fn remove_idea(&self, id: i64) -> Result<Value> {
         let idea = self.store.idea(id)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "idea_not_found",
                 format!("No idea with id {id}. Nothing was changed."),
             )
-            .hint("Read `watchtower ideas list` or `watchtower ideas trash` for existing idea ids.")
+            .hint("Read `vwatch ideas list` or `vwatch ideas trash` for existing idea ids.")
         })?;
         let changed = self.store.set_idea_removed(id, Some(&self.now()))?;
         let idea = self.store.idea(id)?.unwrap_or(idea);
         Ok(
             json!({"removed": id, "idea": idea, "changed": changed, "already_removed": !changed,
-            "undo": changed.then(||format!("watchtower ideas restore {id}"))}),
+            "undo": changed.then(||format!("vwatch ideas restore {id}"))}),
         )
     }
 
@@ -84,17 +82,17 @@ impl Watchtower {
 
     pub fn restore_idea(&self, id: i64) -> Result<Value> {
         let idea = self.store.idea(id)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "idea_not_found",
                 format!("No idea with id {id}. Nothing was changed."),
             )
-            .hint("Read `watchtower ideas trash` for removed idea ids.")
+            .hint("Read `vwatch ideas trash` for removed idea ids.")
         })?;
         let restored = self.store.set_idea_removed(id, None)?;
         let idea = self.store.idea(id)?.unwrap_or(idea);
         Ok(
             json!({"idea": idea, "restored": restored, "already_active": !restored,
-            "undo": restored.then(||format!("watchtower ideas remove {id}"))}),
+            "undo": restored.then(||format!("vwatch ideas remove {id}"))}),
         )
     }
 
@@ -110,8 +108,8 @@ impl Watchtower {
     pub(super) fn idea_source(&self, id: &str) -> Result<(Option<String>, Value)> {
         let source = self.find_item(id)?;
         source.filter(|(_,item)| matches!(item["kind"].as_str(),Some("suggestion"|"new_app"|"synergy"|"owner_idea")))
-            .ok_or_else(|| WatchtowerError::new("unknown_idea",format!("No idea or recommendation has item ID '{id}'. Nothing was changed."))
-                .hint("Use item IDs from watchtower proposals; for your own ideas, use the item_id from watchtower ideas list."))
+            .ok_or_else(|| VWatchError::new("unknown_idea",format!("No idea or recommendation has item ID '{id}'. Nothing was changed."))
+                .hint("Use item IDs from vwatch proposals; for your own ideas, use the item_id from vwatch ideas list."))
     }
 
     pub fn idea_status(&self, id: &str) -> Result<Value> {
@@ -127,7 +125,7 @@ impl Watchtower {
     /// Owner decisions about an idea are separate from taste feedback and agent reports.
     pub fn set_idea_status(&self, id: &str, status: &str, revision: &str) -> Result<Value> {
         if !["open", "in_progress", "implemented", "archived", "restore"].contains(&status) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_idea_status",
                 "Unknown idea status. Nothing was changed.",
             )
@@ -138,11 +136,11 @@ impl Watchtower {
         if !matches!(status, "archived" | "restore")
             && current["active_tasks"].as_u64().unwrap_or(0) > 1
         {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "ambiguous_idea_tasks",
                 "Several active tasks track this idea. Nothing was changed.",
             )
-            .hint("Use watchtower tasks list and close or finish the individual tasks first."));
+            .hint("Use vwatch tasks list and close or finish the individual tasks first."));
         }
         let mut projects = project.iter().map(|p| json!(p)).collect::<Vec<_>>();
         if projects.is_empty() {
@@ -213,8 +211,8 @@ impl Watchtower {
             });
         }
         let (changed,snapshot) = self.store.set_idea_state(id,revision,&change,&at)?.ok_or_else(||
-            WatchtowerError::new("idea_changed", "The idea status or its task changed since it was displayed. Nothing was changed.")
-                .hint(format!("Read watchtower ideas status {id}, review the current state and use its revision.")))?;
+            VWatchError::new("idea_changed", "The idea status or its task changed since it was displayed. Nothing was changed.")
+                .hint(format!("Read vwatch ideas status {id}, review the current state and use its revision.")))?;
         let result = idea_projection(id, snapshot);
         let mut state = pick(
             &result,
@@ -224,7 +222,7 @@ impl Watchtower {
         let mut response = json!({"changed":changed,"idea_status":state});
         if changed && matches!(status, "archived" | "restore") {
             response["undo"] = json!(format!(
-                "watchtower ideas status {id} {} --revision {}",
+                "vwatch ideas status {id} {} --revision {}",
                 if status == "archived" {
                     "restore"
                 } else {

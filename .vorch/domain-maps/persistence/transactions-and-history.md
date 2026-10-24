@@ -2,7 +2,7 @@
 
 ## Context and document recovery
 
-`context_token` in `src/store/documents.rs` hashes the values an agent's interpretation depends on, not their collection time. It includes complete current facts, current document identity/content and relevant owner state. Project contexts also include ratings across projects so the owner's taste is shared. An unrelated project's card alone does not invalidate a project context. Portfolio context includes the previous brief, active owner ideas and whether the owner has opened Watchtower since the previous brief; repeat visits after that boundary do not keep invalidating it.
+`context_token` in `src/store/documents.rs` hashes the values an agent's interpretation depends on, not their collection time. It includes complete current facts, current document identity/content and relevant owner state. Project contexts also include ratings across projects so the owner's taste is shared. An unrelated project's card alone does not invalidate a project context. Portfolio context includes the previous brief, active owner ideas and whether the owner has opened vWatch since the previous brief; repeat visits after that boundary do not keep invalidating it.
 
 Context coverage is deliberately broader than the facts fingerprint or portfolio due basis. An informational fact change can invalidate a pending write without requiring a new card in the ordinary daily due check. When adding context-visible state, decide explicitly whether it belongs in the token and in freshness comparisons; they answer different questions.
 
@@ -30,7 +30,7 @@ Facts triggers record a sample when content, payload, fingerprint or identity ch
 
 Document and owner-state triggers journal the same write that changes current state. Proposal triggers retain earlier suggestions, synergies and new-app ideas when omitted later; first appearance stays tied to the stable ID. Triggers forbid updates/deletes of saved content history, samples and payloads. Changes to any current-state write path must preserve those trigger effects.
 
-Legacy documents can receive missing IDs in place during `Watchtower::give_items_ids`. `rewrite_card_if_current` and `rewrite_portfolio_if_current` compare both version and previous content. The document-update migration journals that normalization and repairs retained proposals on databases normalized before those triggers existed. It does not increment the document version or rewrite older evidence. Normal restore instead appends a version with its original basis.
+Legacy documents can receive missing IDs in place during `vWatch::give_items_ids`. `rewrite_card_if_current` and `rewrite_portfolio_if_current` compare both version and previous content. The document-update migration journals that normalization and repairs retained proposals on databases normalized before those triggers existed. It does not increment the document version or rewrite older evidence. Normal restore instead appends a version with its original basis.
 
 `period_samples` returns a preceding observation plus period samples and overlapping Git reconstructions; service comparison rules live in `application/statistics.md`. Keep sample retention distinct from reconstructed Git coverage.
 

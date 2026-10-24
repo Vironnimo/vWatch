@@ -3,24 +3,24 @@ mod common;
 use chrono::Duration;
 use common::{card, demo_repo, make_repo, service};
 use serde_json::{json, Value};
-use watchtower::Watchtower;
+use vwatch::VWatch;
 
 fn token(result: &Value) -> &str {
     assert_eq!(
         result["undo"],
         format!(
-            "watchtower undo {}",
+            "vwatch undo {}",
             result["undo_token"].as_str().expect("opaque undo token")
         )
     );
     result["undo"]
         .as_str()
         .expect("mutation provides an undo command")
-        .strip_prefix("watchtower undo ")
+        .strip_prefix("vwatch undo ")
         .unwrap()
 }
 
-fn suggestion(svc: &Watchtower) -> String {
+fn suggestion(svc: &VWatch) -> String {
     svc.put_card("demo", card(), false, false).unwrap();
     svc.card("demo").unwrap()["card"]["suggestions"][0]["id"]
         .as_str()
@@ -29,7 +29,7 @@ fn suggestion(svc: &Watchtower) -> String {
 }
 
 fn count_receipts(dir: &std::path::Path) -> i64 {
-    rusqlite::Connection::open(dir.join("watchtower.db"))
+    rusqlite::Connection::open(dir.join("vwatch.db"))
         .unwrap()
         .query_row("SELECT count(*) FROM owner_undo", [], |row| row.get(0))
         .unwrap()
@@ -147,7 +147,7 @@ fn path_undo_keeps_a_later_name_and_discards_measurements_from_the_other_folder(
         original.canonicalize().unwrap()
     );
     assert!(svc.store().facts("demo").unwrap().is_none());
-    assert_eq!(result["next"], "watchtower facts refresh demo");
+    assert_eq!(result["next"], "vwatch facts refresh demo");
     assert_eq!(svc.undo(token(&relinked)).unwrap()["changed"], false);
 
     let relinked = svc
@@ -246,7 +246,7 @@ fn a_failed_receipt_write_rolls_back_the_edit_and_failed_undo_rolls_back_restora
     let (svc, _) = service(dir.path());
     svc.add_project(demo_repo(dir.path()).to_str().unwrap(), None, None)
         .unwrap();
-    let db = rusqlite::Connection::open(dir.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("vwatch.db")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_receipt BEFORE INSERT ON owner_undo BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
     assert!(svc.set_goal("demo", "Must roll back", None).is_err());
     assert_eq!(svc.store().project("demo").unwrap().unwrap().goal, "");

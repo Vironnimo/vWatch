@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use watchtower::cards::{json_schema, validate, Kind};
+use vwatch::cards::{json_schema, validate, Kind};
 
 #[test]
 fn proposal_categories_preserve_legacy_meaning_and_reserve_room_for_both() {

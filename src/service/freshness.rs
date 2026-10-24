@@ -154,7 +154,7 @@ pub(super) fn owner_basis(
     })
 }
 
-impl Watchtower {
+impl VWatch {
     pub fn due(&self, max_age_days: i64, refresh: bool) -> Result<Value> {
         let refreshed = if refresh {
             self.refresh_facts(None, true)?
@@ -226,7 +226,7 @@ impl Watchtower {
                 }
                 Some(_) => None,
             };
-            // cards written before Watchtower added a field lack it; the next card fills it
+            // cards written before vWatch added a field lack it; the next card fills it
             let new_fields = card
                 .as_ref()
                 .map(|c| Kind::Card.missing_fields(&c.data))
@@ -272,9 +272,9 @@ impl Watchtower {
             projects
                 .first()
                 .and_then(|p| p["id"].as_str())
-                .map(|id| format!("watchtower context {id}"))
+                .map(|id| format!("vwatch context {id}"))
         } else if portfolio_reason.is_some() {
-            Some("watchtower portfolio context".to_owned())
+            Some("vwatch portfolio context".to_owned())
         } else {
             None
         };

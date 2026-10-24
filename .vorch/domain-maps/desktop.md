@@ -1,17 +1,17 @@
 # Desktop
 
-The desktop presents Watchtower's shared state to the owner and connects explicit owner actions to the service and Windows.
+The desktop presents vWatch's shared state to the owner and connects explicit owner actions to the service and Windows.
 
 ## Overview
 
-- `ui/index.html` loads `ui/app.js` as a native ES module, with no frontend build step. The entry point coordinates state reads, rendering and modal event precedence; private feature modules own Today (`overview.js`), projects/handbook, ideas, feedback/decision rounds, handoff, statistics, search and settings. `presentation.js` owns shared markup/date helpers and disclosure state; `app.css` owns styling. `src/app.rs` is the Tauri adapter and `src/bin/watchtower-ui.rs` the GUI executable. Keep service rules in the application domain.
+- `ui/index.html` loads `ui/app.js` as a native ES module, with no frontend build step. The entry point coordinates state reads, rendering and modal event precedence; private feature modules own Today (`overview.js`), projects/handbook, ideas, feedback/decision rounds, handoff, statistics, search and settings. `presentation.js` owns shared markup/date helpers and disclosure state; `app.css` owns styling. `src/app.rs` is the Tauri adapter and `src/bin/vwatch-ui.rs` the GUI executable. Keep service rules in the application domain.
 - `src/system.rs` owns executable-relative paths, the data-folder override, embedded Skill export, autostart and user PATH integration. Installer scripts belong to `development.md`; the operating Skill's content belongs to `agent-interface.md`.
 - The GUI executable has the Windows GUI subsystem and remains independent of the console lifecycle. Do not move CLI dispatch, streams or exit-status handling into the window; see `agent-interface.md`.
 - The page's four areas separate today's decisions, project re-entry, ideas and recommendations, and statistics/history. Changes should shorten the owner's read or make the next action clearer. UI text is German and addresses the owner as `du`.
 
 ## Interfaces
 
-The page calls `window.__TAURI__.core.invoke` through `call` in `ui/app.js`. Commands in `src/app.rs` delegate to the shared `Watchtower` service using `spawn_blocking`. New owner capabilities need an intentional CLI counterpart or exclusion in `docs/agent-interface.md`; see `agent-interface.md`.
+The page calls `window.__TAURI__.core.invoke` through `call` in `ui/app.js`. Commands in `src/app.rs` delegate to the shared `VWatch` service using `spawn_blocking`. New owner capabilities need an intentional CLI counterpart or exclusion in `docs/agent-interface.md`; see `agent-interface.md`.
 
 `state` returns the view with a `data_version`. The adapter combines SQLite's other-connection version with an own-write counter because SQLite alone does not notice writes on that same connection. `versioned_state` reads the counters before the state; `write` increments the counter even after failure so partial effects can be reloaded. Preserve that pairing when adding commands. The page compares versions and sequences state requests to prevent older results replacing newer accepted state.
 
@@ -30,7 +30,7 @@ Display preferences are persisted owner choices. Legacy values may need a presen
 ## Constraints & Gotchas
 
 - `tests/ui-helpers.cjs` executes the actual ES module graph through `vm.SourceTextModule` in a fresh Node VM and small mock DOM. The runner supplies `--experimental-vm-modules`; direct Node invocations need that flag too. Test-only private accessors are appended in memory, outside shipped assets. `tests/ui.cjs` covers shared behavior; the focused `ui-handoff`, `ui-project`, `ui-overview`, `ui-ideas` and `ui-statistics` files cover their interactions. These tests do not verify WebView layout, actual focus behavior or Windows integration.
-- Verify UI changes in the running window using a task-specific `WATCHTOWER_HOME` under the checkout's `.tmp/`; see `development.md` for scratch and build setup. Do not change the owner's style/hidden-section preferences or leave test ratings, replies or completed ticks. `watchtower feedback` must show no test entries afterwards.
+- Verify UI changes in the running window using a task-specific `VWATCH_HOME` under the checkout's `.tmp/`; see `development.md` for scratch and build setup. Do not change the owner's style/hidden-section preferences or leave test ratings, replies or completed ticks. `vwatch feedback` must show no test entries afterwards.
 - Never toggle the owner's autostart or PATH choice for development verification. A scratch database does not isolate registry changes. The window requires WebView2; the optional Cargo `desktop` feature keeps Tauri dependencies out of the core/CLI build.
 
 ## Agent-facing text

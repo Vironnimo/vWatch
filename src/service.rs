@@ -1,4 +1,4 @@
-//! Watchtower's single owner of behavior, used by both the app window and the CLI.
+//! vWatch's single owner of behavior, used by both the app window and the CLI.
 //!
 //! Owns project registration, fact refreshes, deciding which projects need a new
 //! interpretation, the context an agent reads before writing a card, card and
@@ -41,15 +41,15 @@ use crate::store::{
 use undo::with_receipt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WatchtowerError {
+pub struct VWatchError {
     pub code: String,
     pub message: String,
     pub hint: Option<String>,
 }
 
-impl WatchtowerError {
+impl VWatchError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        WatchtowerError {
+        VWatchError {
             code: code.into(),
             message: message.into(),
             hint: None,
@@ -70,38 +70,34 @@ impl WatchtowerError {
     }
 }
 
-impl std::fmt::Display for WatchtowerError {
+impl std::fmt::Display for VWatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
 
-impl std::error::Error for WatchtowerError {}
+impl std::error::Error for VWatchError {}
 
-impl From<rusqlite::Error> for WatchtowerError {
+impl From<rusqlite::Error> for VWatchError {
     fn from(e: rusqlite::Error) -> Self {
         use rusqlite::ErrorCode;
         let recovery = match e.sqlite_error_code() {
             Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) =>
                 "Wait for the other database operation to finish. Read the current state before retrying a write; this error does not confirm that earlier steps were undone.",
             Some(ErrorCode::ReadOnly | ErrorCode::PermissionDenied | ErrorCode::CannotOpen | ErrorCode::AuthorizationForStatementDenied) =>
-                "Check WATCHTOWER_HOME and access to its data folder and database. Restore the intended access, then read the current state before retrying a write. Do not create a replacement database.",
+                "Check VWATCH_HOME and access to its data folder and database. Restore the intended access, then read the current state before retrying a write. Do not create a replacement database.",
             Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) =>
-                "Stop writing and preserve the database and its -wal/-shm files. Check WATCHTOWER_HOME points to the intended data folder and report this error for recovery; do not delete or recreate the database.",
+                "Stop writing and preserve the database and its -wal/-shm files. Check VWATCH_HOME points to the intended data folder and report this error for recovery; do not delete or recreate the database.",
             Some(ErrorCode::DiskFull | ErrorCode::SystemIoFailure) =>
-                "Check available space and access to the disk containing WATCHTOWER_HOME. Resolve the storage problem, then read the current state before retrying a write; this error does not confirm that earlier steps were undone.",
+                "Check available space and access to the disk containing VWATCH_HOME. Resolve the storage problem, then read the current state before retrying a write; this error does not confirm that earlier steps were undone.",
             _ =>
                 "Read the current state before repeating a write; this error does not confirm that earlier steps were undone. If the error persists, report it with the failing command and preserve the database. Do not delete or recreate it.",
         };
-        WatchtowerError::new(
-            "storage_error",
-            format!("Watchtower's database failed: {e}"),
-        )
-        .hint(recovery)
+        VWatchError::new("storage_error", format!("vWatch's database failed: {e}")).hint(recovery)
     }
 }
 
-pub type Result<T> = std::result::Result<T, WatchtowerError>;
+pub type Result<T> = std::result::Result<T, VWatchError>;
 
 pub type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
@@ -115,7 +111,7 @@ pub enum RunCompletionStage {
     BeforeSave,
 }
 
-pub struct Watchtower {
+pub struct VWatch {
     store: Store,
     clock: Clock,
     collect: Collector,
@@ -154,10 +150,10 @@ fn pick(v: &Value, keys: &[&str]) -> Value {
     )
 }
 
-impl Watchtower {
-    /// Watchtower on a database file, measuring with git and the real clock.
-    pub fn open(db: &Path) -> Result<Watchtower> {
-        let svc = Watchtower::with_parts(
+impl VWatch {
+    /// vWatch on a database file, measuring with git and the real clock.
+    pub fn open(db: &Path) -> Result<VWatch> {
+        let svc = VWatch::with_parts(
             Store::open(db)?,
             Box::new(Utc::now),
             Box::new(facts::collect_reusing),
@@ -166,8 +162,8 @@ impl Watchtower {
         Ok(svc)
     }
 
-    pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> Watchtower {
-        Watchtower {
+    pub fn with_parts(store: Store, clock: Clock, collect: Collector) -> VWatch {
+        VWatch {
             store,
             clock,
             collect,

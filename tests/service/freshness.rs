@@ -33,7 +33,7 @@ fn morning_run_cycle() {
         .unwrap()
         .ends_with("second"));
     svc.put_card("demo", card(), false, false).unwrap();
-    // a card written before Watchtower added a field is due once to fill it
+    // a card written before vWatch added a field is due once to fill it
     let mut older = svc.card("demo").unwrap()["card"].clone();
     older.as_object_mut().unwrap().remove("handbook");
     older["suggestions"][0]
@@ -303,7 +303,7 @@ fn quiet_active_projects_take_turns_for_an_idea_review() {
     }
     svc.set_status("delta", "parked", None).unwrap();
     svc.put_card("delta", card(), false, false).unwrap();
-    let reviews = |svc: &watchtower::Watchtower| -> Vec<String> {
+    let reviews = |svc: &vwatch::VWatch| -> Vec<String> {
         svc.due(14, false).unwrap()["projects"]
             .as_array()
             .unwrap()
@@ -392,13 +392,13 @@ fn a_ci_turning_red_or_green_makes_the_card_due() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
         .unwrap()
         .to_utc();
-    let store = watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap();
-    let svc = watchtower::Watchtower::with_parts(store, Box::new(move || now), Box::new(collect));
+    let store = vwatch::store::Store::open(&tmp.path().join("vwatch.db")).unwrap();
+    let svc = vwatch::VWatch::with_parts(store, Box::new(move || now), Box::new(collect));
     let repo = tmp.path().join("demo");
     std::fs::create_dir(&repo).unwrap();
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
-    let reasons = |svc: &watchtower::Watchtower| {
+    let reasons = |svc: &vwatch::VWatch| {
         svc.due(14, true).unwrap()["projects"]
             .as_array()
             .unwrap()

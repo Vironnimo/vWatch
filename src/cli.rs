@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use clap::CommandFactory;
 use serde_json::{json, Value};
 
-use crate::service::WatchtowerError;
+use crate::service::VWatchError;
 use crate::{cli_output, system};
 
 mod dispatch;
@@ -212,7 +212,7 @@ pub(crate) fn scoped_command(data_dir: &Path, command: &str) -> String {
     if !nondefault_instance(data_dir) || command.contains(" --instance ") {
         return command.to_owned();
     }
-    let Some(rest) = command.strip_prefix("watchtower ") else {
+    let Some(rest) = command.strip_prefix("vwatch ") else {
         return command.to_owned();
     };
     let absolute = if data_dir.is_absolute() {
@@ -226,7 +226,7 @@ pub(crate) fn scoped_command(data_dir: &Path, command: &str) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    format!("watchtower --instance p_{hex} {rest}")
+    format!("vwatch --instance p_{hex} {rest}")
 }
 
 pub fn job_plan(args: &[OsString]) -> Option<JobPlan> {
@@ -306,7 +306,7 @@ fn requested_data_dir(args: &[OsString], fallback: &Path) -> PathBuf {
     data_dir.or(instance).unwrap_or_else(|| fallback.to_owned())
 }
 
-fn usage_error(error: &clap::Error) -> WatchtowerError {
+fn usage_error(error: &clap::Error) -> VWatchError {
     let message = error.to_string().replacen("error:", "Error:", 1);
     let mut definition = Cli::command();
     definition.build();
@@ -319,7 +319,7 @@ fn usage_error(error: &clap::Error) -> WatchtowerError {
     // an offending argument as a replacement target or executable recovery.
     for word in usage
         .split_whitespace()
-        .skip_while(|word| *word != "watchtower")
+        .skip_while(|word| *word != "vwatch")
         .skip(1)
     {
         if let Some(child) = current.find_subcommand(word) {
@@ -352,7 +352,7 @@ fn usage_error(error: &clap::Error) -> WatchtowerError {
         }
         recovery.push_str(". --json only selects the output format; it does not take a document.");
     }
-    WatchtowerError::new(
+    VWatchError::new(
         "invalid_arguments",
         format!("{}\nNothing was changed.", message.trim()),
     )
@@ -361,7 +361,7 @@ fn usage_error(error: &clap::Error) -> WatchtowerError {
 
 pub(crate) fn write_error(
     out: &mut dyn Write,
-    error: &WatchtowerError,
+    error: &VWatchError,
     json_mode: bool,
     data_dir: &Path,
 ) {
@@ -390,7 +390,7 @@ pub(crate) fn write_error(
             text.push_str(&format!("  {}\n", visible_line(line)));
         }
         if let Some(hint) = &hint {
-            let hint = hint.replace("watchtower --json ", "watchtower ");
+            let hint = hint.replace("vwatch --json ", "vwatch ");
             // A recovery explanation is not an executable continuation. In
             // particular, examples and user-supplied IDs cannot create markers.
             for line in hint.lines() {
@@ -417,12 +417,12 @@ fn scoped_hint(data_dir: &Path, hint: &str) -> String {
     if !nondefault_instance(data_dir) {
         return hint.to_owned();
     }
-    let prefix = scoped_command(data_dir, "watchtower ");
-    let mut parts = hint.split("watchtower ");
+    let prefix = scoped_command(data_dir, "vwatch ");
+    let mut parts = hint.split("vwatch ");
     let mut result = parts.next().unwrap_or_default().to_owned();
     for part in parts {
         if part.starts_with("--instance ") || part.starts_with("--data-dir ") {
-            result.push_str("watchtower ");
+            result.push_str("vwatch ");
         } else {
             result.push_str(&prefix);
         }
@@ -609,7 +609,7 @@ pub fn render_completed_job(
     let parsed = serde_json::from_str::<Value>(text);
     match parsed {
         Ok(body) if body["error"].is_object() && body["ok"] == false => {
-            let mut error = WatchtowerError::new(
+            let mut error = VWatchError::new(
                 body["error"]["code"].as_str().unwrap_or("job_failed"),
                 body["error"]["message"]
                     .as_str()
@@ -627,8 +627,8 @@ pub fn render_completed_job(
             }
         }
         Err(_) => {
-            let error = WatchtowerError::new("job_result_unreadable", "The saved command result is incomplete. Its outcome is unknown.")
-                .hint("Read watchtower activity and the affected item before deciding whether to repeat a change.");
+            let error = VWatchError::new("job_result_unreadable", "The saved command result is incomplete. Its outcome is unknown.")
+                .hint("Read vwatch activity and the affected item before deciding whether to repeat a change.");
             write_error(out, &error, json_mode, data_dir);
             return 1;
         }
@@ -693,8 +693,8 @@ where
         "--data-dir"
     } else if cli.instance.is_some() {
         "printed --instance locator"
-    } else if std::env::var_os("WATCHTOWER_HOME").is_some() {
-        "WATCHTOWER_HOME"
+    } else if std::env::var_os("VWATCH_HOME").is_some() {
+        "VWATCH_HOME"
     } else if nondefault_instance(data_dir) {
         "caller-supplied data folder"
     } else {
@@ -713,7 +713,7 @@ where
         // Creating it here lets the metadata record precede any database write.
         let _ = std::fs::create_dir_all(data_dir);
     }
-    let ticket = if std::env::var_os("WATCHTOWER_INTERNAL_JOB_WORKER").is_none() {
+    let ticket = if std::env::var_os("VWATCH_INTERNAL_JOB_WORKER").is_none() {
         crate::cli_usage::begin(data_dir, key, &metadata.flags, metadata.targets)
     } else {
         None
@@ -769,7 +769,7 @@ pub fn main(args: Vec<OsString>) -> i32 {
     let mut lock = stdout.lock();
     use std::io::IsTerminal;
     if runtime_metadata(&args).stdin_document && std::io::stdin().is_terminal() {
-        let error = WatchtowerError::new(
+        let error = VWatchError::new(
             "missing_document",
             "--file - needs piped input; terminal input is not read. Nothing was saved.",
         )

@@ -74,13 +74,13 @@ fn resolve(path: &str) -> PathBuf {
 }
 
 /// Add the keys of `extra` (an object) to `base` (an object).
-impl Watchtower {
+impl VWatch {
     pub(super) fn project(&self, id: &str) -> Result<Project> {
         if let Some(p) = self.store.project(id)? {
             return Ok(p);
         }
         if let Some(p) = self.store.project_including_removed(id)? {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "project_removed",
                 format!(
                     "Project '{}' ({}) is in the trash. Nothing was changed.",
@@ -88,7 +88,7 @@ impl Watchtower {
                 ),
             )
             .hint(format!(
-                "To restore its cards and history: watchtower projects restore {}",
+                "To restore its cards and history: vwatch projects restore {}",
                 p.id
             )));
         }
@@ -108,15 +108,12 @@ impl Watchtower {
                 .collect::<Vec<_>>()
                 .join(", ");
             if known.len() > 10 {
-                format!("Known project ids (first 10 of {}): {shown}. Read watchtower projects list for the complete list; choose the intended project explicitly.",known.len())
+                format!("Known project ids (first 10 of {}): {shown}. Read vwatch projects list for the complete list; choose the intended project explicitly.",known.len())
             } else {
                 format!("Known project ids: {shown}. Use the exact id of the intended project.")
             }
         };
-        Err(
-            WatchtowerError::new("project_not_found", format!("No project with id '{id}'."))
-                .hint(hint),
-        )
+        Err(VWatchError::new("project_not_found", format!("No project with id '{id}'.")).hint(hint))
     }
 
     pub fn list_projects(&self) -> Result<Value> {
@@ -144,7 +141,7 @@ impl Watchtower {
     ) -> Result<(Project, bool)> {
         let name = name.map(str::trim);
         if name.is_some_and(str::is_empty) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_name",
                 "The name must not be empty. No project was registered.",
             )
@@ -153,7 +150,7 @@ impl Watchtower {
             ));
         }
         if path.trim().is_empty() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_path",
                 "The folder must not be empty. No project was registered.",
             )
@@ -162,10 +159,10 @@ impl Watchtower {
         let resolved = resolve(path);
         let resolved_str = resolved.to_string_lossy().into_owned();
         if !resolved.is_dir() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "path_missing",
                 format!("Folder does not exist: {resolved_str}. No project was registered."),
-            ).hint("Pass an existing project folder and quote paths containing spaces. If a watched project moved, run `watchtower projects list`, then use projects update with its existing id and --path to preserve its cards and history."));
+            ).hint("Pass an existing project folder and quote paths containing spaces. If a watched project moved, run `vwatch projects list`, then use projects update with its existing id and --path to preserve its cards and history."));
         }
         if let Some(p) = self
             .store
@@ -174,7 +171,7 @@ impl Watchtower {
             .find(|p| same_path(&p.path, &resolved_str))
         {
             if p.removed_at.is_some() {
-                return Err(WatchtowerError::new(
+                return Err(VWatchError::new(
                     "project_removed",
                     format!(
                         "This folder belongs to removed project '{}' ({}). Nothing was changed.",
@@ -182,14 +179,14 @@ impl Watchtower {
                     ),
                 )
                 .hint(format!(
-                    "Restore its cards and history with: watchtower projects restore {}",
+                    "Restore its cards and history with: vwatch projects restore {}",
                     p.id
                 )));
             }
             if id.is_none_or(|id| id == p.id) && name.is_none_or(|name| name == p.name) {
                 return Ok((p, false));
             }
-            return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{}' ({}) with different identity fields. Nothing was changed.",p.id,p.name))
+            return Err(VWatchError::new("already_registered", format!("This folder is already registered as '{}' ({}) with different identity fields. Nothing was changed.",p.id,p.name))
                 .hint(format!("Use projects update {} with --name for an intentional rename; the existing id remains {}.",p.id,p.id)));
         }
         let folder = resolved
@@ -210,12 +207,12 @@ impl Watchtower {
         };
         if !valid_project_id(&id) {
             return Err(
-                WatchtowerError::new("invalid_id", format!("Invalid project id '{id}'."))
+                VWatchError::new("invalid_id", format!("Invalid project id '{id}'."))
                     .hint("Use 1 to 40 lowercase letters, digits or hyphens; start with a letter or digit."),
             );
         }
         if self.store.project_including_removed(&id)?.is_some() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "id_taken",
                 format!("The id '{id}' is already used."),
             )
@@ -224,8 +221,8 @@ impl Watchtower {
         match self.store.add_project(&id,name.unwrap_or(&folder),&resolved_str,&self.now())? {
             ProjectRegistration::Added => self.project(&id).map(|p|(p,true)),
             ProjectRegistration::Existing => self.project(&id).map(|p|(p,false)),
-            ProjectRegistration::IdTaken => Err(WatchtowerError::new("id_taken",format!("Project id '{id}' was registered by another caller. Nothing was changed by this call.")).hint("Choose a different id for a different project, or inspect the existing project first.")),
-            ProjectRegistration::PathTaken(other) => Err(WatchtowerError::new("already_registered",format!("This folder was registered as '{other}' by another caller. Nothing was changed by this call.")).hint(format!("Read watchtower projects show {other} to inspect its identity before any edit."))),
+            ProjectRegistration::IdTaken => Err(VWatchError::new("id_taken",format!("Project id '{id}' was registered by another caller. Nothing was changed by this call.")).hint("Choose a different id for a different project, or inspect the existing project first.")),
+            ProjectRegistration::PathTaken(other) => Err(VWatchError::new("already_registered",format!("This folder was registered as '{other}' by another caller. Nothing was changed by this call.")).hint(format!("Read vwatch projects show {other} to inspect its identity before any edit."))),
         }
     }
 
@@ -234,7 +231,7 @@ impl Watchtower {
         let refreshed = self.refresh_facts(Some(std::slice::from_ref(&project.id)), true)?;
         let mut result = extend(
             project_json(&project),
-            json!({"facts": refreshed[0], "created":created, "already_exists":!created, "undo":created.then(||format!("watchtower projects remove {}",project.id))}),
+            json!({"facts": refreshed[0], "created":created, "already_exists":!created, "undo":created.then(||format!("vwatch projects remove {}",project.id))}),
         );
         if !facts::is_git_repo(&project.path) {
             result["warning"] = json!("The folder is not a git repository; only a card written by an agent can describe it.");
@@ -271,11 +268,11 @@ impl Watchtower {
 
     pub fn remove_project(&self, id: &str) -> Result<Value> {
         let mut project = self.store.project_including_removed(id)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "project_not_found",
                 format!("No project with id '{id}'. Nothing was changed."),
             )
-            .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
+            .hint("Read vwatch projects list or vwatch projects trash for existing ids.")
         })?;
         let removed_at = self.now();
         let changed = self.store.set_project_removed(id, Some(&removed_at))?;
@@ -284,7 +281,7 @@ impl Watchtower {
         }
         Ok(
             json!({"removed": id, "project": project_json(&project), "changed": changed,
-            "already_removed": !changed, "undo": changed.then(||format!("watchtower projects restore {id}"))}),
+            "already_removed": !changed, "undo": changed.then(||format!("vwatch projects restore {id}"))}),
         )
     }
 
@@ -297,17 +294,17 @@ impl Watchtower {
 
     pub fn restore_project(&self, id: &str) -> Result<Value> {
         let mut project = self.store.project_including_removed(id)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "project_not_found",
                 format!("No project with id '{id}'. Nothing was changed."),
             )
-            .hint("Read watchtower projects list or watchtower projects trash for existing ids.")
+            .hint("Read vwatch projects list or vwatch projects trash for existing ids.")
         })?;
         let restored = self.store.set_project_removed(id, None)?;
         project.removed_at = None;
         Ok(
             json!({"project": project_json(&project), "restored": restored, "already_active": !restored,
-            "undo": restored.then(||format!("watchtower projects remove {id}"))}),
+            "undo": restored.then(||format!("vwatch projects remove {id}"))}),
         )
     }
 
@@ -331,7 +328,7 @@ impl Watchtower {
             .map(|(field, _)| field.to_owned())
             .collect();
         if name.is_none() && path.is_none() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_update",
                 "No project changes were supplied.",
             )
@@ -342,22 +339,20 @@ impl Watchtower {
         let name = name.map(str::trim).unwrap_or(&before.name);
         if name.is_empty() {
             return Err(
-                WatchtowerError::new("invalid_name", "The name must not be empty.")
+                VWatchError::new("invalid_name", "The name must not be empty.")
                     .hint("Pass a nonempty display name with --name."),
             );
         }
         let path = match path {
-            Some(path) if path.trim().is_empty() => return Err(WatchtowerError::new(
+            Some(path) if path.trim().is_empty() => return Err(VWatchError::new(
                 "invalid_path",
                 "The folder must not be empty.",
             )
-            .hint(
-                "Pass the existing project folder with --path. Watchtower does not move folders.",
-            )),
+            .hint("Pass the existing project folder with --path. vWatch does not move folders.")),
             Some(path) => {
                 let resolved = resolve(path.trim());
                 if !resolved.is_dir() {
-                    return Err(WatchtowerError::new("path_missing", format!("Folder does not exist: {}", resolved.display()))
+                    return Err(VWatchError::new("path_missing", format!("Folder does not exist: {}", resolved.display()))
                         .hint("Move or rename the folder first, then pass its new location with --path. Nothing was changed."));
                 }
                 let resolved = resolved.to_string_lossy().into_owned();
@@ -371,9 +366,9 @@ impl Watchtower {
         };
         let receipt = match self.store.update_project(&before, name, &path, fields, &self.now())? {
             ProjectUpdate::Updated(receipt) => *receipt,
-            ProjectUpdate::Conflict => return Err(WatchtowerError::new("version_conflict", "The project changed while you were editing it.")
-                .hint("Read `watchtower projects list` and retry the intended changes.")),
-            ProjectUpdate::PathTaken(other) => return Err(WatchtowerError::new("already_registered", format!("This folder is already registered as '{other}'."))
+            ProjectUpdate::Conflict => return Err(VWatchError::new("version_conflict", "The project changed while you were editing it.")
+                .hint("Read `vwatch projects list` and retry the intended changes.")),
+            ProjectUpdate::PathTaken(other) => return Err(VWatchError::new("already_registered", format!("This folder is already registered as '{other}'."))
                 .hint(format!("Use the existing project '{other}'. Rename or relink the existing project to preserve its identity. Nothing was changed."))),
         };
         let project = self.project(id)?;
@@ -396,7 +391,7 @@ impl Watchtower {
         if let Some(d) = due {
             if NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
                 return Err(
-                    WatchtowerError::new("invalid_date", format!("'{d}' is not a date."))
+                    VWatchError::new("invalid_date", format!("'{d}' is not a date."))
                         .hint("Write the due date as YYYY-MM-DD."),
                 );
             }
@@ -414,11 +409,10 @@ impl Watchtower {
     pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
         self.project(id)?;
         if !STATUSES.contains(&status) {
-            return Err(WatchtowerError::new(
-                "invalid_status",
-                format!("Unknown status '{status}'."),
-            )
-            .hint(format!("Use one of: {}.", STATUSES.join(", "))));
+            return Err(
+                VWatchError::new("invalid_status", format!("Unknown status '{status}'."))
+                    .hint(format!("Use one of: {}.", STATUSES.join(", "))),
+            );
         }
         let receipt = self.store.set_status(id, status, note, &self.now())?;
         Ok(with_receipt(project_json(&self.project(id)?), receipt))
@@ -431,7 +425,7 @@ impl Watchtower {
     pub fn discover(&self, root: &str) -> Result<Value> {
         let base = resolve(root);
         if !base.is_dir() {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "path_missing",
                 format!("Folder does not exist: {}", base.to_string_lossy()),
             ).hint("Retry projects discover with an existing projects folder; quote paths containing spaces."));
@@ -445,7 +439,7 @@ impl Watchtower {
             }
         } else {
             std::fs::read_dir(&base).map_err(|e| {
-                WatchtowerError::new(
+                VWatchError::new(
                     "path_unreadable",
                     format!("Cannot read {}: {e}", base.to_string_lossy()),
                 )
@@ -555,8 +549,8 @@ impl Watchtower {
             .store
             .save_project_facts(project, &self.now(), &fp, &data)?
         {
-            return Err(WatchtowerError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
-                .hint("Read `watchtower projects list` and refresh the project's facts again. The outdated measurement was discarded."));
+            return Err(VWatchError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
+                .hint("Read `vwatch projects list` and refresh the project's facts again. The outdated measurement was discarded."));
         }
         Ok(json!({
             "id": project.id,
@@ -576,8 +570,8 @@ impl Watchtower {
         }
         self.refresh_facts(Some(&[id.to_owned()]), true)?;
         self.store.facts(id)?.ok_or_else(|| {
-            WatchtowerError::new("facts_missing", format!("Could not measure '{id}'."))
-                .hint(format!("Read `watchtower projects list` to check the folder, then run `watchtower facts refresh {id}` and inspect its per-project result before continuing."))
+            VWatchError::new("facts_missing", format!("Could not measure '{id}'."))
+                .hint(format!("Read `vwatch projects list` to check the folder, then run `vwatch facts refresh {id}` and inspect its per-project result before continuing."))
         })
     }
 

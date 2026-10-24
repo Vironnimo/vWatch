@@ -88,13 +88,13 @@ fn the_data_version_moves_only_for_writes_of_other_connections() {
     assert_ne!(version, before);
     assert_eq!(state["ideas"][0]["text"], "Von einem Agenten");
     assert_eq!(svc.data_version().unwrap(), version);
-    let connection = watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap();
+    let connection = vwatch::store::Store::open(&tmp.path().join("vwatch.db")).unwrap();
     let armed = std::sync::atomic::AtomicBool::new(true);
     let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
         .unwrap()
         .to_utc();
-    let during = watchtower::Watchtower::with_parts(
-        watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap(),
+    let during = vwatch::VWatch::with_parts(
+        vwatch::store::Store::open(&tmp.path().join("vwatch.db")).unwrap(),
         Box::new(move || {
             if armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 connection
@@ -272,7 +272,7 @@ fn idea_recency_uses_first_saved_identity_across_edits_and_returns() {
 /// version: watched projects' cards, then the briefs, then the cards of removed
 /// projects that ratings or tasks name. Each item snapshot comes from its first list.
 fn walked_items(
-    svc: &watchtower::Watchtower,
+    svc: &vwatch::VWatch,
 ) -> (
     std::collections::HashMap<String, String>,
     std::collections::HashMap<String, Value>,
@@ -352,7 +352,7 @@ fn walked_items(
 }
 /// The window state's dates, card histories and task sources equal a walk
 /// over every saved version.
-fn assert_state_matches_full_walk(svc: &watchtower::Watchtower) -> Value {
+fn assert_state_matches_full_walk(svc: &vwatch::VWatch) -> Value {
     let state = svc.state(false).unwrap();
     let store = svc.store();
     let (first, items) = walked_items(svc);

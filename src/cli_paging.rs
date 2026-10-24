@@ -9,7 +9,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use crate::service::{Result, WatchtowerError};
+use crate::service::{Result, VWatchError};
 
 /// Leave room for the dispatcher's instance note within the 10,000-character contract.
 pub const PAGE_LIMIT: usize = 8_500;
@@ -40,18 +40,18 @@ pub fn resume(data_dir: &Path, token: &str, start: usize) -> Result<String> {
     let path = snapshot_path(data_dir, token)?;
     let bytes = fs::read(&path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            WatchtowerError::new("output_missing", "The saved output is unavailable in this instance. No command was repeated.")
-                .hint("Use the same Watchtower instance that printed the continuation. If the snapshot was removed, read the current state with the original command's show or status command before repeating a change.")
+            VWatchError::new("output_missing", "The saved output is unavailable in this instance. No command was repeated.")
+                .hint("Use the same vWatch instance that printed the continuation. If the snapshot was removed, read the current state with the original command's show or status command before repeating a change.")
         } else {
             io_error("read", error)
         }
     })?;
     if format!("{:x}", Sha1::digest(&bytes)) != token {
-        return Err(WatchtowerError::new("output_changed", "The saved output changed on disk. No command was repeated.")
+        return Err(VWatchError::new("output_changed", "The saved output changed on disk. No command was repeated.")
             .hint("Read the current state with the original command's show or status command. Do not repeat a change just to recover its output."));
     }
     let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|_| {
-        WatchtowerError::new("output_invalid", "The saved output cannot be read. No command was repeated.")
+        VWatchError::new("output_invalid", "The saved output cannot be read. No command was repeated.")
             .hint("Read the current state with the original command's show or status command before repeating a change.")
     })?;
     page(data_dir, &snapshot, token, start)
@@ -63,7 +63,7 @@ fn snapshot_path(data_dir: &Path, token: &str) -> Result<PathBuf> {
             .bytes()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
     {
-        return Err(WatchtowerError::new("invalid_output_token", "The output token must be the 40 lowercase hexadecimal characters from a continuation. No command was repeated.")
+        return Err(VWatchError::new("invalid_output_token", "The output token must be the 40 lowercase hexadecimal characters from a continuation. No command was repeated.")
             .hint("Copy the full command from the earlier Next: line; the token is not a file path."));
     }
     Ok(data_dir.join("output").join(format!("{token}.json")))
@@ -104,17 +104,17 @@ fn check_existing(path: &Path, bytes: &[u8]) -> Result<()> {
     if fs::read(path).map_err(|error| io_error("read", error))? == bytes {
         return Ok(());
     }
-    Err(WatchtowerError::new("output_conflict", "The output snapshot could not be saved without replacing different content. The original command has already run.")
+    Err(VWatchError::new("output_conflict", "The output snapshot could not be saved without replacing different content. The original command has already run.")
         .hint("Read the current state with the original command's show or status command; do not repeat a change to recover its output."))
 }
 
-fn io_error(action: &str, error: std::io::Error) -> WatchtowerError {
+fn io_error(action: &str, error: std::io::Error) -> VWatchError {
     let cause = match error.kind() {
         std::io::ErrorKind::PermissionDenied => "access to the output folder was denied",
         std::io::ErrorKind::StorageFull => "the output disk is full",
         _ => "the output folder could not be accessed",
     };
-    WatchtowerError::new("output_unavailable", format!("Could not {action} the saved output: {cause}. The original command has already run; this does not undo its changes."))
+    VWatchError::new("output_unavailable", format!("Could not {action} the saved output: {cause}. The original command has already run; this does not undo its changes."))
         .hint("Restore access and available space in the instance's data folder. Read the current state with the original command's show or status command before repeating a change.")
 }
 
@@ -122,18 +122,16 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
     let chars: Vec<char> = snapshot.text.chars().collect();
     let total = chars.len();
     if start >= total {
-        return Err(WatchtowerError::new("invalid_output_start", format!("Output offset {start} is outside the saved text of {total} characters. No command was repeated."))
-            .hint(format!("Use the zero-based offset from the continuation, or start again: {}", crate::cli::scoped_command(data_dir, &format!("watchtower output {token} --start 0")))));
+        return Err(VWatchError::new("invalid_output_start", format!("Output offset {start} is outside the saved text of {total} characters. No command was repeated."))
+            .hint(format!("Use the zero-based offset from the continuation, or start again: {}", crate::cli::scoped_command(data_dir, &format!("vwatch output {token} --start 0")))));
     }
-    let continuation = crate::cli::scoped_command(
-        data_dir,
-        &format!("watchtower output {token} --start {total}"),
-    );
+    let continuation =
+        crate::cli::scoped_command(data_dir, &format!("vwatch output {token} --start {total}"));
     let undo = snapshot
         .text
         .lines()
         .rev()
-        .find(|line| line.starts_with("Undo: watchtower "))
+        .find(|line| line.starts_with("Undo: vwatch "))
         .map(|line| {
             format!(
                 "Undo: {}",
@@ -147,7 +145,7 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
         .text
         .lines()
         .rev()
-        .find(|line| line.starts_with("Next: watchtower "))
+        .find(|line| line.starts_with("Next: vwatch "))
         .map(|line| {
             format!(
                 "Next: {}",
@@ -158,7 +156,7 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
     let framing = 600 + continuation.chars().count().max(next_size) + undo_size;
     let body_limit = PAGE_LIMIT.saturating_sub(framing).min(BODY_LIMIT);
     if body_limit < 128 {
-        return Err(WatchtowerError::new("output_scope_too_long", "The instance path is too long for a safe continuation within the output limit. The original command has already run.")
+        return Err(VWatchError::new("output_scope_too_long", "The instance path is too long for a safe continuation within the output limit. The original command has already run.")
             .hint("Use the same instance's show or status command with --json to inspect its complete current state. Do not repeat a change to recover its output."));
     }
     let mut end = start;
@@ -217,10 +215,7 @@ fn page(data_dir: &Path, snapshot: &Snapshot, token: &str, start: usize) -> Resu
     if end < total {
         out.push_str(&format!(
             "Next: {}",
-            crate::cli::scoped_command(
-                data_dir,
-                &format!("watchtower output {token} --start {end}")
-            )
+            crate::cli::scoped_command(data_dir, &format!("vwatch output {token} --start {end}"))
         ));
     } else {
         out.push_str("End of saved output.");

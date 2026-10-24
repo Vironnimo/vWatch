@@ -230,7 +230,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // A unique executable name identifies only this test's descendants,
         // even when the intermediary cmd.exe has already exited.
-        let name = format!("watchtower-timeout-{}.exe", std::process::id());
+        let name = format!("vwatch-timeout-{}.exe", std::process::id());
         let system = std::env::var_os("SystemRoot").unwrap();
         std::fs::copy(
             Path::new(&system).join("System32/ping.exe"),

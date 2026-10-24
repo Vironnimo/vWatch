@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Watchtower",
+  "productName": "vWatch",
   "version": "0.2.0",
-  "identifier": "local.watchtower.desktop",
+  "identifier": "local.vwatch.desktop",
   "build": {
     "frontendDist": "ui"
   },

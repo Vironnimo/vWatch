@@ -2,17 +2,17 @@
 
 ## Project
 
-Watchtower is a local Windows morning overview for an owner running roughly eight software projects through coding agents. It helps the owner see what changed, decide what needs attention, resume an older project and hand a concrete task to an agent. The window is for reading and decisions; a native console CLI lets people and agents use the same application service and SQLite database.
+vWatch is a local Windows morning overview for an owner running roughly eight software projects through coding agents. It helps the owner see what changed, decide what needs attention, resume an older project and hand a concrete task to an agent. The window is for reading and decisions; a native console CLI lets people and agents use the same application service and SQLite database.
 
-The installed folder contains `Watchtower.exe`, `Watchtower-UI.exe`, `data/` and `skill/watchtower/`. The window does not call a model. External agents read repository evidence and write German project Cards and a portfolio brief through guarded CLI operations.
+The installed folder contains `vWatch.exe`, `vWatch-UI.exe`, `data/` and `skill/vwatch/`. The window does not call a model. External agents read repository evidence and write German project Cards and a portfolio brief through guarded CLI operations.
 
 ## Architecture
 
 **Stack:** Rust 2021, pinned toolchain 1.97.1; Tauri 2.12.0 with a static vanilla JavaScript/HTML/CSS frontend and no frontend build step. `Cargo.lock` pins rusqlite 0.40.2 (bundled SQLite), Tokei 15.0.0, Clap 4.6.7, Serde 1.0.229, serde_json 1.0.151 and Chrono 0.4.45. Node 24.15.0 runs the UI tests; Python 3.14.4 runs the dependency-free development tools. Git is required; `gh` is optional for CI measurements. Windows 11 supplies WebView2.
 
 ```text
-src/main.rs -> cli_jobs / cli -> Watchtower service
-ui/ -> Tauri invoke -> src/app.rs -> Watchtower service
+src/main.rs -> cli_jobs / cli -> vWatch service
+ui/ -> Tauri invoke -> src/app.rs -> vWatch service
 src/service.rs + service/ -> cards, facts, store
 src/cards.rs -> document definitions, validation, defaults, schema export
 src/facts.rs + facts/ -> read-only Git / optional gh / bounded file scans
@@ -21,7 +21,7 @@ src/system.rs -> installation paths, embedded Skill, Windows integration
 scripts/ + .githooks/ -> developer checks and checkout lifecycle
 ```
 
-`Watchtower` in `service.rs` owns application behavior; CLI and Tauri adapt it rather than implementing competing behavior. The optional `desktop` feature contains Tauri dependencies and the GUI binary; the console/core build works without it. The default `custom-protocol` feature serves embedded `ui/` assets, with no development HTTP server or port allocation.
+`VWatch` in `service.rs` owns application behavior; CLI and Tauri adapt it rather than implementing competing behavior. The optional `desktop` feature contains Tauri dependencies and the GUI binary; the console/core build works without it. The default `custom-protocol` feature serves embedded `ui/` assets, with no development HTTP server or port allocation.
 
 Use 1,000 physical lines as a soft source-file review threshold, not an automatic refactor requirement. Split large owners into cohesive private units behind the same public interface when the task benefits; do not replace a large file with arbitrary chunks, pass-through layers or compressed formatting. The large owners use private units behind their existing interfaces; the maps locate those responsibilities.
 
@@ -42,15 +42,15 @@ How to read the maps: `AGENTS.md` -> Load context for the task.
 | application.md | `src/service.rs`, `src/service/`, `src/cards.rs` | Shared behavior, report schemas, owner decisions, runs and read models |
 | persistence.md | `src/store.rs`, `src/store/` | SQLite migrations, identity, atomic guards, history and Undo |
 | repository-facts.md | `src/facts.rs`, `src/facts/` | Read-only repository observations, CI, bounded statistics and fingerprints |
-| agent-interface.md | `src/main.rs`, `src/cli*.rs`, `src/cli/`, `src/cli_output/`, `skill/watchtower/`, `docs/agent-interface.md` | Console protocol, continuation, recovery, runtime instructions and capability parity |
-| desktop.md | `ui/`, `src/app.rs`, `src/bin/watchtower-ui.rs`, `src/system.rs` | Owner window, Tauri lifecycle and Windows integration |
+| agent-interface.md | `src/main.rs`, `src/cli*.rs`, `src/cli/`, `src/cli_output/`, `skill/vwatch/`, `docs/agent-interface.md` | Console protocol, continuation, recovery, runtime instructions and capability parity |
+| desktop.md | `ui/`, `src/app.rs`, `src/bin/vwatch-ui.rs`, `src/system.rs` | Owner window, Tauri lifecycle and Windows integration |
 | development.md | `scripts/`, `.githooks/`, build configuration, test infrastructure | Pinned tools, static commit checks, worktrees, local verification and installation |
 
 ## Conventions
 
-**Contracts and errors:** `WatchtowerError` is the service error boundary; the CLI owns presentation, codes and process exit status. Application CLI command names, output markers, JSON fields, due reasons and schemas are compatibility contracts; see agent-interface. Most service read models use `serde_json::Value`, so behavior and schema tests are essential at that boundary.
+**Contracts and errors:** `VWatchError` is the service error boundary; the CLI owns presentation, codes and process exit status. Application CLI command names, output markers, JSON fields, due reasons and schemas are compatibility contracts; see agent-interface. Most service read models use `serde_json::Value`, so behavior and schema tests are essential at that boundary.
 
-**Time:** service tests inject a fixed UTC clock and a fact collector through `Watchtower::with_parts`. Facts distinguish local calendar activity from UTC observation history. Preserve the appropriate clock instead of replacing absent evidence with the wall clock.
+**Time:** service tests inject a fixed UTC clock and a fact collector through `VWatch::with_parts`. Facts distinguish local calendar activity from UTC observation history. Preserve the appropriate clock instead of replacing absent evidence with the wall clock.
 
 **Text and paths:** product text is German; code and developer/operating documentation are English. Card/window paths use forward slashes or environment placeholders as documented by the operating Skill. `.gitattributes` governs line endings: LF text and hooks, CRLF PowerShell/batch files.
 
@@ -72,12 +72,12 @@ $env:TEMP = $repoScratch
 $env:TMP = $repoScratch
 $env:TMPDIR = $repoScratch
 $env:GIT_CEILING_DIRECTORIES = $repoScratch
-$env:WATCHTOWER_HOME = Join-Path $repoScratch 'dev-instance'
+$env:VWATCH_HOME = Join-Path $repoScratch 'dev-instance'
 $primaryRepo = Split-Path (git rev-parse --path-format=absolute --git-common-dir).Trim() -Parent
 cargo run --target-dir (Join-Path $primaryRepo 'target')
 ```
 
-For the console use `cargo run --target-dir (Join-Path $primaryRepo 'target') --bin Watchtower -- due --no-refresh`. `--data-dir` overrides `WATCHTOWER_HOME`; continuations preserve the selected instance. Default application data belongs to the installed app, so keep the scratch override for development.
+For the console use `cargo run --target-dir (Join-Path $primaryRepo 'target') --bin vWatch -- due --no-refresh`. `--data-dir` overrides `VWATCH_HOME`; continuations preserve the selected instance. Default application data belongs to the installed app, so keep the scratch override for development.
 
 **Worktrees:** before creating, merging or deleting a task checkout, read `.vorch/workflows/worktree-workflow.md`. Use `python scripts/worktree.py create|list|merge|delete <task-name>`; task branches use `codex/`. Small changes can stay on `main`. Codex-managed checkouts use the app's attachment/archive lifecycle; do not delete one with a different worktree manager.
 
@@ -106,6 +106,6 @@ The test runner supplies isolated homes and repositories outside checkouts/the u
 
 The owner's morning read should get shorter and decisions easier. Re-entry, answering agent questions, handing off work and learning from ratings are the other core situations; additional dashboard information is not a goal by itself.
 
-The repository remains local and has no publishing pipeline. The owner approved Vorch task worktrees on 2026-10-23; this replaces the earlier main-only development rule. The shared build directory and checkout-local build/log/live-instance scratch remain explicit Watchtower adaptations; test fixture data follows Vorch's external isolation convention. Author identity for development is Julian B. <virojb@web.de>, confirmed by the owner on the same date.
+The repository remains local and has no publishing pipeline. The owner approved Vorch task worktrees on 2026-10-23; this replaces the earlier main-only development rule. The shared build directory and checkout-local build/log/live-instance scratch remain explicit vWatch adaptations; test fixture data follows Vorch's external isolation convention. Author identity for development is Julian B. <virojb@web.de>, confirmed by the owner on the same date.
 
 Cross-domain recovery and historical-data preservation are owned by persistence; output recovery is owned by agent-interface. Window polling is transport freshness, not acknowledgement of new reports. Read the relevant map before changing any of these boundaries.

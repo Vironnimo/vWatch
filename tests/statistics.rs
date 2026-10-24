@@ -26,7 +26,7 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
     assert_eq!(f["code"]["source_code"], 1);
     assert_eq!(f["code"]["ok"], true);
     assert_eq!(f["code"]["excluded_files"], 2);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     let payloads = count(&db, "fact_payloads");
     let saved = svc.store().facts("demo").unwrap().unwrap();
     svc.store()
@@ -135,7 +135,7 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
                 .save_facts(
                     "fixture",
                     &model.now(),
-                    &watchtower::facts::fingerprint(data),
+                    &vwatch::facts::fingerprint(data),
                     data,
                 )
                 .unwrap()
@@ -143,7 +143,7 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
         let initial = common::measured_facts(3);
         save(&initial);
         clock.advance(Duration::minutes(1));
-        let db = rusqlite::Connection::open(fixture.path().join("watchtower.db")).unwrap();
+        let db = rusqlite::Connection::open(fixture.path().join("vwatch.db")).unwrap();
         let mut middle = initial.clone();
         match barrier {
             "failed" => middle["ok"] = json!(false),
@@ -178,7 +178,7 @@ fn identical_refreshes_add_no_sample_but_a_new_day_a_change_or_a_relink_does() {
     let (svc, clock) = service(tmp.path());
     let repo = demo_repo(tmp.path());
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     assert_eq!(count(&db, "fact_samples"), 1);
     clock.advance(Duration::minutes(20));
     svc.refresh_facts(None, false).unwrap();
@@ -236,7 +236,7 @@ fn statistics_skip_repeated_observations_without_changing_their_results() {
             .save_facts(
                 "demo",
                 &svc.now(),
-                &watchtower::facts::fingerprint(&data),
+                &vwatch::facts::fingerprint(&data),
                 &data,
             )
             .unwrap();
@@ -251,7 +251,7 @@ fn statistics_skip_repeated_observations_without_changing_their_results() {
         clock.advance(step);
         save(lines);
     }
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     assert_eq!(count(&db, "fact_samples"), 5);
     let read = || {
         (
@@ -279,7 +279,7 @@ fn databases_from_the_first_history_version_stop_recording_repeats_and_keep_save
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     drop(svc);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute_batch("DELETE FROM history_migrations WHERE name='changed-samples-v1'; DROP TRIGGER samples_update;
         CREATE TRIGGER samples_update AFTER UPDATE ON facts BEGIN
         INSERT INTO fact_samples(project_id,at,fingerprint,path,identity_revision,origin,data,code_payload,activity_payload)
@@ -316,7 +316,7 @@ fn refreshes_keep_the_code_count_until_the_working_tree_changes() {
     let repo = demo_repo(tmp.path());
     std::fs::write(repo.join("app.py"), "print('one')\n").unwrap();
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
-    let code = |svc: &watchtower::Watchtower| {
+    let code = |svc: &vwatch::VWatch| {
         svc.store().facts("demo").unwrap().unwrap().data["code"]["source_code"].clone()
     };
     assert_eq!(code(&svc), 1);
@@ -415,7 +415,7 @@ fn proposals_survive_report_omission_and_card_replays_do_not_duplicate_history()
         .unwrap();
     let proposal = saved["card"]["suggestions"][0].clone();
     let id = proposal["id"].as_str().unwrap();
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     let events = count(&db, "content_history");
     svc.put_card_guarded("demo", card(), false, false, Some(token))
         .unwrap();
@@ -505,7 +505,7 @@ fn document_normalization_updates_history_and_retains_new_item_ids() {
     normalized_card["suggestions"][0]["id"] = json!("normalized-suggestion");
     let mut normalized_brief = old_brief.data.clone();
     normalized_brief["new_apps"] = json!([{"id":"normalized-app","title":"Retained app"}]);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     // A failed journal write must also roll back the normalization and retained item.
     db.execute_batch("CREATE TRIGGER reject_normalization BEFORE INSERT ON content_history BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
     assert!(svc
@@ -569,7 +569,7 @@ fn document_update_migration_repairs_already_normalized_proposals_once() {
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     drop(svc);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute_batch(
         "DROP TRIGGER history_cards_update; DROP TRIGGER history_portfolio_update;
         DELETE FROM history_migrations WHERE name='document-updates-v1';
@@ -596,7 +596,7 @@ fn document_update_migration_repairs_already_normalized_proposals_once() {
 fn history_filters_and_pages_keep_task_project_membership_and_exact_boundaries() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     for (entity, id, project, before, after) in [
         (
             "card",
@@ -729,7 +729,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     )
     .unwrap();
     drop(svc);
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     remove_history_schema(&db);
     db.execute(
         "UPDATE facts SET data=json_remove(data,'$.code','$.activity')",
@@ -746,7 +746,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
             .len(),
         1
     );
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     let events = count(&db, "content_history");
     drop(svc);
     let (svc, clock) = service(tmp.path());
@@ -788,8 +788,8 @@ fn real_console_exposes_statistics_history_comparisons_and_guarded_idea_edits() 
     }
     drop(svc);
     let run = |args: &[&str]| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
-            .env("WATCHTOWER_HOME", tmp.path())
+        std::process::Command::new(env!("CARGO_BIN_EXE_vWatch"))
+            .env("VWATCH_HOME", tmp.path())
             .args(args)
             .output()
             .unwrap()
@@ -835,12 +835,12 @@ fn real_console_exposes_statistics_history_comparisons_and_guarded_idea_edits() 
     let page = String::from_utf8(out.stdout).unwrap();
     let next = page
         .lines()
-        .find_map(|line| line.strip_prefix("Next: watchtower "))
+        .find_map(|line| line.strip_prefix("Next: vwatch "))
         .unwrap();
     assert!(next.contains("--instance"));
     let args: Vec<_> = next.split_whitespace().collect();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
-        .env_remove("WATCHTOWER_HOME")
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_vWatch"))
+        .env_remove("VWATCH_HOME")
         .args(args)
         .output()
         .unwrap();

@@ -1,4 +1,4 @@
-# Testing Watchtower
+# Testing vWatch
 
 Read this when writing or changing a test or investigating a test-run failure. The development root map owns build, installation and Git tooling; this file owns suite selection, isolation and timing.
 
@@ -26,14 +26,14 @@ Each run keeps logs and `report.json` in the current checkout's `.tmp/test-runs/
 
 ## Fixture isolation and cleanup
 
-Test data lives outside the repository and the owner's profile: `<primary-checkout-parent>/.vorch-test-data/<primary-checkout-name>/<unique-run>/`. For the usual checkout this is `C:/Development/projects/.vorch-test-data/watchtower/`. Set the process-local `VORCH_TEST_ROOT` to another directory when that location is unsuitable; the runner rejects roots inside either checkout or the current HOME/USERPROFILE. Reports, compiler scratch and source-run scratch remain in `.tmp/`; only application-test fixture data uses this external root.
+Test data lives outside the repository and the owner's profile: `<primary-checkout-parent>/.vorch-test-data/<primary-checkout-name>/<unique-run>/`. For the usual checkout this is `C:/Development/projects/.vorch-test-data/vwatch/`. Set the process-local `VORCH_TEST_ROOT` to another directory when that location is unsuitable; the runner rejects roots inside either checkout or the current HOME/USERPROFILE. Reports, compiler scratch and source-run scratch remain in `.tmp/`; only application-test fixture data uses this external root.
 
 Every Rust case, UI file and Rust discovery process receives its own fixture directory. `isolated_environment` in `scripts/test.py` sets:
 
 - Empty HOME and USERPROFILE, isolated APPDATA and LOCALAPPDATA, and no XDG_CONFIG_HOME.
-- TEMP, TMP and TMPDIR under its fixture directory, plus a safe WATCHTOWER_HOME and the explicit WATCHTOWER_TEST_INSTANCE opt-in.
+- TEMP, TMP and TMPDIR under its fixture directory, plus a safe VWATCH_HOME and the explicit VWATCH_TEST_INSTANCE opt-in.
 - An empty GIT_CONFIG_GLOBAL, disabled system Git config and prompts, and GIT_CEILING_DIRECTORIES at the case fixture boundary above HOME and TEMP. Git ignores a ceiling equal to its starting directory, so TEMP itself must remain below that boundary. All inherited GIT_* variables, including author/committer identity and index/config overrides, are removed first.
-- No inherited WATCHTOWER_* fault switches, NODE_OPTIONS, NODE_PATH or EMAIL.
+- No inherited VWATCH_* fault switches, NODE_OPTIONS, NODE_PATH or EMAIL.
 
 `tests/common/mod.rs::make_repo` configures test-only Git identity in each newly created repository and disables commit signing. Its `git_at` helper supplies explicit dates. Tests must not rely on the owner's Git config. Existing shared helpers use `tempfile` under the runner's per-case TEMP and explicitly pass database/repository paths.
 
@@ -45,7 +45,7 @@ Ctrl+C cancels queued cases and signals active workers to terminate their proces
 
 Successful runs remove only their verified, uniquely created external fixture directory. Failed runs retain it for diagnosis and name it in `report.json`. Logs remain in `.tmp/` for both outcomes. Never remove an entire configured test root to clean up one run. The runner does not alter the owner's installed database, preferences, autostart, PATH or Git identity.
 
-`tests/test_development.py::TestRunner` exercises forbidden roots and inherited configuration, real detached Windows descendants under timeout/cancellation/leak detection, interrupted-run reports and cleanup of only a successful unique fixture. These synthetic jobs do not build or launch Watchtower. The install-path contract uses a real main/worktree pair and PowerShell with captured Cargo/copy operations; it stops before installation and verifies that both operations use the primary target even with inherited overrides.
+`tests/test_development.py::TestRunner` exercises forbidden roots and inherited configuration, real detached Windows descendants under timeout/cancellation/leak detection, interrupted-run reports and cleanup of only a successful unique fixture. These synthetic jobs do not build or launch vWatch. The install-path contract uses a real main/worktree pair and PowerShell with captured Cargo/copy operations; it stops before installation and verifies that both operations use the primary target even with inherited overrides.
 
 ## Test ownership and assertions
 

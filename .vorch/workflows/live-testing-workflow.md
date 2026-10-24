@@ -4,7 +4,7 @@ Use after UI changes or for console/window contracts deterministic tests cannot 
 
 ## Prepare an isolated instance
 
-Read PROJECT -> Development for scratch and build setup. Select a task-specific `WATCHTOWER_HOME` below checkout-local `.tmp/` before mutation probes. Use generated fixtures or a consistent SQLite backup for realistic data. Copying only a live WAL database file can omit transactions; close source connections or use SQLite's backup API.
+Read PROJECT -> Development for scratch and build setup. Select a task-specific `VWATCH_HOME` below checkout-local `.tmp/` before mutation probes. Use generated fixtures or a consistent SQLite backup for realistic data. Copying only a live WAL database file can omit transactions; close source connections or use SQLite's backup API.
 
 Shared build output can contain another checkout's last build: build from the intended checkout before launching. Scratch data do not isolate registry, PATH, Start menu or installed Skill changes; leave those owner choices alone.
 

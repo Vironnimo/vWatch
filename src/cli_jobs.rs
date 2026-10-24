@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
-use crate::service::{Result, WatchtowerError};
+use crate::service::{Result, VWatchError};
 
-const WORKER: &str = "__watchtower_job_worker";
+const WORKER: &str = "__vwatch_job_worker";
 const DEADLINE: Duration = Duration::from_secs(45);
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -90,14 +90,14 @@ impl Drop for StreamInheritance {
     }
 }
 
-fn io_error(action: &str, error: std::io::Error) -> WatchtowerError {
-    WatchtowerError::new("job_io", format!("Cannot {action} the saved command: {error}. Its outcome is unknown; changes may have happened."))
-        .hint("Run `watchtower jobs list` in the same data folder, then inspect the original command's show or status result before repeating a change.")
+fn io_error(action: &str, error: std::io::Error) -> VWatchError {
+    VWatchError::new("job_io", format!("Cannot {action} the saved command: {error}. Its outcome is unknown; changes may have happened."))
+        .hint("Run `vwatch jobs list` in the same data folder, then inspect the original command's show or status result before repeating a change.")
 }
 
-fn prepare_error(action: &str, error: std::io::Error) -> WatchtowerError {
-    WatchtowerError::new("job_start_io", format!("Cannot {action} the command job: {error}. This call did not start project work."))
-        .hint("Check the selected data folder and access to its jobs folder. After resolving that problem, run `watchtower jobs list` to inspect earlier calls before repeating a change.")
+fn prepare_error(action: &str, error: std::io::Error) -> VWatchError {
+    VWatchError::new("job_start_io", format!("Cannot {action} the command job: {error}. This call did not start project work."))
+        .hint("Check the selected data folder and access to its jobs folder. After resolving that problem, run `vwatch jobs list` to inspect earlier calls before repeating a change.")
 }
 
 fn job_path(data_dir: &Path, token: &str) -> Result<PathBuf> {
@@ -107,7 +107,7 @@ fn job_path(data_dir: &Path, token: &str) -> Result<PathBuf> {
             .bytes()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
     {
-        return Err(WatchtowerError::new("invalid_job_token", "The job token must be job_ followed by 40 lowercase hexadecimal characters. No command was repeated.")
+        return Err(VWatchError::new("invalid_job_token", "The job token must be job_ followed by 40 lowercase hexadecimal characters. No command was repeated.")
             .hint("Copy the complete jobs wait command from the earlier output. The token is not a file path."));
     }
     Ok(data_dir.join("jobs").join(token))
@@ -117,12 +117,12 @@ fn read_request(data_dir: &Path, token: &str) -> Result<Request> {
     let path = job_path(data_dir, token)?.join("request.json");
     let bytes = fs::read(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            WatchtowerError::new("job_not_found", format!("Saved command {token} was not found in {}. No command was repeated.", data_dir.display()))
-                .hint("Use the data folder from the original command. Run `watchtower jobs list` there to see the saved jobs.")
+            VWatchError::new("job_not_found", format!("Saved command {token} was not found in {}. No command was repeated.", data_dir.display()))
+                .hint("Use the data folder from the original command. Run `vwatch jobs list` there to see the saved jobs.")
         } else { io_error("read", error) }
     })?;
     serde_json::from_slice(&bytes).map_err(|_| {
-        WatchtowerError::new(
+        VWatchError::new(
             "job_invalid",
             "The saved command request is unreadable. Its outcome is unknown.",
         )
@@ -174,9 +174,9 @@ fn prefix(data_dir: &Path, json_mode: bool) -> String {
     crate::cli::scoped_command(
         data_dir,
         if json_mode {
-            "watchtower --json"
+            "vwatch --json"
         } else {
-            "watchtower "
+            "vwatch "
         },
     )
     .trim_end()
@@ -205,7 +205,7 @@ fn completed_result(data_dir: &Path, token: &str, request: &Request) -> Result<O
     let wait = format!("{} jobs wait {token}", prefix(data_dir, request.json));
     match fs::read(path.join("result.json")) {
         Ok(bytes) => {
-            let result: Completed = serde_json::from_slice(&bytes).map_err(|_| WatchtowerError::new("job_result_invalid", "The saved result is unreadable. The command may have changed data; its outcome is unknown.")
+            let result: Completed = serde_json::from_slice(&bytes).map_err(|_| VWatchError::new("job_result_invalid", "The saved result is unreadable. The command may have changed data; its outcome is unknown.")
                 .hint(format!("Inspect the current state before retrying: {}", recovery(request))))?;
             Ok(Some(
                 json!({"finished":true,"job":{"token":token,"state":"completed","command":request.command,"created_at":request.created_at,"next":wait},"result":result,"next":wait}),
@@ -251,7 +251,7 @@ fn inspect_pending(data_dir: &Path, token: &str, request: &Request) -> Result<Va
 }
 
 fn deadline(data_dir: &Path) -> Duration {
-    test_fault(data_dir, "WATCHTOWER_TEST_JOB_DEADLINE_MS")
+    test_fault(data_dir, "VWATCH_TEST_JOB_DEADLINE_MS")
         .map(|ms| Duration::from_millis(ms.clamp(20, 45_000)))
         .unwrap_or(DEADLINE)
 }
@@ -261,8 +261,7 @@ fn test_fault(data_dir: &Path, name: &str) -> Option<u64> {
     let default = crate::system::app_dir().join("data");
     let selected = fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_owned());
     let default = fs::canonicalize(&default).unwrap_or(default);
-    if std::env::var("WATCHTOWER_TEST_INSTANCE").ok().as_deref() != Some("1") || selected == default
-    {
+    if std::env::var("VWATCH_TEST_INSTANCE").ok().as_deref() != Some("1") || selected == default {
         return None;
     }
     std::env::var(name).ok()?.parse().ok()
@@ -337,7 +336,7 @@ pub fn command(action: &str, token: Option<&str>, data_dir: &Path) -> Result<Val
                 }
                 match inspect(data_dir, &name) {
                     Ok(status) => jobs.push(status["job"].clone()),
-                    Err(error) => jobs.push(json!({"token":name,"state":"unknown","command":"unknown","error":error.message,"next":crate::cli::scoped_command(data_dir, &format!("watchtower jobs status {name}"))})),
+                    Err(error) => jobs.push(json!({"token":name,"state":"unknown","command":"unknown","error":error.message,"next":crate::cli::scoped_command(data_dir, &format!("vwatch jobs status {name}"))})),
                 }
             }
         }
@@ -345,11 +344,11 @@ pub fn command(action: &str, token: Option<&str>, data_dir: &Path) -> Result<Val
         return Ok(json!({"jobs":jobs}));
     }
     let token = token.ok_or_else(|| {
-        WatchtowerError::new(
+        VWatchError::new(
             "job_token_required",
             "Supply the token of the saved command. No command was repeated.",
         )
-        .hint("Run `watchtower jobs list` to see saved jobs.")
+        .hint("Run `vwatch jobs list` to see saved jobs.")
     })?;
     if action == "wait" {
         wait(data_dir, token, deadline(data_dir))
@@ -365,7 +364,7 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
         .iter()
         .map(|arg| {
             arg.to_str().map(str::to_owned).ok_or_else(|| {
-                WatchtowerError::new(
+                VWatchError::new(
                     "invalid_encoding",
                     "The command contains a non-Unicode argument. Nothing was started.",
                 )
@@ -389,8 +388,8 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
         match launch_lock.try_lock() {
             Ok(()) => break,
             Err(TryLockError::WouldBlock) if deadline_started.elapsed() < Duration::from_secs(2) => std::thread::sleep(Duration::from_millis(10)),
-            Err(TryLockError::WouldBlock) => return Err(WatchtowerError::new("job_launch_busy", "Another command is recording its job. This call did not start work.")
-                .hint("Run `watchtower jobs list` to find the already running command before repeating a change.")),
+            Err(TryLockError::WouldBlock) => return Err(VWatchError::new("job_launch_busy", "Another command is recording its job. This call did not start work.")
+                .hint("Run `vwatch jobs list` to find the already running command before repeating a change.")),
             Err(TryLockError::Error(error)) => return Err(prepare_error("coordinate", error)),
         }
     }
@@ -454,7 +453,7 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .env("WATCHTOWER_INTERNAL_JOB_WORKER", "1");
+        .env("VWATCH_INTERNAL_JOB_WORKER", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -469,8 +468,8 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
     let mut child = match spawned {
         Ok(child) => child,
         Err(cause) => {
-            let error = WatchtowerError::new("job_start_failed", format!("The command worker could not start: {cause}. No work was started."))
-                .hint("Check that Watchtower.exe is available and executable, then repeat the original command.");
+            let error = VWatchError::new("job_start_failed", format!("The command worker could not start: {cause}. No work was started."))
+                .hint("Check that vWatch.exe is available and executable, then repeat the original command.");
             let result = Completed {
                 exit_code: 1,
                 stdout: json!({"ok":false,"error":error.to_json()}).to_string(),
@@ -524,10 +523,10 @@ fn worker(data_dir: &Path, token: &str) -> i32 {
         .map_err(|e| io_error("save", e))?;
         std::env::set_current_dir(&request.working_dir)
             .map_err(|e| io_error("restore working directory for", e))?;
-        if let Some(ms) = test_fault(data_dir, "WATCHTOWER_TEST_JOB_DELAY_MS") {
+        if let Some(ms) = test_fault(data_dir, "VWATCH_TEST_JOB_DELAY_MS") {
             std::thread::sleep(Duration::from_millis(ms.min(120_000)));
         }
-        if test_fault(data_dir, "WATCHTOWER_TEST_JOB_BLOCK") == Some(1) {
+        if test_fault(data_dir, "VWATCH_TEST_JOB_BLOCK") == Some(1) {
             let began = Instant::now();
             while !data_dir.join(".release-test-job").exists()
                 && began.elapsed() < Duration::from_secs(30)
@@ -535,7 +534,7 @@ fn worker(data_dir: &Path, token: &str) -> i32 {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        if test_fault(data_dir, "WATCHTOWER_TEST_JOB_CRASH") == Some(1) {
+        if test_fault(data_dir, "VWATCH_TEST_JOB_CRASH") == Some(1) {
             return Ok(91);
         }
         let mut arguments: Vec<OsString> = request.arguments.into_iter().map(Into::into).collect();

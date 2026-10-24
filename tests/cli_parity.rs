@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 fn call(home: &Path, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let code = watchtower::cli::run_with_streams(
-        std::iter::once("watchtower").chain(args.iter().copied()),
+    let code = vwatch::cli::run_with_streams(
+        std::iter::once("vwatch").chain(args.iter().copied()),
         home,
         &mut std::io::empty(),
         &mut out,
@@ -741,8 +741,7 @@ fn owner_changes_return_an_executable_undo_without_overwriting_newer_changes() {
     );
     assert_eq!(code, 0, "{text}");
     assert!(
-        text.lines()
-            .any(|line| line.starts_with("Undo: watchtower ")),
+        text.lines().any(|line| line.starts_with("Undo: vwatch ")),
         "{text}"
     );
     assert!(

@@ -3,7 +3,7 @@ mod common;
 use chrono::Duration;
 use common::{card, demo_repo, service};
 use serde_json::json;
-use watchtower::store::Store;
+use vwatch::store::Store;
 
 #[test]
 fn handoff_keeps_its_snapshot_until_the_owner_confirms_the_result() {
@@ -231,7 +231,7 @@ fn task_validation_and_stale_updates_preserve_owner_decisions() {
         true
     );
     svc.set_task_status(id, "cancelled").unwrap();
-    let store = Store::open(&tmp.path().join("watchtower.db")).unwrap();
+    let store = Store::open(&tmp.path().join("vwatch.db")).unwrap();
     assert!(!store
         .replace_task(id, task["revision"].as_i64().unwrap(), "review", &task)
         .unwrap());
