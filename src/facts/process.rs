@@ -253,9 +253,11 @@ mod tests {
             }
             false
         };
+        // An explicit .\ path keeps working when NoDefaultCurrentDirectoryInExePath
+        // stops cmd.exe from searching the working directory.
         for command in [
-            format!("{name} -n 4 127.0.0.1"),
-            format!("start \"\" /B {name} -n 4 127.0.0.1"),
+            format!(".\\{name} -n 4 127.0.0.1"),
+            format!("start \"\" /B .\\{name} -n 4 127.0.0.1"),
         ] {
             let started = Instant::now();
             let result = run(
