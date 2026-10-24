@@ -1,0 +1,264 @@
+{
+  "one_liner": "Wanderungen aus GPX-Tracks planen, mit Notizen je Wegpunkt – offline im Browser.",
+  "stack": "TypeScript mit Vite und Vitest; DOMParser für GPX, IndexedDB und Service Worker geplant.",
+  "phase": "active",
+  "phase_evidence": "Letzter Commit am 2026-10-21; vier Commits in den letzten 30 Tagen, heute ein neuer Worktree für fix/offline-sync.",
+  "headline": "Das Offline-Versprechen der README ist noch nicht gebaut.",
+  "personality": "Ich verspreche dir Karten ohne Netz – mein Service Worker hört bisher nur zu und tut nichts.",
+  "recent_changes": [
+    {
+      "date": "2026-10-24",
+      "title": "Leerer Worktree für Offline-Sync angelegt",
+      "detail": "trailnotes-offline-sync auf fix/offline-sync wurde vom aktuellen main erstellt; er hat noch keinen eigenen Commit und keine Änderungen."
+    },
+    {
+      "date": "2026-10-21",
+      "title": "Tracks ohne Höhe zeigen kein NaN mehr",
+      "detail": "parseGpx setzt die Höhe auf undefined statt NaN, wenn ein Trackpunkt keine Höhenangabe hat."
+    },
+    {
+      "date": "2026-10-13",
+      "title": "Gesamtanstieg eines Tracks",
+      "detail": "profile.ascent summiert nur die Anstiege; dazu kam der bisher einzige echte Test in tests/profile.test.ts."
+    },
+    {
+      "date": "2026-10-05",
+      "title": "Notiz-API je Wegpunkt, ohne Datenbank",
+      "detail": "notes.saveNote soll in IndexedDB schreiben, openDb wirft aber „not implemented“; Notizen lassen sich noch nicht speichern."
+    },
+    {
+      "date": "2026-09-27",
+      "title": "Service-Worker-Gerüst für Offline-Kacheln",
+      "detail": "src/sw.ts registriert einen leeren fetch-Handler; es wird nichts gecacht, und map.ts lädt keine Kacheln."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-09-14",
+      "title": "Projekt gestartet"
+    },
+    {
+      "date": "2026-09-20",
+      "title": "GPX-Import für Trackpunkte"
+    },
+    {
+      "date": "2026-09-27",
+      "title": "Service-Worker-Gerüst für Offline-Karten"
+    },
+    {
+      "date": "2026-10-05",
+      "title": "Notiz-Schnittstelle je Wegpunkt"
+    },
+    {
+      "date": "2026-10-13",
+      "title": "Höhenprofil mit Gesamtanstieg"
+    }
+  ],
+  "features": [
+    "GPX-Trackpunkte mit Koordinaten und Höhe einlesen",
+    "Trackpunkte ohne Höhe ohne NaN-Werte",
+    "Gesamtanstieg eines Tracks berechnen",
+    "Vitest-Test für die Anstiegsberechnung"
+  ],
+  "usage": {
+    "summary": null,
+    "last_used": null,
+    "evidence": "Keine Build-Ausgabe, exportierten Notizen oder GPX-Dateien im Repository oder Worktree (git status --ignored leer); keine Installation vorhanden. Browserdaten (IndexedDB) wurden nicht geprüft."
+  },
+  "open_ends": [
+    {
+      "kind": "worktree",
+      "title": "Worktree fix/offline-sync ohne eigene Arbeit",
+      "detail": "trailnotes-offline-sync steht auf demselben Commit wie main (8b26b8a) und ist sauber; was dort entstehen soll, ist nirgends notiert.",
+      "source": "git worktree list; fix/offline-sync",
+      "age_days": 0
+    },
+    {
+      "kind": "other",
+      "title": "Service Worker cacht keine Kartenkacheln",
+      "detail": "src/sw.ts hat einen leeren fetch-Handler und map.ts lädt keine Karte; das Offline-Versprechen der README ist damit offen.",
+      "source": "src/sw.ts, src/map.ts (3ef796d)",
+      "age_days": 27
+    },
+    {
+      "kind": "other",
+      "title": "Notizen lassen sich nicht speichern",
+      "detail": "notes.openDb wirft „not implemented“; saveNote scheitert bei jedem Aufruf.",
+      "source": "src/notes.ts (1663d3f)",
+      "age_days": 19
+    }
+  ],
+  "waiting_on_you": [
+    {
+      "id": "q-5d2f893f",
+      "title": "Welche Kartenquelle soll trailnotes offline vorhalten?",
+      "source": "src/sw.ts, src/map.ts, README.md („Works offline in the browser“)",
+      "options": [
+        {
+          "answer": "Regionaler Kartenausschnitt als PMTiles-Datei",
+          "effect": "Eine Datei je Wanderregion, vollständig offline; braucht einen Vektor-Renderer wie MapLibre."
+        },
+        {
+          "answer": "Angesehene OSM-Kacheln im Service Worker cachen",
+          "effect": "Einfach, aber nur vorher betrachtete Ausschnitte sind offline; Massen-Vorladen verbietet die OSM-Nutzungsrichtlinie."
+        },
+        {
+          "answer": "Kachelanbieter mit Offline-Lizenz",
+          "effect": "Vorladen ganzer Routen erlaubt, braucht aber API-Schlüssel und möglicherweise ein Abo."
+        }
+      ],
+      "recommended": 1
+    }
+  ],
+  "vision": {
+    "statement": "Wanderungen aus GPX-Tracks planen und Notizen je Wegpunkt führen, offline im Browser (README.md).",
+    "progress_note": "GPX-Import und Anstieg funktionieren; Karte, Offline-Kacheln, Wegpunkte und Notizspeicher sind noch Gerüste.",
+    "progress_pct": null
+  },
+  "reentry": {
+    "next_step": "openDb in src/notes.ts mit IndexedDB umsetzen, damit Notizen je Wegpunkt tatsächlich gespeichert werden.",
+    "why": "Notizen sind neben dem GPX-Import der Kern von trailnotes und hängen nicht an der offenen Kartenentscheidung; danach trägt der Offline-Teil echte Daten.",
+    "done_when": "saveNote speichert eine Notiz, die nach einem Neuladen der Seite wieder gelesen werden kann."
+  },
+  "health_notes": [
+    "profile.ascent zählt fehlende Höhen als 0 m: Seit dem NaN-Fix vom 2026-10-21 erzeugt ein Punkt ohne Höhe einen falschen Anstieg in Höhe des Folgepunkts.",
+    "parseGpx liest nur trkpt; Wegpunkte (wpt), an denen die Notizen hängen sollen, werden nicht importiert, obwohl b788cd5 sie ankündigt.",
+    "Kein index.html im Repository, und package.json deklariert weder vite noch vitest; `npm run dev` und `npm test` laufen nach frischer Installation nicht."
+  ],
+  "decisions": [],
+  "suggestions": [
+    {
+      "id": "sg-d5584570",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Fehlende Höhen im Anstieg überspringen",
+      "why": "Teilweise höhenlose Tracks melden sonst Hunderte Höhenmeter zu viel; das verfälscht genau die Zahl, nach der du eine Tour planst.",
+      "evidence": "src/profile.ts::ascent nutzt ele ?? 0; 8b26b8a setzt ele auf undefined",
+      "done_when": "Ein Test mit einem Punkt ohne Höhe zwischen 500 m und 520 m ergibt 20 m Anstieg."
+    },
+    {
+      "id": "sg-1b9495e2",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Wegpunkte aus GPX importieren",
+      "why": "Notizen hängen an Wegpunkten, die parseGpx heute verwirft; ohne sie hat die Notizfunktion keinen Anker.",
+      "evidence": "src/gpx.ts liest nur trkpt; Commit b788cd5 „import tracks and waypoints“",
+      "done_when": "parseGpx liefert wpt-Elemente mit Name und Koordinaten; ein Test prüft eine GPX-Datei mit zwei Wegpunkten."
+    },
+    {
+      "id": "sg-3661586a",
+      "category": "idea",
+      "type": "feature",
+      "title": "Gehzeit nach DIN 33466 schätzen",
+      "why": "Für die Planung zählt die Gehzeit; Strecke, Anstieg und Abstieg liefern sie nach der gängigen Wanderzeitformel, ohne Rechnen am Küchentisch.",
+      "evidence": "profile.ascent existiert; Point enthält lat/lon für die Streckenlänge",
+      "done_when": "Zu einem Track zeigt trailnotes Strecke, Anstieg, Abstieg und geschätzte Gehzeit nach DIN 33466."
+    },
+    {
+      "id": "sg-1a076335",
+      "category": "idea",
+      "type": "feature",
+      "title": "Offline-Prüfung vor dem Losgehen",
+      "why": "Im Funkloch merkst du zu spät, dass ein Kartenstück fehlt; eine Prüfung im WLAN zeigt Lücken entlang der Route vorher.",
+      "evidence": "README verspricht Offline-Nutzung; src/sw.ts soll Kacheln cachen, Track-Koordinaten liefert parseGpx",
+      "done_when": "Für einen geladenen Track zeigt trailnotes an, ob alle Kartenstücke entlang der Strecke offline vorliegen."
+    },
+    {
+      "id": "sg-1d10f116",
+      "category": "idea",
+      "type": "feature",
+      "title": "Niedrigwasserzeiten an Küstenwegpunkten",
+      "why": "Bei Watt- und Küstenwanderungen bestimmt das Niedrigwasser die Startzeit; der Wegpunkt zeigt es neben deiner Notiz. Weg der Datenübergabe aus tidewatch ist offen.",
+      "evidence": "tidewatch: data/stations.csv mit lat/lon, src/extremes.rs; trailnotes: Point mit lat/lon",
+      "done_when": "Ein Wegpunkt nahe Husum, Büsum oder Cuxhaven zeigt die nächsten Niedrigwasserzeiten der nächsten Station."
+    }
+  ],
+  "cross_project_hints": [
+    "tidewatch kennt Gezeiten für Husum, Büsum und Cuxhaven samt Koordinaten; Küstenwegpunkte in trailnotes könnten daraus Niedrigwasserfenster zeigen.",
+    "pixel-garden fängt Speicherfehler im Safari-Privatmodus in save.js ab; der IndexedDB-Notizspeicher in trailnotes braucht dieselbe Absicherung."
+  ],
+  "handbook": {
+    "run": [
+      {
+        "what": "Entwicklungsserver starten",
+        "how": "npm run dev",
+        "folder": "."
+      },
+      {
+        "what": "Tests ausführen",
+        "how": "npm test",
+        "folder": "."
+      }
+    ],
+    "installed": null,
+    "architecture": "Browser-App ohne Framework: main.ts bindet die Karte (map.ts) ein, gpx.ts parst Trackpunkte per DOMParser, profile.ts berechnet den Anstieg, notes.ts soll Notizen in IndexedDB ablegen, sw.ts soll Kartenkacheln offline cachen. Karte, Notizspeicher und Service Worker sind bisher Gerüste.",
+    "places": [
+      {
+        "path": "src/gpx.ts",
+        "what": "GPX-Parser für Trackpunkte"
+      },
+      {
+        "path": "src/profile.ts",
+        "what": "Anstiegsberechnung des Höhenprofils"
+      },
+      {
+        "path": "src/notes.ts",
+        "what": "Notizen je Wegpunkt, IndexedDB-Anbindung fehlt"
+      },
+      {
+        "path": "src/sw.ts",
+        "what": "Service Worker für Offline-Kacheln, noch leer"
+      },
+      {
+        "path": "src/map.ts",
+        "what": "Kartenanzeige, bisher nur ein Platzhalter"
+      },
+      {
+        "path": "src/main.ts",
+        "what": "Einstieg, montiert die Karte im Element #map"
+      },
+      {
+        "path": "tests/profile.test.ts",
+        "what": "Vitest-Test für den Anstieg"
+      },
+      {
+        "path": "../trailnotes-offline-sync",
+        "what": "Zweiter Worktree auf fix/offline-sync, noch ohne Änderungen"
+      }
+    ],
+    "read_first": [
+      {
+        "path": "README.md",
+        "why": "Projektversprechen inklusive Offline-Nutzung"
+      },
+      {
+        "path": "src/notes.ts",
+        "why": "Nächster Baustein, an dem die Notizfunktion hängt"
+      },
+      {
+        "path": "src/sw.ts",
+        "why": "Ort der offenen Offline-Kartenfrage"
+      }
+    ],
+    "needs": [
+      "Node.js mit npm",
+      "vite und vitest, in package.json noch nicht als Abhängigkeit eingetragen",
+      "Browser mit IndexedDB- und Service-Worker-Unterstützung",
+      "Eine Kartenquelle für Offline-Kacheln, noch nicht festgelegt"
+    ],
+    "terms": [
+      {
+        "term": "Wegpunkt",
+        "meaning": "Benannter Punkt einer Tour (GPX wpt), an dem eine Notiz hängt."
+      },
+      {
+        "term": "Trackpunkt",
+        "meaning": "Punkt der aufgezeichneten Route (GPX trkpt) mit Koordinaten und optionaler Höhe."
+      },
+      {
+        "term": "Offline-Kacheln",
+        "meaning": "Kartenstücke, die der Service Worker für Touren ohne Netz vorhalten soll."
+      }
+    ]
+  }
+}

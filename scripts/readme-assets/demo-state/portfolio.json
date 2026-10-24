@@ -1,0 +1,131 @@
+{
+  "greeting": "Guten Morgen! Fünf Projekte, drei davon in Bewegung – und fast überall liegen fertige Bausteine herum, die noch niemand eingesteckt hat.",
+  "focus": [
+    {
+      "id": "fc-459a733f",
+      "project": "tidewatch",
+      "title": "Datum in tidewatch today einbauen und pushen",
+      "why": "Dein aktivstes Projekt gibt jeden Tag dieselbe Tabelle aus; zwei Commits liegen nur lokal, und src/moon.rs ist unversioniert.",
+      "done_when": "`cargo run -- today husum` zeigt an zwei Tagen verschiedene Tabellen; origin/main enthält alle Commits, moon.rs ist committet."
+    },
+    {
+      "id": "fc-9ce85285",
+      "project": "trailnotes",
+      "title": "Phantom-Anstieg nach dem NaN-Fix beheben",
+      "why": "Seit dem Fix vom 2026-10-21 zählt ein Punkt ohne Höhe als 0 m und bläht den Anstieg auf – genau die Zahl für die Tourenplanung.",
+      "done_when": "profile.ascent überspringt Punkte ohne Höhe; ein Test mit fehlender Höhe zwischen 500 m und 520 m ergibt 20 m."
+    },
+    {
+      "id": "fc-36b83b94",
+      "project": "ledger-lite",
+      "title": "Lidl-Regel committen und PDF-Frage beantworten",
+      "why": "Die uncommittete Regel geht beim Wechsel auf feature/pdf-export leicht verloren; der Branch steht seit 15 Tagen still, bis du eine Bibliothek wählst.",
+      "done_when": "ledger/rules.py ist committet und die PDF-Frage auf der ledger-lite-Karte beantwortet."
+    }
+  ],
+  "patterns": [
+    {
+      "id": "pt-dbc2cbe9",
+      "title": "Commits versprechen mehr, als der Code tut",
+      "why": "In vier Projekten beschreibt die Commit-Nachricht ein fertiges Feature, der Code ist aber Stub oder nicht eingebunden; dein Gedächtnis überschätzt dadurch den Stand.",
+      "projects": [
+        "trailnotes",
+        "tidewatch",
+        "pixel-garden",
+        "recipe-box"
+      ],
+      "evidence": "trailnotes 1663d3f (openDb wirft „not implemented“) und 3ef796d (sw.ts leer); tidewatch e8bd269/ec18eee (web.rs, extremes.rs nicht in main.rs); pixel-garden v1.0 (game.js importiert plants.js und save.js nicht); recipe-box cfbf7be (scaled wirft NotImplementedError).",
+      "severity": "warn"
+    },
+    {
+      "id": "pt-9ccf3211",
+      "title": "Platzhaltertests geben falsche Sicherheit",
+      "why": "ledger-lite prüft `assert True`, tidewatch vergleicht zwei Konstanten; nur trailnotes testet echte Logik, und dort fehlt ausgerechnet der Fall ohne Höhe.",
+      "projects": [
+        "ledger-lite",
+        "tidewatch",
+        "trailnotes"
+      ],
+      "evidence": "ledger-lite tests/test_report.py; tidewatch tests/predict.rs ruft predict nicht auf; trailnotes tests/profile.test.ts deckt nur vollständige Höhen ab; recipe-box und pixel-garden haben keine Tests.",
+      "severity": "warn"
+    },
+    {
+      "id": "pt-e29dd048",
+      "title": "Lokale Stände ohne Gegenstück auf origin",
+      "why": "tidewatch hat zwei ungepushte Commits, pixel-garden einen nur lokalen Release-Tag; ledger-lite und recipe-box haben gar kein Remote. Andere Sicherungen sind nicht erkennbar.",
+      "projects": [
+        "tidewatch",
+        "pixel-garden",
+        "ledger-lite",
+        "recipe-box"
+      ],
+      "evidence": "facts: tidewatch ahead 2 seit 2026-10-20; pixel-garden git ls-remote ohne v1.0; ledger-lite und recipe-box has_remote no.",
+      "severity": "info"
+    }
+  ],
+  "synergies": [
+    {
+      "id": "sy-149d64d2",
+      "category": "idea",
+      "title": "Niedrigwasserfenster an Küstenwegpunkten in trailnotes",
+      "why": "Wattwanderungen bei Husum oder Büsum planst du nach dem Niedrigwasser; tidewatch kennt Stationen samt Koordinaten, trailnotes die Wegpunkte. Annahme prüfen: planst du solche Touren?",
+      "projects": [
+        "tidewatch",
+        "trailnotes"
+      ],
+      "evidence": "tidewatch data/stations.csv (lat/lon), src/extremes.rs; trailnotes src/gpx.ts (Point mit lat/lon). Übergabe offen, etwa als JSON-Route im noch ungenutzten tidewatch src/web.rs – das gäbe der Webansicht einen Zweck."
+    },
+    {
+      "id": "sy-8bd9d992",
+      "category": "recommendation",
+      "title": "Speicherabsicherung aus pixel-garden nach trailnotes übertragen",
+      "why": "pixel-garden hat im Safari-Privatmodus gelernt, dass Browserspeicher werfen kann; trailnotes' IndexedDB-Notizen sollten das von Anfang an abfangen und sichtbar melden.",
+      "projects": [
+        "pixel-garden",
+        "trailnotes"
+      ],
+      "evidence": "pixel-garden save.js (edabf63, try/catch um localStorage); trailnotes src/notes.ts (openDb noch nicht implementiert)."
+    },
+    {
+      "id": "sy-227279f7",
+      "category": "recommendation",
+      "title": "Deutschen Zahlenparser aus ledger-lite für Zutatenmengen nutzen",
+      "why": "ledger-lite liest „1.234,56“ bereits korrekt als Decimal; recipe-box braucht genau das für „1,5 kg Mehl“, bevor Skalieren und Einkaufsmengen funktionieren.",
+      "projects": [
+        "ledger-lite",
+        "recipe-box"
+      ],
+      "evidence": "ledger-lite ledger/importer.py::read; recipe-box models.Recipe.scaled (TODO: Zutaten sind reine Texte)."
+    }
+  ],
+  "new_apps": [],
+  "park_or_revive": [
+    {
+      "id": "vd-08b8fd3b",
+      "project": "recipe-box",
+      "verdict": "park",
+      "why": "Seit 2026-05-29 ruht ein WIP-Commit; ohne Zutatenmodell und Speicherung ist nichts nutzbar, und drei aktivere Projekte binden deine Zeit."
+    },
+    {
+      "id": "vd-326415e1",
+      "project": "pixel-garden",
+      "verdict": "finish",
+      "why": "Pflanzen, Gießen und Speichern sind geschrieben, nur game.js bindet sie nicht ein; ein kleiner Schritt macht 1.0 wirklich spielbar."
+    }
+  ],
+  "attention_note": "Deine Commits gehen an tidewatch und trailnotes – passend; ledger-lite wartet auf eine Entscheidung, pixel-garden auf das letzte Einstecken, recipe-box auf ein klares Parken.",
+  "idea_checks": [],
+  "week_review": {
+    "week": "2026-W42",
+    "done": [
+      "tidewatch: Hoch- und Niedrigwasser-Erkennung geschrieben (extremes.rs)",
+      "trailnotes: Gesamtanstieg eines Tracks mit erstem echtem Test"
+    ],
+    "stalled": [
+      "ledger-lite: PDF-Branch blieb Stub ohne Bibliothekswahl",
+      "trailnotes: Notizspeicher openDb blieb unimplementiert",
+      "recipe-box: WIP-Portionsskalierung die ganze Woche unberührt"
+    ],
+    "time_note": "Zwei Commits in W42, je einer in tidewatch und trailnotes; ledger-lite, recipe-box und pixel-garden blieben ohne Commit."
+  }
+}

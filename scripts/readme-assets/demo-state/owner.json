@@ -1,0 +1,14 @@
+[
+  ["feedback", "set", "q-6c6a7bd5", "--value", "answered", "--note", "Nein, die Nordsee reicht mir."],
+  ["feedback", "set", "q-a3cb85fb", "--value", "answered", "--note", "Parken. Ich komme im Winter darauf zurück."],
+  ["projects", "status", "recipe-box", "parked", "--note", "Im Winter wieder ansehen."],
+  ["projects", "goal", "tidewatch", "Jeden Morgen vor dem Deichspaziergang nutzbar", "--due", "2026-12-20"],
+  ["feedback", "set", "sg-02e6ea37", "--value", "up"],
+  ["feedback", "set", "sg-3661586a", "--value", "up", "--note", "Das würde ich bei jeder Tour benutzen."],
+  ["feedback", "set", "sg-1c56df3c", "--value", "up"],
+  ["feedback", "set", "sy-149d64d2", "--value", "up", "--note", "Ja, Wattwanderungen plane ich oft."],
+  ["feedback", "set", "sg-60a9a1f3", "--value", "later"],
+  ["feedback", "set", "sg-d118ca94", "--value", "down", "--note", "Brauche ich nicht."],
+  ["tasks", "create", "--project", "trailnotes", "--source-id", "sg-d5584570", "--title", "Fehlende Höhen im Anstieg überspringen", "--why", "Seit dem NaN-Fix zählt ein Punkt ohne Höhe als 0 m und bläht den Anstieg auf.", "--done-when", "Ein Test mit einem Punkt ohne Höhe zwischen 500 m und 520 m ergibt 20 m Anstieg."],
+  ["ideas", "add", "Gezeitenkurve als Widget auf dem Handy-Startbildschirm"]
+]

@@ -45,7 +45,7 @@ Ctrl+C cancels queued cases and signals active workers to terminate their proces
 
 Successful runs remove only their verified, uniquely created external fixture directory. Failed runs retain it for diagnosis and name it in `report.json`. Logs remain in `.tmp/` for both outcomes. Never remove an entire configured test root to clean up one run. The runner does not alter the owner's installed database, preferences, autostart, PATH or Git identity.
 
-`tests/test_development.py::TestRunner` exercises forbidden roots and inherited configuration, real detached Windows descendants under timeout/cancellation/leak detection, interrupted-run reports and cleanup of only a successful unique fixture. These synthetic jobs do not build or launch vWatch. The install-path contract uses a real main/worktree pair and PowerShell with captured Cargo/copy operations; it stops before installation and verifies that both operations use the primary target even with inherited overrides.
+`tests/test_development.py::TestRunner` exercises forbidden roots and inherited configuration, real detached Windows descendants under timeout/cancellation/leak detection, interrupted-run reports and cleanup of only a successful unique fixture. These synthetic jobs do not build or launch vWatch. The install-path contract uses a real main/worktree pair and PowerShell with captured Cargo/copy operations; it stops before installation and verifies that both operations use the primary target even with inherited overrides, and that an extracted release package installs its own executables without building.
 
 ## Test ownership and assertions
 

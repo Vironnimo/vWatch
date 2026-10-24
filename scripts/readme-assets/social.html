@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>vWatch social preview</title>
+<style>
+  html, body { margin: 0; }
+  body {
+    width: 1280px; height: 640px; overflow: hidden; box-sizing: border-box;
+    background: #15130f; color: #f1ede6;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-columns: 470px 1fr; align-items: center;
+  }
+  .text { padding: 0 0 0 72px; }
+  .logo { width: 96px; height: 96px; }
+  h1 { font-size: 92px; margin: 20px 0 12px; letter-spacing: -2px; line-height: 1; }
+  h1 span { color: #e8870a; }
+  p { font-size: 34px; line-height: 1.25; margin: 0; color: #b3aa9e; }
+  .shot {
+    justify-self: end; width: 760px; height: 520px; margin-right: -2px;
+    border-radius: 18px 0 0 18px; overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .5); border: 1px solid #423c35; border-right: 0;
+  }
+  .shot img { width: 1100px; display: block; }
+</style>
+</head>
+<body>
+  <div class="text">
+    <img class="logo" src="../../icons/icon.png" alt="">
+    <h1>v<span>Watch</span></h1>
+    <p>A morning overview of all the projects your coding agents work on</p>
+  </div>
+  <div class="shot"><img src="../../.github/assets/today.webp" alt=""></div>
+</body>
+</html>

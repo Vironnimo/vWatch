@@ -28,9 +28,11 @@ Codex-managed worktrees use the app's attachment/archive lifecycle. Do not add a
 
 ## Local checks and installation
 
-There is no remote or CI. `scripts/push.py --no-push` verifies an immutable commit in a private checkout; it never fetches or publishes. `scripts/check.py all` checks the working tree. The local verification workflow describes failure handling and exact checked revisions.
+There is no CI. `scripts/push.py` verifies an immutable commit in a private checkout and then pushes exactly that commit to `origin`'s `main` as a fast-forward; `--no-push` (implied by `--ref`) only checks, and nothing is ever fetched or pulled. `pre-push` refuses commits with AI attribution. `scripts/check.py all` checks the working tree. The push workflow describes failure handling and exact checked revisions.
 
-`scripts/install.ps1` resolves the shared primary target through `check.py target-dir`, passes it explicitly to Cargo and copies both release binaries from that same directory, including from worktrees or with inherited Cargo target settings. It preserves installed data/preferences and refuses to interrupt an active console. It closes the GUI for replacement, exports the Skill and updates the Start menu. Runtime OS integration belongs to desktop; release and live-test procedures are workflows.
+`scripts/install.ps1` resolves the shared primary target through `check.py target-dir`, passes it explicitly to Cargo and copies both release binaries from that same directory, including from worktrees or with inherited Cargo target settings. Beside `vWatch-UI.exe` in an extracted release package it skips the build and installs the packaged executables. It preserves installed data/preferences and refuses to interrupt an active console. It closes the GUI for replacement, exports the Skill and updates the Start menu. `scripts/package.ps1` builds the release zip from the same target into `.tmp/release/`.
+
+`scripts/readme-assets/` regenerates the README images: `seed.py --replay` builds fictional demo repositories and a demo instance under `.tmp/readme-demo/` from the recorded agent output in `demo-state/`, and `capture.py` drives the real window over WebView2's loopback debugging port with Python Playwright and writes `.github/assets/`. Neither touches the installed instance; Playwright and Pillow are pinned in its `requirements.txt` as developer tools, not application dependencies. Runtime OS integration belongs to desktop; release and live-test procedures are workflows.
 
 ## Constraints & Gotchas
 
@@ -44,7 +46,7 @@ There is no remote or CI. `scripts/push.py --no-push` verifies an immutable comm
 - Writing/changing tests or interpreting a timeout/survey -> `development/testing.md`
 - Creating, merging or removing task checkouts -> `.vorch/workflows/worktree-workflow.md`
 - Checking an immutable commit or responding to a push request -> `.vorch/workflows/push-workflow.md`
-- Installing binaries or updating installed Skills -> `.vorch/workflows/release-workflow.md`
+- Installing binaries, updating installed Skills or publishing a GitHub release -> `.vorch/workflows/release-workflow.md`
 - Verifying the native window or console -> `.vorch/workflows/live-testing-workflow.md`
 - Changing maps -> `.vorch/workflows/domain-map-workflow.md`
 - Auditing map placement/routing -> `.vorch/workflows/domain-map-audit-workflow.md`

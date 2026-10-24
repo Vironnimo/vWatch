@@ -1,116 +1,137 @@
-# vWatch
+<p align="center">
+  <img src="icons/icon.png" alt="vWatch logo" width="88">
+</p>
 
-A local morning overview of all your software projects: where each one stands, what is at risk, what waits for your decision, and what to do next.
+<h1 align="center">vWatch</h1>
 
-vWatch holds two kinds of data:
+<p align="center"><strong>A morning overview of all the software projects your coding agents work on.</strong></p>
 
-- **Facts** it measures itself from git: activity, configured remotes, uncommitted and unpushed work, additional worktrees and branches, GitHub CI state. A remote is not proof of a backup; missing measurements remain unknown.
-- **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `vwatch due` tells an agent which projects actually changed, so a daily run only re-analyses those.
+<p align="center">
+  vWatch measures every repository with Git and lets your own coding agent (Claude Code, Codex, vBot or any agent that can run a command) write a short report per project.
+  Each morning you see what changed, what waits for your decision and what to hand to an agent next. Your ratings teach the agent what you care about.
+</p>
 
-You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
+<p align="center">
+  <a href="https://github.com/Vironnimo/vWatch/releases"><img src="https://img.shields.io/github/v/release/Vironnimo/vWatch?include_prereleases&style=flat-square" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" alt="Status: alpha">
+  <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4?style=flat-square" alt="Platform: Windows 11">
+</p>
 
-Four always-reachable areas organize the window: **Heute** brings together decisions, blocked work, results awaiting your confirmation, next steps and unread reports; **Projekte** shows project voices and tasks, and opens each project as a full page with its handbook, history and facts; **Ideen & Empfehlungen** separates product ideas from next steps and upkeep, with ratings for each; **Statistik** compares saved measurements and content changes. Routine Git work does not determine the attention order. Unread content and an outdated agent report are different signals.
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#a-closer-look">Screenshots</a> ·
+  <a href="docs/usage.md">User guide</a> ·
+  <a href="#security-and-privacy">Security</a>
+</p>
 
-Statistics retain facts refreshes in SQLite, including failed measurements: every change and the first observation of each UTC day. They show source lines, language shares, files, commits, changed lines, frequently changed files, local work and confirmed task completions over a chosen period. Source counts describe the working tree, including uncommitted files, with documentation/configuration separate and common generated/dependency files excluded heuristically. Unknown or incomplete measurements never become zeroes; folder, branch or counting-method changes break size comparisons. The Git activity reconstruction has its own coverage and remains distinct from observed state.
+**For many projects at once.** When agents work on eight projects in parallel, it is hard to remember where each one stands, which branch is half done and which question an agent left for you. vWatch keeps that in one window, so a project you haven't touched for a month is quick to pick up again.
 
-Cards remain editable JSON documents through the guarded CLI. Each saved version and content change is recorded in the same database transaction, so the live UI and history agree. "Änderungsverlauf" shows previous and new values for reports, project intent, ideas, proposals, tasks, feedback and warning decisions; any two card or portfolio versions can be compared. The migration retains existing document versions and the last available facts; earlier overwritten measurements cannot be recovered. Unchanged large statistics payloads share storage, and a refresh that repeats the previous observation on the same UTC day is not saved again. Reading history never acknowledges unread reports.
+**Measured facts, your agent's judgement.** vWatch itself only measures: commits, uncommitted and unpushed work, branches, worktrees and CI state. It never calls a model and never writes to your repositories. The assessment comes from the agent you already use, which reads the repository and saves its report through the `vwatch` CLI.
 
-"Seit deinem letzten Lesen" lists changes in project reports: progress, open ends, questions, documented decisions and incorporated replies. Routine Git changes stay in project facts and never generate digest entries. An open end disappearing means the card no longer lists it, not proof of completion. Project and activity markers share the explicit read snapshot. Even the first visit does not create a read baseline: use "Aktuellen Stand als gelesen markieren" after reading. Refreshing facts or reopening the window never acknowledges reports.
+<p align="center">
+  <img src=".github/assets/tour.webp" alt="A tour through vWatch in its dark theme: today's overview with four open decisions and three focus items, the project tiles with each project's voice, the tidewatch project page with its next step and questions, and the ideas collection with ratings" width="880">
+</p>
 
-A compact report-status control beside fact freshness shows the last check's completion time, which project reports changed and which were kept, plus any unfinished work. Failures and pending replies remain visible in its label. The overview summary uses ordinary reading size so project content comes first.
+> [!NOTE]
+> The window is in German. This README, the user guide and the agent's instructions are in English; agents write their reports in German.
 
-Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
+## Features
 
-"Auftrag vorbereiten" opens a preview with the task, reason and completion criterion. "Nur kopieren" copies without assigning; "Beauftragen und kopieren" first saves the assignment, then copies its task number and reporting instructions. You paste that text into your agent. If copying fails after saving, the assignment remains available for another copy. vWatch retains the task and its source even when a suggestion leaves the current report; you confirm a reported result or reopen the task.
+<table>
+<tr>
+<td width="50%" valign="top"><b>One report per project</b><br>Your agent writes a Card for each project: where it stands, the next step, open ends and the questions it has for you.</td>
+<td width="50%" valign="top"><b>Facts it measures itself</b><br>Uncommitted files, unpushed commits, unmerged branches, extra worktrees and failing CI come straight from Git and <code>gh</code>, never from a model.</td>
+</tr>
+<tr>
+<td valign="top"><b>Focus across projects</b><br>A daily portfolio brief names up to three things to focus on, patterns across projects, and projects worth parking or reviving.</td>
+<td valign="top"><b>Only what changed</b><br><code>vwatch due</code> tells the agent which projects changed, so the daily run reviews only those. "Seit deinem letzten Lesen" lists what is new in the reports.</td>
+</tr>
+<tr>
+<td valign="top"><b>Your decisions stick</b><br>Rate each suggestion good, later or nonsense. The agent reads every rating, never brings back a rejected idea and learns your taste across projects.</td>
+<td valign="top"><b>Hand work to an agent</b><br>Turn a suggestion into a task with reason and completion criterion and paste it into your agent. Its report waits for your confirmation.</td>
+</tr>
+<tr>
+<td valign="top"><b>A handbook for re-entry</b><br>Each project page shows how to start the project, where things are and what to read first, with a copy button per command.</td>
+<td valign="top"><b>History and statistics</b><br>Every saved change is recorded: compare and restore Card versions, undo your own changes. Statistics show source lines, languages and commits over time, and keep unknown values unknown.</td>
+</tr>
+</table>
 
-Ideas also offer direct "In Umsetzung", "Umgesetzt" and "Archivieren" actions, including in the rating round. Use "In Umsetzung" after manually pasting an idea to an agent; "Umgesetzt" records your confirmation without requiring an agent report. Both use the retained task history. "Wieder offen" reverses the implementation status. "Archivieren" removes a proposal from open suggestions without changing its rating or cancelling running tasks; the "Archiviert" filter offers "Zurückholen". These decisions survive report rewrites and appear in agent contexts. The CLI equivalent is `ideas status <item-id>` to read the current status and revision, then `ideas status <item-id> <status> --revision <revision>` for `in_progress`, `implemented`, `open`, `archived` or `restore`.
+## Get started
 
-A project page begins with purpose, current state, next step and its project voice. Below follow "Weiterarbeiten", "Starten & Handbuch" (each command on its own row with a copy button) and "Verlauf & Fakten" as one page; a jump bar reaches each part. The project list beside it marks open decisions, failed CI and unread reports; ↑/↓ moves through it and Esc returns to the overview. Status and goals have a compact summary with an edit control. Search opens the matching section and highlights the result. Commit curves and any retained agent progress estimate stay in project details, outside the morning overview.
+vWatch runs on Windows 11 and needs [Git](https://git-scm.com/download/win) on your PATH. The [GitHub CLI](https://cli.github.com/) is optional and adds CI status.
 
-Deliberate choices such as local-only work or a needed worktree can be acknowledged with a reason. The measured fact stays visible, and the warning returns if the situation worsens. “Später” offers tomorrow, next week or a chosen date.
+1. **Install.** Download the zip from [Releases](https://github.com/Vironnimo/vWatch/releases), extract it and run its installer from that folder:
 
-Tasks and ideas show the action, reason and completion criterion without agent estimates of duration or effort. Existing estimates are hidden throughout the window, and new cards and briefs no longer request or store them. Owner-set due dates and measured activity remain available.
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\install.ps1
+   ```
 
-The collection **Ideen & Empfehlungen** opens with product ideas: new capabilities, simpler user workflows, new apps and your own ideas. **Empfehlungen** separately holds next steps, upkeep, repairs and safeguarding. Agents classify project suggestions and cross-project proposals explicitly and evaluate both directions independently, without a quota to invent content. Project cards allow up to four proposals per category so maintenance does not occupy the space for ideas. Older feature suggestions remain ideas; other unclassified proposals initially appear as recommendations until reviewed.
+   It copies `vWatch.exe` and `vWatch-UI.exe` to `%LOCALAPPDATA%\Programs\vWatch` and adds a Start menu entry. You can read `install.ps1` before you run it; it changes no other system settings. Run it again from a newer package to update; your data stays. The executables are not signed, so Windows SmartScreen may warn when you first open vWatch: choose "More info", then "Run anyway".
 
-Both categories have their own counts and rating rounds: 1 gut, 2 später, 3 Quatsch, with an optional reason. Filters separate "Neu", "Gut gefunden", "Später", "In Umsetzung", "Umgesetzt", "Archiviert", "Abgelehnt" and "Alle" within the selected category. A positive rating never creates an assignment. Reclassification preserves stable IDs, first appearance, feedback and tasks. Every proposal remains findable after a later report omits it. Your own ideas can be edited in place with guarded undo and preserved history; an edit requires a new agent assessment. Removing an idea moves it to restorable trash. Deferred proposals return to "Neu" when their date arrives. Agents can read either category with `vwatch proposals --category idea` or `--category recommendation`.
+2. **Pick your projects.** Open vWatch from the Start menu. In the settings (gear icon), choose your projects folder with "Ordner wählen …" and tick the repositories to watch. Turn on "Für Agents aufrufbar" there, so agents can run `vwatch` from any terminal.
 
-Ideas sort newest first by the first saved appearance of their stable ID, including on project pages. Rewriting or reintroducing an older idea does not make it new. Each project review includes reflection on useful improvements, followed by a synthesis across all projects, even when reports are current. Existing suggestions do not block new ones. Agents save worthwhile proposals, respect rejected or deferred ideas, and report what was newly added or why a considered direction did not qualify.
+3. **Connect your agent.** vWatch writes its [operating Skill](skill/vwatch/SKILL.md) to `%LOCALAPPDATA%\Programs\vWatch\skill\vwatch`. Point your agent at that `SKILL.md`, or copy the folder into its skills folder, for Claude Code `%USERPROFILE%\.claude\skills\vwatch`. Then ask it:
 
-## One folder, two entry points
+   ```text
+   Do the daily vWatch run.
+   ```
 
-```
-%LOCALAPPDATA%\Programs\vWatch\
-  vWatch.exe        the console CLI for people and agents
-  vWatch-UI.exe     the window for the owner
-  data\                 database and window cache
-  skill\vwatch\     the Skill for agents, written by vWatch on start
-```
+   The agent studies each project and saves its Cards and the brief, and the window shows them within seconds. Schedule the same prompt daily in your agent app to get a fresh overview every morning.
 
-- Double-click `vWatch-UI.exe` (or the Start menu entry "vWatch") opens the window. On first start you pick your projects folder and tick the repositories to watch.
-- The gear opens the settings: add or remove projects, edit a project's name or folder with "Bearbeiten", "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `vwatch`), and the command that installs the Skill in vBot. Editing preserves the project ID, cards, ratings and history. Select the existing folder after moving or renaming it elsewhere.
-- `vwatch <command>` shows readable text for people and agents. Add `--json` when a program needs structured output, for example `vwatch projects list --json`. Document input uses `--file <path>`, `--file -` for stdin, or `--input-json '<object>'`.
-- The CLI is a native console program independent of the window. A long operation returns within its 45-second wait budget with either its result or an exact `jobs wait` continuation. A command that is still running says so; follow its continuation instead of starting it again. Output is complete when the console process exits; there is no late GUI output to poll for.
-- Long text results have an exact `Next:` command for the remaining pages. Errors name what failed, any partial effect and the recovery. `Undo:` identifies a supported reversal. `vwatch activity` helps recover after a lost response.
-- Task reports also accept `vwatch tasks report <id> --file <path>` for multiline results and evidence. The file contains `status`, `result` and `evidence`; reporting `done` requests your review rather than confirming completion.
-- `VWATCH_HOME` or `--data-dir <folder>` selects another data folder. Continuation commands retain the selected instance.
+**From source.** With the Rust toolchain from `rust-toolchain.toml`, the MSVC build tools and Python, `scripts\install.ps1` in a checkout builds both executables and installs them the same way. [CONTRIBUTING.md](CONTRIBUTING.md) covers development.
 
-Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin vWatch`.
+## A closer look
 
-Requires git on the PATH (`gh` optional, for CI state) and the WebView2 runtime that ships with Windows 11.
+### Today
 
-## Install
+"Heute" starts with what needs you: questions an agent left, results waiting for your confirmation and the brief's focus for the day. "Auftrag vorbereiten" turns a focus item into a task for your agent. Routine Git activity never pushes a project to the top; unread reports and outdated reports are marked separately.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-```
+![The "Heute" overview: the brief's greeting, four decisions from the ledger-lite, tidewatch, trailnotes and pixel-garden Cards, and three focus items with "Auftrag vorbereiten" links](.github/assets/today.webp)
 
-Builds both release executables (needs Rust), copies them to `%LOCALAPPDATA%\Programs\vWatch` and creates the Start menu entry for the window. Reinstalling keeps `data\` and the settings. An existing vWatch autostart entry is redirected to the window executable without changing whether autostart is enabled. Installation refuses to replace a CLI executable while an agent is using it.
+### All projects
 
-## Agents
+"Projekte" shows one tile per project with its status, the agent's one-line assessment and the decisions waiting for you. Each project also gets a short voice in the first person, which makes it easy to tell projects apart at a glance.
 
-The [operating Skill](skill/vwatch/SKILL.md), embedded in the executables, teaches the tracked daily run: `runs start` → `context` and repository study → `card put` → `portfolio context` → `portfolio put` → `runs finish`. Agents read ordinary text output and follow continuations. Card and portfolio writes require the `--context-token` from their complete context. A conflicting write is rejected until the agent rereads and reconciles the changed information.
+![Five project tiles: tidewatch, ledger-lite and trailnotes active, pixel-garden and recipe-box dormant, each with its voice, headline and number of open decisions](.github/assets/projects.webp)
 
-Agents can also manage watched projects, ideas, ratings, replies, tasks, warnings and display preferences through the CLI when you request those changes. A daily run only observes repositories and updates vWatch's interpretation; it does not implement suggestions or invent your decisions. Task reports remain subject to your confirmation. Autostart and PATH remain your choices in the window's settings.
+### A project page
 
-In vBot, give the install command from vWatch's settings to the Agent that should operate vWatch. It installs the Skill privately for that Agent:
+Each project gets a page with its purpose, current state and next step, your goal and the questions waiting for you, each with the agent's recommended answer. Further down follow the open ends, the agent's suggestions, the handbook with how to run the project and what to read first, and the facts Git measured.
 
-```powershell
-vbot skill install "$env:LOCALAPPDATA/Programs/vWatch/skill/vwatch" --scope own
-```
+![The tidewatch project page: current state, the next step with its completion criterion, the goal with its due date, and an open question with three answers, one marked "empfohlen"](.github/assets/project.webp)
 
-`own` requires the calling vBot Agent's identity. From an external terminal, select that Agent explicitly with `--scope agent:<id>`. When updating an existing installation, keep its existing scope; install globally only when the owner explicitly requests global availability.
+### Ideas and recommendations
 
-Then schedule a daily task such as "Führe den täglichen vWatch-Lauf durch." for that Agent with Bash access.
+Product ideas and recommendations such as upkeep and repairs are kept apart, each with its own rating round: press 1 for good, 2 for later, 3 for nonsense and optionally add a reason. Ratings are kept with the stable item, also after a later report drops it.
 
-`vwatch schema card` and `vwatch schema portfolio` describe the document fields as readable text; add `--json` for their complete JSON schemas. `vwatch --help` lists commands, and the [CLI reference](skill/vwatch/references/cli.md) explains data, recovery and less common operations. The [agent interface specification](docs/agent-interface.md) records capability coverage, guarantees and validation scope.
+![The ideas collection: separate tabs for ideas and recommendations, a field for your own idea, filters for new, good, later, in progress, implemented, archived and rejected ideas, and two idea cards with gut, später and Quatsch buttons](.github/assets/ideas.webp)
 
-To rename a watched project or reconnect its moved folder, use its stable ID with `vwatch projects update <id> --name "New name" --path "C:/projects/new-folder"`. Either option can be used alone. If you do not know the ID, find it with `vwatch projects list`. Cards, ratings and history remain attached. Removed projects and ideas stay in their `trash` lists and can be restored with the same IDs; removal is not a rename operation.
+## Security and privacy
 
-## Development
+- **Local only.** vWatch keeps its data in a SQLite database in `%LOCALAPPDATA%\Programs\vWatch\data`. It has no account, no telemetry and no server. Its only network access is the optional `gh` call for CI status.
+- **Read-only on your repositories.** vWatch runs read-only Git commands. The window opens links and folders only when you click them, and shows files in Explorer instead of running them.
+- **The CLI trusts your Windows account.** Any program running as you can read and change vWatch's data through `vwatch`, the same way your agent does. That is the intended design.
+- **Reports can quote your code.** Cards contain what your agent wrote about your repositories. The operating Skill tells agents to keep credentials and personal content out of them; treat the data folder like the repositories themselves.
 
-```bash
-cargo test
-cargo clippy --all-targets
-node --test tests/ui*.cjs
-cargo build --release
-cargo test --no-default-features
-cargo run --bin vWatch -- due --no-refresh
-```
+Please report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-Run the window from source with `cargo run`; set `VWATCH_HOME` to a task-specific folder under `.tmp/` to keep test data out of the installed app.
+## Documentation
 
-All development scratch files belong in the repository-root `.tmp/`, whose contents are ignored by Git. Cargo configures `TEMP`, `TMP` and `TMPDIR` there for builds, tests and `cargo run`. Run Cargo from this checkout so it loads `.cargo/config.toml`. For other tools, set the same variables in the current PowerShell process from the repository root:
+| Goal | Start here |
+| --- | --- |
+| Learn every part of the window | [User guide](docs/usage.md) |
+| See what an agent is told | [Operating Skill](skill/vwatch/SKILL.md) and the [CLI reference](skill/vwatch/references/cli.md) |
+| Build on the CLI | [Agent interface specification](docs/agent-interface.md) |
+| Build, test or contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-```powershell
-$repoTemp = (New-Item -ItemType Directory -Force -Path .tmp).FullName
-$env:TEMP = $repoTemp
-$env:TMP = $repoTemp
-$env:TMPDIR = $repoTemp
-$env:GIT_CEILING_DIRECTORIES = $repoTemp
-$env:VWATCH_HOME = Join-Path $repoTemp 'dev-instance'
-```
+`vwatch --help` and `vwatch <command> --help` describe every command.
 
-Use task-specific subfolders for temporary scripts, logs, screenshots, payloads and database copies. `GIT_CEILING_DIRECTORIES` (also configured by Cargo) prevents temporary folders without their own repository from discovering vWatch's parent Git repository. Keep build output in the existing `target/` folder.
+## Status
 
-The UI behavior tests use Node's built-in test runner and need no browser packages.
+vWatch is alpha software by a single maintainer, built for daily use with coding agents. It runs on Windows 11 only. Versions are 0.x, so the CLI and document formats may still change between releases. Bugs and ideas are welcome in [Issues](https://github.com/Vironnimo/vWatch/issues). If vWatch is useful to you, a star helps others find it.
+
+## License
+
+[MIT](LICENSE)

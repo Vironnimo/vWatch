@@ -81,9 +81,9 @@ For the console use `cargo run --target-dir (Join-Path $primaryRepo 'target') --
 
 **Worktrees:** before creating, merging or deleting a task checkout, read `.vorch/workflows/worktree-workflow.md`. Use `python scripts/worktree.py create|list|merge|delete <task-name>`; task branches use `codex/`. Small changes can stay on `main`. Codex-managed checkouts use the app's attachment/archive lifecycle; do not delete one with a different worktree manager.
 
-**Complete checks:** this repository is local only, with no remote or CI. `python scripts/check.py all` checks the current working tree; before verifying an immutable commit read `.vorch/workflows/push-workflow.md` and use its local-only path. No workflow authorizes adding a remote.
+**Complete checks and push:** there is no CI. `python scripts/check.py all` checks the current working tree; before checking or pushing an immutable commit read `.vorch/workflows/push-workflow.md`.
 
-**Installation:** before installing a finished change, read `.vorch/workflows/release-workflow.md`. `scripts/install.ps1` builds and installs both executables; it preserves data and existing OS choices and refuses replacement while an agent is using the installed CLI.
+**Installation and releases:** before installing a finished change or publishing a release, read `.vorch/workflows/release-workflow.md`. `scripts/install.ps1` builds and installs both executables; it preserves data and existing OS choices and refuses replacement while an agent is using the installed CLI.
 
 ## Testing
 
@@ -106,6 +106,6 @@ The test runner supplies isolated homes and repositories outside checkouts/the u
 
 The owner's morning read should get shorter and decisions easier. Re-entry, answering agent questions, handing off work and learning from ratings are the other core situations; additional dashboard information is not a goal by itself.
 
-The repository remains local and has no publishing pipeline. The owner approved Vorch task worktrees on 2026-10-23; this replaces the earlier main-only development rule. The shared build directory and checkout-local build/log/live-instance scratch remain explicit vWatch adaptations; test fixture data follows Vorch's external isolation convention. Author identity for development is Julian B. <virojb@web.de>, confirmed by the owner on the same date.
+The repository is public on GitHub as `Vironnimo/vWatch` under the MIT License since 2026-10-24, by the owner's decision; the README, `.github/` and community files are its public face. Pushes and releases happen only on the owner's request. The owner approved Vorch task worktrees on 2026-10-23; this replaces the earlier main-only development rule. The shared build directory and checkout-local build/log/live-instance scratch remain explicit vWatch adaptations; test fixture data follows Vorch's external isolation convention. Author identity for development is Julian B. <virojb@web.de>, confirmed by the owner on the same date.
 
 Cross-domain recovery and historical-data preservation are owned by persistence; output recovery is owned by agent-interface. Window polling is transport freshness, not acknowledgement of new reports. Read the relevant map before changing any of these boundaries.

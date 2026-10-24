@@ -1,0 +1,4 @@
+# Developer tools for scripts/readme-assets/capture.py only; vWatch itself needs none.
+# python -m pip install -r scripts/readme-assets/requirements.txt
+playwright==1.63.0
+Pillow==12.3.0

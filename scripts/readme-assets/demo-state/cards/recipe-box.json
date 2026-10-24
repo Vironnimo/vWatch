@@ -1,0 +1,203 @@
+{
+  "one_liner": "Kleine Web-App für Familienrezepte mit Einkaufsliste.",
+  "stack": "Python mit Flask 3.0 und Jinja-Template; Rezepte als Dataclass, ohne Datenbank.",
+  "phase": "dormant",
+  "phase_evidence": "Letzter Commit „wip: scale servings“ am 2026-05-29, seitdem knapp fünf Monate ohne Änderung.",
+  "headline": "Seit Mai ruht ein WIP-Commit; Rezepte werden nirgends gespeichert.",
+  "personality": "Ich habe eine schöne Überschrift „Rezepte“ und eine leere Liste darunter – die Familienrezepte warten noch auf ein Zuhause.",
+  "recent_changes": [
+    {
+      "date": "2026-05-29",
+      "title": "Portionen skalieren begonnen (WIP)",
+      "detail": "Recipe.scaled wirft NotImplementedError; laut TODO lassen sich Mengen nicht skalieren, weil Zutaten reine Textzeilen sind."
+    },
+    {
+      "date": "2026-05-16",
+      "title": "Einkaufsliste aus ausgewählten Rezepten",
+      "detail": "shopping_list zählt gleiche Zutatenzeilen, gibt aber nur die sortierten Namen zurück; die Mengen gehen dabei verloren."
+    },
+    {
+      "date": "2026-04-17",
+      "title": "Rezepte mit Zutaten und Schritten",
+      "detail": "models.Recipe hält Titel, Portionen, Zutaten und Schritte; die Startseite zeigt weiterhin eine fest leere Liste."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-03-24",
+      "title": "Projekt gestartet"
+    },
+    {
+      "date": "2026-04-17",
+      "title": "Rezeptmodell mit Zutaten und Schritten"
+    },
+    {
+      "date": "2026-05-16",
+      "title": "Einkaufsliste aus mehreren Rezepten"
+    },
+    {
+      "date": "2026-05-29",
+      "title": "Portionsskalierung angefangen, nicht fertig"
+    }
+  ],
+  "features": [
+    "Rezeptmodell mit Titel, Portionen, Zutaten, Schritten",
+    "Einkaufsliste über mehrere Rezepte zusammenführen",
+    "Flask-Startseite mit Rezeptliste (derzeit immer leer)"
+  ],
+  "usage": {
+    "summary": null,
+    "last_used": null,
+    "evidence": "Keine Datenbank, Rezeptdateien oder Logs im Repository (git status --ignored leer); app.py übergibt eine fest leere Rezeptliste; keine Installation vorhanden."
+  },
+  "open_ends": [
+    {
+      "kind": "todo",
+      "title": "Portionsskalierung als WIP-Commit liegen geblieben",
+      "detail": "Recipe.scaled wirft NotImplementedError; das TODO nennt die Ursache: Zutaten sind Text ohne Menge und Einheit.",
+      "source": "models.py (cfbf7be)",
+      "age_days": 148
+    },
+    {
+      "kind": "other",
+      "title": "Rezepte werden nirgends gespeichert oder eingegeben",
+      "detail": "app.py rendert index.html mit recipes=[]; es gibt weder Datei noch Datenbank noch Eingabemaske für Rezepte.",
+      "source": "app.py, templates/index.html",
+      "age_days": 190
+    }
+  ],
+  "waiting_on_you": [
+    {
+      "id": "q-a3cb85fb",
+      "title": "recipe-box parken oder mit strukturierten Zutaten wiederbeleben?",
+      "source": "facts: last_work 2026-05-29; models.py (wip: scale servings)",
+      "options": [
+        {
+          "answer": "Parken, Wiedereinstieg zum Zutatenmodell notieren",
+          "effect": "Die Karte wird ruhig; beim Wiedereinstieg ist klar, dass Menge und Einheit der erste Schritt sind."
+        },
+        {
+          "answer": "Wiederbeleben mit Menge, Einheit, Name",
+          "effect": "Skalieren und eine Einkaufsliste mit Mengen werden möglich; danach fehlt noch das Speichern."
+        },
+        {
+          "answer": "Archivieren und die Idee aufgeben",
+          "effect": "recipe-box fällt aus den täglichen Läufen; die Historie bleibt erhalten."
+        }
+      ],
+      "recommended": 1
+    }
+  ],
+  "vision": {
+    "statement": "Kleine Web-App für Familienrezepte mit Einkaufsliste (README.md).",
+    "progress_note": "Datenmodell und Einkaufsliste existieren; Speichern, Eingabe, Mengen und Skalierung fehlen, die Startseite bleibt leer.",
+    "progress_pct": null
+  },
+  "reentry": {
+    "next_step": "Entscheide, ob recipe-box geparkt oder mit Zutaten aus Menge, Einheit und Name fortgesetzt wird.",
+    "why": "Der WIP-Commit scheitert genau an diesem Modell; ohne Entscheidung bleibt das Projekt im Halbzustand und erscheint täglich als offen.",
+    "done_when": "Der Projektstatus ist geparkt mit Notiz, oder Zutaten haben Menge und Einheit und Recipe.scaled liefert Ergebnisse."
+  },
+  "health_notes": [
+    "shopping_list verwirft die gezählten Mengen und gibt nur sortierte Zutatentexte zurück; „2 Eier“ und „3 Eier“ bleiben zwei getrennte Einträge.",
+    "Keine Tests im Repository; Einkaufsliste und Modell sind ungeprüft.",
+    "Kein Git-Remote konfiguriert; ob es eine andere Sicherung gibt, ist aus dem Repository nicht erkennbar."
+  ],
+  "decisions": [],
+  "suggestions": [
+    {
+      "id": "sg-b48a7cb1",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Zutaten als Menge, Einheit und Name modellieren",
+      "why": "Skalieren und eine brauchbare Einkaufsliste scheitern beide daran, dass Zutaten nur Text sind; das ist der Wiedereinstieg, falls du weitermachst.",
+      "evidence": "TODO in models.Recipe.scaled; shopping.shopping_list zählt nur Textzeilen",
+      "done_when": "Recipe.scaled(4) verdoppelt alle Mengen eines Zwei-Personen-Rezepts; shopping_list summiert gleiche Zutaten je Einheit."
+    },
+    {
+      "id": "sg-e4aaf9c6",
+      "category": "idea",
+      "type": "feature",
+      "title": "Rezept per Link aus dem Web übernehmen",
+      "why": "Viele Familienrezepte stammen von Webseiten; deren schema.org-Recipe-Daten füllen Titel, Portionen, Zutaten und Schritte ohne Abtippen.",
+      "evidence": "models.Recipe hat genau diese Felder; app.py bietet noch keine Eingabe",
+      "done_when": "Eine eingefügte URL mit schema.org-Recipe-Daten ergibt ein gespeichertes Rezept mit Zutaten und Schritten."
+    },
+    {
+      "id": "sg-2c7a2c11",
+      "category": "idea",
+      "type": "feature",
+      "title": "Einkaufsliste als abhakbare Handy-Seite",
+      "why": "Die Liste wird im Laden gebraucht, nicht am Schreibtisch; eine mobile Seite mit Abhaken ersetzt den Zettel.",
+      "evidence": "shopping.shopping_list existiert, wird aber von keiner Route angezeigt",
+      "done_when": "/einkauf zeigt die Liste der gewählten Rezepte mit Abhakfeldern, gut lesbar auf einem Handybildschirm."
+    }
+  ],
+  "cross_project_hints": [
+    "ledger-lite parst deutsche Dezimalbeträge mit Decimal in importer.read; dasselbe Vorgehen passt für Zutatenmengen wie „1,5 kg“.",
+    "ledger-lite summiert die Kategorie Lebensmittel; geplante Einkäufe aus recipe-box ließen sich später neben die tatsächlichen Ausgaben stellen."
+  ],
+  "handbook": {
+    "run": [
+      {
+        "what": "Abhängigkeiten installieren",
+        "how": "pip install -r requirements.txt",
+        "folder": "."
+      },
+      {
+        "what": "Web-App starten",
+        "how": "flask --app app run",
+        "folder": "."
+      },
+      {
+        "what": "Startseite im Browser öffnen",
+        "how": "http://127.0.0.1:5000/",
+        "folder": ""
+      }
+    ],
+    "installed": null,
+    "architecture": "Flask-App (app.py) mit einer Route, die templates/index.html rendert. models.py beschreibt Rezepte als Dataclass, shopping.py fasst Zutaten mehrerer Rezepte zusammen. Speicherung, Eingabe und die Verbindung zwischen Route und Modellen fehlen.",
+    "places": [
+      {
+        "path": "app.py",
+        "what": "Flask-App mit der einzigen Route /"
+      },
+      {
+        "path": "models.py",
+        "what": "Rezept-Dataclass und unfertige Skalierung"
+      },
+      {
+        "path": "shopping.py",
+        "what": "Einkaufsliste aus mehreren Rezepten"
+      },
+      {
+        "path": "templates/index.html",
+        "what": "Startseite mit Rezeptliste"
+      },
+      {
+        "path": "requirements.txt",
+        "what": "Fest gepinnte Flask-Version"
+      }
+    ],
+    "read_first": [
+      {
+        "path": "README.md",
+        "why": "Projektziel in einem Satz"
+      },
+      {
+        "path": "models.py",
+        "why": "WIP-Stelle und TODO zum Zutatenmodell"
+      }
+    ],
+    "needs": [
+      "Python 3.9 oder neuer wegen list[str] in models.py",
+      "Flask 3.0.0 aus requirements.txt"
+    ],
+    "terms": [
+      {
+        "term": "Portionen",
+        "meaning": "Anzahl Personen, für die ein Rezept gilt; Grundlage der geplanten Skalierung."
+      }
+    ]
+  }
+}

@@ -1,0 +1,218 @@
+{
+  "one_liner": "Kleines Browserspiel: Samen pflanzen, gießen und dem Garten beim Wachsen zusehen.",
+  "stack": "Reines JavaScript mit ES-Modulen, HTML-Canvas und localStorage; kein Build-Schritt.",
+  "phase": "dormant",
+  "phase_evidence": "Letzter Commit am 2026-09-09 mit dem Safari-Fix, seitdem 45 Tage ohne Änderung.",
+  "headline": "Version 1.0 zeichnet nur den Boden – Pflanzen fehlen.",
+  "personality": "Ich bin offiziell Version 1.0 und habe eine wunderschöne grüne Wiese – gepflanzt wurde auf ihr allerdings noch nie.",
+  "recent_changes": [
+    {
+      "date": "2026-09-09",
+      "title": "Speichern im Safari-Privatmodus abgesichert",
+      "detail": "save und load fangen localStorage-Fehler ab; im Privatmodus bleibt der Garten nur im Speicher. Der Fix kam nach v1.0 und ist unveröffentlicht."
+    },
+    {
+      "date": "2026-07-26",
+      "title": "Version 1.0 getaggt",
+      "detail": "CHANGELOG.md beschreibt „Plant, water, grow and save“; der Tag v1.0 liegt nur lokal, origin kennt ihn nicht."
+    },
+    {
+      "date": "2026-07-19",
+      "title": "Garten in localStorage speichern",
+      "detail": "save.js schreibt und liest den Garten als JSON unter dem Schlüssel garden."
+    },
+    {
+      "date": "2026-07-04",
+      "title": "Pflanzen wachsen in Stufen",
+      "detail": "plants.grow hebt eine gegossene Pflanze vom Samen über Spross und Knospe bis zur Blüte."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-06-16",
+      "title": "Projekt gestartet"
+    },
+    {
+      "date": "2026-07-04",
+      "title": "Wachstumsstufen für Pflanzen"
+    },
+    {
+      "date": "2026-07-19",
+      "title": "Speichern im Browser"
+    },
+    {
+      "date": "2026-07-26",
+      "title": "Release 1.0"
+    },
+    {
+      "date": "2026-09-09",
+      "title": "Safari-Fix nach dem Release"
+    }
+  ],
+  "features": [
+    "Canvas mit gezeichnetem Gartenboden",
+    "Vier Wachstumsstufen von Samen bis Blüte (nicht eingebunden)",
+    "Speichern und Laden über localStorage (nicht eingebunden)",
+    "Fehlertolerant im Safari-Privatmodus"
+  ],
+  "usage": {
+    "summary": null,
+    "last_used": null,
+    "evidence": "Keine Installation, kein Deployment-Hinweis und keine ignorierten Dateien im Repository; Spielstände lägen im localStorage eines Browsers und wurden nicht geprüft."
+  },
+  "open_ends": [
+    {
+      "kind": "other",
+      "title": "game.js nutzt plants.js und save.js nicht",
+      "detail": "index.html lädt nur game.js, das einen grünen Streifen zeichnet; Pflanzen, Gießen und Speichern erreichen das Spiel nie – auch nicht in v1.0.",
+      "source": "game.js, index.html, git show v1.0:game.js",
+      "age_days": 90
+    },
+    {
+      "kind": "unpushed",
+      "title": "Tag v1.0 nicht auf origin",
+      "detail": "git ls-remote origin zeigt nur main; der Release-Tag v1.0 existiert nur in diesem Repository.",
+      "source": "git ls-remote origin",
+      "age_days": 90
+    },
+    {
+      "kind": "other",
+      "title": "Safari-Fix seit v1.0 unveröffentlicht",
+      "detail": "Ein Commit nach v1.0 (edabf63); CHANGELOG.md erwähnt ihn nicht, ein neuer Tag fehlt.",
+      "source": "facts: release.commits_since; CHANGELOG.md",
+      "age_days": 45
+    }
+  ],
+  "waiting_on_you": [
+    {
+      "id": "q-9f78ffdd",
+      "title": "Ist pixel-garden mit 1.0 abgeschlossen oder soll es spielbar werden?",
+      "source": "CHANGELOG.md, game.js, facts: last_work 2026-09-09",
+      "options": [
+        {
+          "answer": "Spielbar machen, dann 1.1 veröffentlichen",
+          "effect": "game.js bindet plants.js und save.js ein; Klicken pflanzt, Gießen lässt wachsen, der Stand übersteht Neuladen."
+        },
+        {
+          "answer": "Als erledigt markieren, so lassen",
+          "effect": "vWatch achtet nur noch auf Verschlechterung; das Spiel bleibt eine grüne Fläche."
+        },
+        {
+          "answer": "Parken bis zu einer neuen Idee",
+          "effect": "Die Karte wird ruhig; der fehlende Spielablauf steht als Wiedereinstieg fest."
+        }
+      ],
+      "recommended": 1
+    }
+  ],
+  "vision": {
+    "statement": "Kleines Browserspiel: Samen pflanzen, gießen und den Garten wachsen sehen (README.md).",
+    "progress_note": "Wachstumslogik und Speichern sind geschrieben und als 1.0 getaggt, aber nicht mit der Spielfläche verbunden.",
+    "progress_pct": null
+  },
+  "reentry": {
+    "next_step": "In game.js plants.js und save.js importieren: Klick pflanzt, Gießen lässt wachsen, Garten wird gespeichert.",
+    "why": "Erst damit tut das Spiel, was README und CHANGELOG 1.0 beschreiben; alle Bausteine dafür sind bereits geschrieben.",
+    "done_when": "Im Browser lässt sich eine Pflanze setzen und bis zur Blüte gießen; nach dem Neuladen steht sie noch da."
+  },
+  "health_notes": [
+    "load() gibt bei beschädigtem JSON stillschweigend einen leeren Garten zurück; der nächste save überschreibt den alten Stand dann ohne Hinweis.",
+    "Im Safari-Privatmodus verschwinden Pflanzen nach dem Neuladen weiterhin; der Fix edabf63 verhindert nur den Absturz, wie der Kommentar in save.js sagt.",
+    "Keine Tests im Repository."
+  ],
+  "decisions": [],
+  "suggestions": [
+    {
+      "id": "sg-168be83b",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Spielbaren Stand als 1.1 veröffentlichen",
+      "why": "Safari-Fix und erster spielbarer Ablauf gehören zusammen; ein neuer Tag mit CHANGELOG-Eintrag macht den Unterschied zu 1.0 nachvollziehbar.",
+      "evidence": "facts: release v1.0, commits_since 1; CHANGELOG.md kennt nur 1.0",
+      "done_when": "Tag v1.1 existiert lokal und auf origin; CHANGELOG.md nennt Safari-Fix und spielbaren Ablauf."
+    },
+    {
+      "id": "sg-10e9408a",
+      "category": "idea",
+      "type": "feature",
+      "title": "Pflanzen wachsen auch, während du weg bist",
+      "why": "Ein Garten lebt vom Wiederkommen; Wachstum nach echter Zeit belohnt den kurzen Blick am nächsten Morgen, wie bei Idle-Spielen.",
+      "evidence": "save.js speichert den Garten; plants.grow kennt nur „gegossen ja/nein“, keine Zeit",
+      "done_when": "Eine gegossene Pflanze steht nach einem Tag Pause beim Öffnen eine Stufe weiter."
+    },
+    {
+      "id": "sg-d118ca94",
+      "category": "idea",
+      "type": "feature",
+      "title": "Garten als Bild herunterladen",
+      "why": "Ein Pixelgarten will gezeigt werden; das Canvas kann den aktuellen Garten direkt als PNG ausgeben.",
+      "evidence": "game.js zeichnet auf <canvas id=\"garden\"> mit 320×180 Pixeln",
+      "done_when": "Ein Knopf lädt den aktuellen Garten als PNG-Datei herunter."
+    }
+  ],
+  "cross_project_hints": [
+    "save.js fängt localStorage-Fehler im Safari-Privatmodus ab; trailnotes braucht für seinen IndexedDB-Notizspeicher dieselbe Absicherung."
+  ],
+  "handbook": {
+    "run": [
+      {
+        "what": "Lokalen Webserver im Projektordner starten",
+        "how": "python -m http.server <port>",
+        "folder": "."
+      },
+      {
+        "what": "Spiel im Browser öffnen",
+        "how": "http://localhost:<port>/",
+        "folder": ""
+      }
+    ],
+    "installed": null,
+    "architecture": "Statische Seite ohne Build: index.html lädt game.js als ES-Modul, das auf ein 320×180-Canvas zeichnet. plants.js (Wachstumsstufen) und save.js (localStorage) sind fertig, werden aber von game.js nicht importiert.",
+    "places": [
+      {
+        "path": "index.html",
+        "what": "Einstiegsseite mit Canvas und Modul-Skript"
+      },
+      {
+        "path": "game.js",
+        "what": "Zeichnet die Spielfläche, bisher nur den Boden"
+      },
+      {
+        "path": "plants.js",
+        "what": "Wachstumsstufen und Gießlogik"
+      },
+      {
+        "path": "save.js",
+        "what": "Speichern und Laden über localStorage"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "what": "Versionshinweise, bisher nur 1.0"
+      }
+    ],
+    "read_first": [
+      {
+        "path": "README.md",
+        "why": "Spielidee in einem Satz"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "why": "Was Version 1.0 verspricht"
+      },
+      {
+        "path": "game.js",
+        "why": "Zeigt, was tatsächlich gezeichnet wird"
+      }
+    ],
+    "needs": [
+      "Moderner Browser mit ES-Modulen und localStorage",
+      "Statischer Webserver, weil ES-Module nicht über file:// laden"
+    ],
+    "terms": [
+      {
+        "term": "Stufe",
+        "meaning": "Wachstumszustand einer Pflanze: seed, sprout, bud, flower (STAGES in plants.js)."
+      }
+    ]
+  }
+}

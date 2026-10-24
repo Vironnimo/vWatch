@@ -1,0 +1,285 @@
+{
+  "one_liner": "Gezeitentabellen für Nordseeorte – auf der Kommandozeile und als kleine Webansicht.",
+  "stack": "Rust 2021, axum und tokio für die Webansicht, csv und serde für Stationsdaten, chrono (noch ungenutzt).",
+  "phase": "active",
+  "phase_evidence": "Letzter Commit am 2026-10-23, dazu heute die unversionierte src/moon.rs; fünf Commits in den letzten 30 Tagen.",
+  "headline": "`tidewatch today` zeigt jeden Tag dieselbe Kurve.",
+  "personality": "Ich kenne Husum, Büsum und Cuxhaven auswendig – nur welcher Tag heute ist, hat mir noch niemand gesagt.",
+  "recent_changes": [
+    {
+      "date": "2026-10-24",
+      "title": "Mondphase begonnen, noch unversioniert",
+      "detail": "src/moon.rs berechnet die Mondphase aus den Tagen seit Neumond; die Datei ist nicht committet und nicht in main.rs eingebunden."
+    },
+    {
+      "date": "2026-10-23",
+      "title": "Webansicht liefert die Kurve als SVG",
+      "detail": "src/web.rs gibt jetzt ein SVG-Element zurück, das noch leer ist; der Router wird nirgends gestartet. Der Commit ist nicht gepusht."
+    },
+    {
+      "date": "2026-10-20",
+      "title": "Plan für Stationssuche und Mondphasen",
+      "detail": "docs/PLAN.md hakt Vorhersage und Hoch-/Niedrigwasser ab; offen sind Stationssuche, Mond-Overlay und K1/O1 für die Ostsee."
+    },
+    {
+      "date": "2026-10-15",
+      "title": "Hoch- und Niedrigwasser erkennen",
+      "detail": "src/extremes.rs findet Wendepunkte einer abgetasteten Kurve; das Modul ist nicht in main.rs deklariert, die CLI zeigt keine Extremwerte."
+    },
+    {
+      "date": "2026-10-07",
+      "title": "Kleine axum-Seite für die Tageskurve",
+      "detail": "axum und tokio kamen in Cargo.toml dazu; src/web.rs definiert einen Router mit einer einzigen Route."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-08-24",
+      "title": "Projekt gestartet"
+    },
+    {
+      "date": "2026-08-31",
+      "title": "Gezeitenkonstanten für drei Nordseestationen eingelesen"
+    },
+    {
+      "date": "2026-09-11",
+      "title": "Wasserstand aus M2- und S2-Partialtide berechnet"
+    },
+    {
+      "date": "2026-09-21",
+      "title": "Kommando tidewatch today <station> verfügbar"
+    },
+    {
+      "date": "2026-10-07",
+      "title": "Erste Webansicht mit axum"
+    },
+    {
+      "date": "2026-10-15",
+      "title": "Erkennung von Hoch- und Niedrigwasser geschrieben"
+    }
+  ],
+  "features": [
+    "Stationen Husum, Büsum und Cuxhaven aus CSV",
+    "Wasserstand aus M2- und S2-Partialtiden",
+    "Stündliche Wasserstandstabelle über 24 Stunden",
+    "Wendepunkterkennung für Hoch- und Niedrigwasser (nicht eingebunden)",
+    "Exit-Code 2 bei unbekannter Station"
+  ],
+  "usage": {
+    "summary": null,
+    "last_used": null,
+    "evidence": "Im Repository keine Logs, Exporte oder ignorierten Datendateien (git status --ignored leer); keine Installation, Verknüpfung oder geplante Aufgabe für tidewatch vorhanden."
+  },
+  "open_ends": [
+    {
+      "kind": "unpushed",
+      "title": "Zwei Commits nicht auf origin",
+      "detail": "Plan (cbd5962) und SVG-Fix (93e1f8f) liegen nur lokal; origin/main steht noch auf ec18eee vom 2026-10-15.",
+      "source": "git log origin/main..main",
+      "age_days": 4
+    },
+    {
+      "kind": "uncommitted",
+      "title": "src/moon.rs ist unversioniert",
+      "detail": "Die Mondphasenfunktion liegt nur im Arbeitsordner und ist weder committet noch als Modul eingebunden.",
+      "source": "git ls-files --others: src/moon.rs",
+      "age_days": 0
+    },
+    {
+      "kind": "other",
+      "title": "extremes.rs und web.rs nicht in main.rs eingebunden",
+      "detail": "main.rs deklariert nur harmonics und predict. Hoch-/Niedrigwasser und Webansicht werden nicht kompiliert; für axum gibt es keinen tokio-Start.",
+      "source": "src/main.rs",
+      "age_days": 17
+    },
+    {
+      "kind": "plan",
+      "title": "Drei offene Punkte in docs/PLAN.md",
+      "detail": "Stationssuche nach Name, Mondphasen-Overlay in der Webansicht und K1/O1-Partialtiden für die Ostsee sind noch offen.",
+      "source": "docs/PLAN.md",
+      "age_days": 4
+    }
+  ],
+  "waiting_on_you": [
+    {
+      "id": "q-9a458e93",
+      "title": "Soll die Webansicht wirklich laufen oder vorerst entfallen?",
+      "source": "src/web.rs, src/main.rs, Cargo.toml",
+      "options": [
+        {
+          "answer": "Webansicht einbinden und starten",
+          "effect": "main.rs bekommt tokio-Runtime und ein serve-Kommando; das Mond-Overlay aus PLAN.md hat einen Ort."
+        },
+        {
+          "answer": "Nur CLI, Webcode entfernen",
+          "effect": "axum und tokio fallen weg; die Mondphase wird Teil der Textausgabe."
+        },
+        {
+          "answer": "Später entscheiden, Code bleibt liegen",
+          "effect": "web.rs bleibt ungenutzt, axum und tokio werden weiter ohne Nutzen gebaut."
+        }
+      ],
+      "recommended": 1
+    },
+    {
+      "id": "q-6c6a7bd5",
+      "title": "Soll tidewatch wirklich auch die Ostsee abdecken?",
+      "source": "docs/PLAN.md: Add more constituents (K1, O1) for the Baltic",
+      "options": [
+        {
+          "answer": "Ja, K1 und O1 ergänzen",
+          "effect": "stations.csv braucht vier weitere Spalten, predict::level rechnet mit vier Partialtiden."
+        },
+        {
+          "answer": "Nein, bei der Nordsee bleiben",
+          "effect": "Der Plan-Punkt entfällt; Fokus auf Datum, Stationssuche und Mondphase."
+        }
+      ],
+      "recommended": 2
+    }
+  ],
+  "vision": {
+    "statement": "Gezeitentabellen für Küstenorte auf der Kommandozeile und in einer kleinen Webansicht (README.md).",
+    "progress_note": "Vorhersagekern und Extremwerterkennung existieren; Datumsbezug, Webstart und drei Plan-Punkte fehlen noch.",
+    "progress_pct": 40
+  },
+  "reentry": {
+    "next_step": "In main.rs die Stunden ab dem aktuellen Datum mit chrono berechnen statt fest 0 bis 23.",
+    "why": "Ohne Datum gibt `tidewatch today` täglich dieselbe Tabelle aus; erst danach werden Hoch-/Niedrigwasser, Webkurve und Mondphase aussagekräftig.",
+    "done_when": "`cargo run -- today husum` liefert an zwei verschiedenen Tagen unterschiedliche Tabellen, passend zur Husumer Gezeitentafel auf ±10 cm."
+  },
+  "health_notes": [
+    "main.rs übergibt predict::level nur die Stunden 0–23 ab einer unbestimmten Epoche; chrono steht in Cargo.toml, wird aber nirgends verwendet.",
+    "tests/predict.rs vergleicht nur die Konstanten 1.9 und 1.95 und ruft predict nicht auf; der Abgleich mit der Husumer Tafel ist damit ungeprüft.",
+    "Der Pfad data/stations.csv ist relativ fest codiert; außerhalb des Repo-Ordners bricht das Programm mit „stations“ ab."
+  ],
+  "decisions": [],
+  "suggestions": [
+    {
+      "id": "sg-e39864ea",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Hoch- und Niedrigwasser in today-Ausgabe zeigen",
+      "why": "extremes.rs ist fertig, erreicht dich aber nicht; Hoch- und Niedrigwasserzeiten sind das, was man aus einer Gezeitentafel eigentlich liest.",
+      "evidence": "src/extremes.rs::turning_points; src/main.rs deklariert das Modul nicht (ec18eee)",
+      "done_when": "`cargo run -- today husum` listet unter der Tabelle Uhrzeit und Höhe jedes Hoch- und Niedrigwassers."
+    },
+    {
+      "id": "sg-d33431ef",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Husum-Test gegen echte Vorhersage prüfen",
+      "why": "Der Test bestätigt heute nur eine Konstante; ein falscher Datumsbezug oder eine falsche Phase bliebe unbemerkt.",
+      "evidence": "tests/predict.rs (4a3cb33); ohne src/lib.rs kann der Integrationstest predict nicht importieren",
+      "done_when": "Ein Test ruft predict::level für Husum an einem Tafeltag auf und scheitert bei über 10 cm Abweichung."
+    },
+    {
+      "id": "sg-02e6ea37",
+      "category": "idea",
+      "type": "feature",
+      "title": "Nächstes Hoch- oder Niedrigwasser als Einzeiler",
+      "why": "Vor dem Watt- oder Strandgang zählt nur, wann das Wasser als Nächstes kommt; eine Zeile ersetzt das Lesen von 24 Tabellenzeilen.",
+      "evidence": "src/main.rs gibt 24 Stundenwerte aus; src/extremes.rs liefert bereits Wendepunkte",
+      "done_when": "`tidewatch next husum` gibt eine Zeile mit nächstem Hoch- oder Niedrigwasser, Uhrzeit, Höhe und verbleibender Zeit aus."
+    },
+    {
+      "id": "sg-60a9a1f3",
+      "category": "idea",
+      "type": "feature",
+      "title": "Gezeiten als Kalenderdatei exportieren",
+      "why": "Hoch- und Niedrigwasser erscheinen dann im Handykalender neben deinen Terminen, ohne dass du tidewatch öffnen musst.",
+      "evidence": "chrono ist bereits Abhängigkeit; extremes.rs liefert Ereignisse; web.rs könnte die Datei als abonnierbare URL ausliefern",
+      "done_when": "`tidewatch ics husum` erzeugt eine .ics-Datei mit Hoch- und Niedrigwasser der nächsten sieben Tage, die ein Kalender importiert."
+    }
+  ],
+  "cross_project_hints": [
+    "trailnotes plant Wanderungen offline; Wattwanderungen bei Husum oder Büsum hängen am Niedrigwasser – tidewatch-Extremwerte könnten an trailnotes-Wegpunkten erscheinen.",
+    "data/stations.csv enthält lat/lon, die harmonics::Station ignoriert; damit ließe sich zu einem trailnotes-Wegpunkt die nächste Pegelstation finden."
+  ],
+  "handbook": {
+    "run": [
+      {
+        "what": "Tagestabelle für eine Station ausgeben",
+        "how": "cargo run -- today husum",
+        "folder": "."
+      },
+      {
+        "what": "Tests ausführen",
+        "how": "cargo test",
+        "folder": "."
+      }
+    ],
+    "installed": null,
+    "architecture": "main.rs liest data/stations.csv über harmonics.rs und ruft predict::level für 24 Stunden auf. extremes.rs (Hoch-/Niedrigwasser), web.rs (axum-Router mit SVG) und das unversionierte moon.rs existieren, sind aber nicht als Module eingebunden.",
+    "places": [
+      {
+        "path": "data/stations.csv",
+        "what": "Gezeitenkonstanten M2/S2 und Koordinaten je Station"
+      },
+      {
+        "path": "src/predict.rs",
+        "what": "Wasserstandsformel aus zwei Partialtiden"
+      },
+      {
+        "path": "src/main.rs",
+        "what": "CLI-Einstieg und einzige Stelle, die Module einbindet"
+      },
+      {
+        "path": "src/extremes.rs",
+        "what": "Hoch- und Niedrigwassererkennung, noch nicht eingebunden"
+      },
+      {
+        "path": "src/web.rs",
+        "what": "axum-Router der Webansicht, noch nicht gestartet"
+      },
+      {
+        "path": "src/moon.rs",
+        "what": "Mondphasenberechnung, unversioniert"
+      },
+      {
+        "path": "tests/predict.rs",
+        "what": "Platzhaltertest für Husumer Referenzwerte"
+      },
+      {
+        "path": "docs/PLAN.md",
+        "what": "Erledigte und offene Ausbauschritte"
+      }
+    ],
+    "read_first": [
+      {
+        "path": "docs/PLAN.md",
+        "why": "Zeigt erledigte und offene Schritte des Projekts"
+      },
+      {
+        "path": "src/predict.rs",
+        "why": "Kern der Vorhersage, Grundlage jeder Ausgabe"
+      },
+      {
+        "path": "src/main.rs",
+        "why": "Zeigt, welche Module tatsächlich laufen"
+      }
+    ],
+    "needs": [
+      "Rust-Toolchain mit Cargo (Edition 2021)",
+      "Aufruf aus dem Repo-Ordner wegen des relativen Pfads data/stations.csv"
+    ],
+    "terms": [
+      {
+        "term": "M2 / S2",
+        "meaning": "Haupt-Mond- und Haupt-Sonnen-Partialtide; ihre Amplitude und Phase je Station bestimmen die Gezeitenkurve."
+      },
+      {
+        "term": "Harmonische Konstanten",
+        "meaning": "Amplituden und Phasen der Partialtiden je Station, gespeichert in data/stations.csv."
+      },
+      {
+        "term": "K1 / O1",
+        "meaning": "Eintägige Partialtiden, im Plan für Ostseestationen vorgesehen."
+      },
+      {
+        "term": "Wendepunkt",
+        "meaning": "Lokales Maximum oder Minimum der Kurve, also Hoch- oder Niedrigwasser (src/extremes.rs)."
+      }
+    ]
+  }
+}

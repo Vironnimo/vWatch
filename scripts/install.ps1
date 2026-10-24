@@ -1,4 +1,8 @@
-# Build vWatch and install it for the current user.
+# Install vWatch for the current user.
+#
+# From a source checkout (scripts\install.ps1) it builds both executables first.
+# From an extracted release package (install.ps1 beside the executables) it
+# installs them without Rust or Python.
 #
 # Result: vWatch.exe (CLI), vWatch-UI.exe (window), and a Start menu entry.
 # Data and preferences survive reinstall. An existing autostart entry for the old
@@ -7,22 +11,26 @@ param(
     [string]$Target = (Join-Path $env:LOCALAPPDATA 'Programs\vWatch')
 )
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path -Parent $PSScriptRoot
 $Target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Target)
-$buildTarget = & python (Join-Path $PSScriptRoot 'check.py') target-dir
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildTarget)) {
-    throw 'Could not resolve the primary Cargo target directory'
-}
-$release = Join-Path $buildTarget 'release'
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'vWatch-UI.exe') -PathType Leaf) {
+    $release = $PSScriptRoot
+} else {
+    $repo = Split-Path -Parent $PSScriptRoot
+    $buildTarget = & python (Join-Path $PSScriptRoot 'check.py') target-dir
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildTarget)) {
+        throw 'Could not resolve the primary Cargo target directory'
+    }
+    $release = Join-Path $buildTarget 'release'
 
-# Cargo discovers .cargo/config.toml from its working directory, not from
-# --manifest-path. Keep the checkout's scratch paths even when called elsewhere.
-Push-Location -LiteralPath $repo
-try {
-    cargo build --release --bins --target-dir $buildTarget
-    if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
-} finally {
-    Pop-Location
+    # Cargo discovers .cargo/config.toml from its working directory, not from
+    # --manifest-path. Keep the checkout's scratch paths even when called elsewhere.
+    Push-Location -LiteralPath $repo
+    try {
+        cargo build --release --bins --target-dir $buildTarget
+        if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+    } finally {
+        Pop-Location
+    }
 }
 
 $cliExe = Join-Path $Target 'vWatch.exe'
