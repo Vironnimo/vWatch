@@ -23,7 +23,7 @@ pub(super) fn document_request(value: &Value) -> String {
     format!("request1-{:x}", Sha1::digest(value.to_string().as_bytes()))
 }
 
-/// The ids Watchtower keeps for a saved document's items, for the agent's reply.
+/// The ids vWatch keeps for a saved document's items, for the agent's reply.
 pub(super) fn item_ids(kind: Kind, doc: &Value) -> Vec<Value> {
     kind.items()
         .iter()
@@ -94,7 +94,7 @@ fn mark_inherited(problems: &[String], sent: Option<&[String]>, document: &str) 
         .join("; ")
 }
 
-/// A dry run's items: ids Watchtower generated show `id: null`, because they are only assigned when saved.
+/// A dry run's items: ids vWatch generated show `id: null`, because they are only assigned when saved.
 fn dry_items(kind: Kind, sent: &Value, receipts: &[Value]) -> Vec<Value> {
     let given: Vec<&Value> = kind
         .items()
@@ -139,7 +139,7 @@ fn keep_items(
         Kind::Card => ("invalid_card", "card"),
         Kind::Portfolio => ("invalid_portfolio", "brief"),
     };
-    Err(WatchtowerError::new(code, format!("The {name} was not saved: {} keeps an item by its id alone, but no saved version of this {name} has that item in that list.", missing.join(", ")))
+    Err(VWatchError::new(code, format!("The {name} was not saved: {} keeps an item by its id alone, but no saved version of this {name} has that item in that list.", missing.join(", ")))
         .hint(format!("Send that item's full content, or leave it out. An item sent as {{\"id\": ...}} alone must use an id from the context's previous {name} or its item history.")))
 }
 
@@ -212,11 +212,11 @@ fn item_receipts(
         .collect()
 }
 
-impl Watchtower {
+impl VWatch {
     pub fn portfolio(&self) -> Result<Value> {
         let p = self.store.latest_portfolio()?.ok_or_else(|| {
-            WatchtowerError::new("no_portfolio", "No portfolio brief has been written yet.")
-                .hint("Run `watchtower portfolio context` and write one.")
+            VWatchError::new("no_portfolio", "No portfolio brief has been written yet.")
+                .hint("Run `vwatch portfolio context` and write one.")
         })?;
         Ok(json!({"version": p.version, "created_at": p.created_at, "portfolio": p.data}))
     }
@@ -265,7 +265,7 @@ impl Watchtower {
             return Ok(payload);
         }
         let Some(previous) = previous else {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "nothing_to_merge",
                 format!("There is no previous {what} to merge into."),
             )
@@ -320,8 +320,8 @@ impl Watchtower {
         let payload = Self::merged(previous.as_ref().map(|c| &c.data), payload, merge, "card")?;
         let (clean, warnings) = cards::validate(Kind::Card, &payload, &kept).map_err(|problems| {
             let merged = if merge { " With --merge, fields marked (from the previous card) were not in your document: send corrected versions of those too." } else { "" };
-            WatchtowerError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref(), "card")))
-                .hint(format!("Fix the listed fields and send the card again.{merged} `watchtower schema card` prints the full schema."))
+            VWatchError::new("invalid_card", format!("The card was not saved: {}", mark_inherited(&problems, sent.as_deref(), "card")))
+                .hint(format!("Fix the listed fields and send the card again.{merged} `vwatch schema card` prints the full schema."))
         })?;
         self.validate_item_ids(Kind::Card, Some(id), &clean)?;
         let unmatched: Vec<String> = clean["waiting_on_you"]
@@ -337,7 +337,7 @@ impl Watchtower {
             .map(|(i, _)| format!("waiting_on_you[{i}].recommended"))
             .collect();
         if !unmatched.is_empty() {
-            return Err(WatchtowerError::new("invalid_card", format!("The card was not saved: {} names an option the question does not have.", unmatched.join(", ")))
+            return Err(VWatchError::new("invalid_card", format!("The card was not saved: {} names an option the question does not have.", unmatched.join(", ")))
                 .hint("Set recommended to the 1-based number of one of the question's options, or null when no option is recommended."));
         }
         let changed = changed_fields(Kind::Card, previous.as_ref().map(|c| &c.data), &clean);
@@ -363,7 +363,7 @@ impl Watchtower {
             .collect();
         if !prose.is_empty() {
             warnings.push(format!(
-                "handbook.run: `how` of \"{}\" is not a plain command or URL: it has backticks, a URL after a command, or a shortcut to click. Watchtower copies `how` as it stands, so it holds exactly what the owner types, or one URL to open; a URL gets its own entry, and how to open the installed app belongs in `handbook.installed.open`. Send the whole handbook with that fixed.",
+                "handbook.run: `how` of \"{}\" is not a plain command or URL: it has backticks, a URL after a command, or a shortcut to click. vWatch copies `how` as it stands, so it holds exactly what the owner types, or one URL to open; a URL gets its own entry, and how to open the installed app belongs in `handbook.installed.open`. Send the whole handbook with that fixed.",
                 prose.join("\", \"")
             ));
         }
@@ -425,11 +425,11 @@ impl Watchtower {
     ) -> Value {
         let undo = (version > 1).then(|| match project {
             Some(id) => format!(
-                "watchtower card restore {id} --version {} --context-token {token}",
+                "vwatch card restore {id} --version {} --context-token {token}",
                 version - 1
             ),
             None => format!(
-                "watchtower portfolio restore --version {} --context-token {token}",
+                "vwatch portfolio restore --version {} --context-token {token}",
                 version - 1
             ),
         });
@@ -487,13 +487,11 @@ impl Watchtower {
     pub fn card_version(&self, id: &str, version: i64) -> Result<Value> {
         self.project(id)?;
         let card = self.store.card_version(id, version)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "version_not_found",
                 format!("Project '{id}' has no card version {version}. Nothing was changed."),
             )
-            .hint(format!(
-                "Read watchtower card history {id} for saved versions."
-            ))
+            .hint(format!("Read vwatch card history {id} for saved versions."))
         })?;
         Ok(
             json!({"project":id,"version":card.version,"created_at":card.created_at,"card":card.data}),
@@ -516,13 +514,11 @@ impl Watchtower {
         }
         let current = self.store.latest_card(id)?;
         let card = self.store.card_version(id, version)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "version_not_found",
                 format!("Project '{id}' has no card version {version}. Nothing was changed."),
             )
-            .hint(format!(
-                "Read watchtower card history {id} for saved versions."
-            ))
+            .hint(format!("Read vwatch card history {id} for saved versions."))
         })?;
         if current.as_ref().is_some_and(|c| c.version == version) {
             return Ok(extend(
@@ -563,11 +559,11 @@ impl Watchtower {
 
     pub fn portfolio_version(&self, version: i64) -> Result<Value> {
         let p = self.store.portfolio_version(version)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "version_not_found",
                 format!("There is no portfolio version {version}. Nothing was changed."),
             )
-            .hint("Read watchtower portfolio history for saved versions.")
+            .hint("Read vwatch portfolio history for saved versions.")
         })?;
         Ok(json!({"version":p.version,"created_at":p.created_at,"portfolio":p.data}))
     }
@@ -585,11 +581,11 @@ impl Watchtower {
         }
         let current = self.store.latest_portfolio()?;
         let p = self.store.portfolio_version(version)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "version_not_found",
                 format!("There is no portfolio version {version}. Nothing was changed."),
             )
-            .hint("Read watchtower portfolio history for saved versions.")
+            .hint("Read vwatch portfolio history for saved versions.")
         })?;
         if current.as_ref().is_some_and(|c| c.version == version) {
             return Ok(extend(
@@ -615,8 +611,8 @@ impl Watchtower {
     pub fn card(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         let card = self.store.latest_card(id)?.ok_or_else(|| {
-            WatchtowerError::new("no_card", format!("Project '{id}' has no card yet."))
-                .hint(format!("Run `watchtower context {id}` and write one."))
+            VWatchError::new("no_card", format!("Project '{id}' has no card yet."))
+                .hint(format!("Run `vwatch context {id}` and write one."))
         })?;
         Ok(
             json!({"project": id, "version": card.version, "created_at": card.created_at, "card": card.data}),
@@ -662,8 +658,8 @@ impl Watchtower {
             "portfolio brief",
         )?;
         let (clean, warnings) = cards::validate(Kind::Portfolio, &payload, &kept).map_err(|problems| {
-            WatchtowerError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref(), "brief")))
-                .hint(format!("Fix the listed fields and send it again. {} `watchtower schema portfolio` describes the fields.", if merge { "With --merge, fields marked (from the previous brief) were inherited: include corrected versions of those fields too." } else { "" }))
+            VWatchError::new("invalid_portfolio", format!("The brief was not saved: {}", mark_inherited(&problems, sent.as_deref(), "brief")))
+                .hint(format!("Fix the listed fields and send it again. {} `vwatch schema portfolio` describes the fields.", if merge { "With --merge, fields marked (from the previous brief) were inherited: include corrected versions of those fields too." } else { "" }))
         })?;
         self.validate_item_ids(Kind::Portfolio, None, &clean)?;
         let known: Vec<String> = self.store.projects()?.into_iter().map(|p| p.id).collect();
@@ -693,7 +689,7 @@ impl Watchtower {
         if !unknown.is_empty() {
             let mut known = known;
             known.sort();
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "unknown_project",
                 format!(
                     "The brief names unknown project ids: {}.",
@@ -701,7 +697,7 @@ impl Watchtower {
                 ),
             )
             .hint(format!(
-                "Use the ids from `watchtower portfolio context`: {}.",
+                "Use the ids from `vwatch portfolio context`: {}.",
                 known.join(", ")
             )));
         }
@@ -713,8 +709,8 @@ impl Watchtower {
             .map(|id| id.to_string())
             .collect();
         if !strange.is_empty() {
-            return Err(WatchtowerError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
-                .hint("Use the ids from `owner_ideas` in `watchtower portfolio context`; the owner may have removed an idea since."));
+            return Err(VWatchError::new("unknown_idea", format!("The brief assesses ideas that are not parked: {}.", strange.join(", ")))
+                .hint("Use the ids from `owner_ideas` in `vwatch portfolio context`; the owner may have removed an idea since."));
         }
         let mut warnings = warnings;
         warnings.extend(unknown_item_ids(Kind::Portfolio, &payload, &saved));
@@ -765,7 +761,7 @@ impl Watchtower {
                 Kind::Card => ("invalid_card", "card"),
                 Kind::Portfolio => ("invalid_portfolio", "brief"),
             };
-            return Err(WatchtowerError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
+            return Err(VWatchError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
                 .hint("Keep an existing id only for the same item in the same project card or brief. Omit id for a new item."));
         }
         Ok(())

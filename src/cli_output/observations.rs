@@ -141,7 +141,7 @@ pub(super) fn render(command: &str, data: &Value, out: &mut String) {
             line(out, 0, &format!("Note: {}", text(&data["note"])));
             if !data["next_before"].is_null() {
                 let mut next = format!(
-                    "watchtower history list --before {}",
+                    "vwatch history list --before {}",
                     text(&data["next_before"])
                 );
                 for (field, flag) in [
@@ -337,7 +337,7 @@ fn overview(out: &mut String, data: &Value) {
             out,
             0,
             &format!(
-                "Watchtower overview: {} registered projects, including archived projects.",
+                "vWatch overview: {} registered projects, including archived projects.",
                 projects.len()
             ),
         );

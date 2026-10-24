@@ -371,7 +371,7 @@ pub(super) fn context_token(db: &Connection, scope: Option<&str>) -> Result<Stri
             "SELECT id,text FROM ideas WHERE ?1 IS NULL AND removed_at IS NULL ORDER BY id",
             scope,
         )?;
-        // The brief only needs to know whether the owner opened Watchtower since
+        // The brief only needs to know whether the owner opened vWatch since
         // its previous version. Later visits do not change that interpretation.
         basis["previous_portfolio_opened"] = Value::Bool(db.query_row(
             "SELECT EXISTS(SELECT 1 FROM prefs WHERE key='last_visit' AND json_extract(value, '$') >= (SELECT created_at FROM portfolio ORDER BY id DESC LIMIT 1))",

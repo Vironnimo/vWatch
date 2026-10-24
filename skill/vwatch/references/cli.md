@@ -1,4 +1,4 @@
-# Watchtower CLI reference
+# vWatch CLI reference
 
 Use this reference for owner actions outside the daily recipes, history recovery, long commands, document input or code that consumes output. Commands run from any working directory. Replace `<placeholders>` with the values named beside each example. Ordinary output is readable text; command and group `--help` describe arguments.
 
@@ -22,9 +22,9 @@ Text output retains complete table values and pages beyond the output budget. Co
 
 A potentially long command runs for up to 45 seconds inline. If unfinished, it returns a job token and an exact `jobs wait` continuation. Each wait is bounded to 45 seconds and either returns the original completed result or the next wait. `jobs list` lists recorded jobs; `jobs status <job-token>` inspects one. Waiting never repeats the original operation. A job with an unknown outcome requires state inspection, not blind retry; follow its recovery command.
 
-If the shell loses a response, run `watchtower activity` for recent command outcomes. Use an available job continuation. If completion was not captured, inspect the affected project, card, brief, task or run before deciding whether to repeat the write. `watchtower usage --since <YYYY-MM-DD>` shows local command usage without argument values. Dates in this filter are UTC and inclusive.
+If the shell loses a response, run `vwatch activity` for recent command outcomes. Use an available job continuation. If completion was not captured, inspect the affected project, card, brief, task or run before deciding whether to repeat the write. `vwatch usage --since <YYYY-MM-DD>` shows local command usage without argument values. Dates in this filter are UTC and inclusive.
 
-The CLI works while the window is closed. `watchtower status` shows its version and data location and exports the Skill beside the executable. `--data-dir <folder>` selects a different database folder for that call; use the printed instance path when continuing its job or output. `WATCHTOWER_HOME` selects the default data folder when no flag is supplied. Never read or edit database files to bypass the CLI.
+The CLI works while the window is closed. `vwatch status` shows its version and data location and exports the Skill beside the executable. `--data-dir <folder>` selects a different database folder for that call; use the printed instance path when continuing its job or output. `VWATCH_HOME` selects the default data folder when no flag is supplied. Never read or edit database files to bypass the CLI.
 
 Common recoveries:
 
@@ -56,10 +56,10 @@ Retain an item's ID only for the same item in its original document and kind. ID
 History is available through `card history <project-id>` and `portfolio history`; inspect a version with `card show <project-id> --version <number>` or `portfolio show --version <number>`. To restore at the user's request, first read the current context and the chosen historical version. Replace `<version>` with that history entry's number and `<context-token>` with the current context token:
 
 ```powershell
-watchtower card restore <project-id> --version <version> --context-token <context-token>
+vwatch card restore <project-id> --version <version> --context-token <context-token>
 ```
 
-For a brief, use `watchtower portfolio restore --version <version> --context-token <context-token>`. Restoring an older version appends a version and preserves history; restoring the current version changes nothing. Restored evidence stays historical, so the document can remain due. Restore only content consistent with current user instructions; otherwise write a reconciled document instead.
+For a brief, use `vwatch portfolio restore --version <version> --context-token <context-token>`. Restoring an older version appends a version and preserves history; restoring the current version changes nothing. Restored evidence stays historical, so the document can remain due. Restore only content consistent with current user instructions; otherwise write a reconciled document instead.
 
 ## Statistics and content history
 
@@ -84,7 +84,7 @@ For requested registration, `projects discover <folder>` lists unwatched reposit
 Register only the folders named in the request or selected by its stated criteria. Replace `<existing-folder>` with one of those paths:
 
 ```powershell
-watchtower projects add "<existing-folder>"
+vwatch projects add "<existing-folder>"
 ```
 
 Multiple paths can be added in one call. `--id` and `--name` apply only when adding a single path. An already registered folder retains its existing identity. Partial success reports which folders were added and which failed.
@@ -104,7 +104,7 @@ Multiple paths can be added in one call. `--id` and `--name` apply only when add
 Take `<item-id>` from a card or brief. Questions accept `answered`, `done` or `later` (postponed without an answer; the card does not become due for it); focus items accept `done`; suggestions, patterns, synergies, app ideas and verdicts accept `up`, `later` or `down`. For an explicit user request to defer a suggestion until a date, use its item ID:
 
 ```powershell
-watchtower feedback set <item-id> --value later --until <YYYY-MM-DD>
+vwatch feedback set <item-id> --value later --until <YYYY-MM-DD>
 ```
 
 Use `--note` for the user's answer or reason. Omission keeps the prior note. For `later`, an omitted `--until` preserves the existing date or sets 14 days. Legacy `later` reactions without a snooze date defer an item for 14 days after their timestamp. `feedback clear <item-id>` withdraws a reaction. `feedback restore <item-id> --file <snapshot-file>` restores the reaction snapshot from a previous result; JSON null means no reaction. Prefer an emitted `Undo:` command for accidental edits.
@@ -113,7 +113,7 @@ Use `--note` for the user's answer or reason. Omission keeps the prior note. For
 
 `warnings list <project-id>` shows measured warnings and acknowledgements. Only on the user's request, record a deliberate condition with `warnings acknowledge <project-id> --key <key> --note <reason>`. The complete keys are `no_remote`, `ci_none` and `worktrees`. `warnings clear <project-id> --key <key>` withdraws it. The measured fact stays visible, and material worsening invalidates the acknowledgement.
 
-`Undo: watchtower undo <token>` and document restores with context tokens reject intervening changes. If undo reports a conflict, inspect the intervening state and preserve the user's later changes. Other printed undo commands are inverse operations such as restoring a removed project; if the target changed afterwards, inspect its current state before using them.
+`Undo: vwatch undo <token>` and document restores with context tokens reject intervening changes. If undo reports a conflict, inspect the intervening state and preserve the user's later changes. Other printed undo commands are inverse operations such as restoring a removed project; if the target changed afterwards, inspect its current state before using them.
 
 Idea implementation and archiving are owner decisions, separate from task reports and ratings. `ideas status <item-id>` reads one idea or recommendation with its current `revision`, status, archive flag and linked task. Take `<item-id>` from `proposals` or the `item_id` in `ideas list`. On the user's request, use `ideas status <item-id> <status> --revision <revision>` with that returned revision: `in_progress` records work already underway, `implemented` records the user's confirmation even without an agent report, and `open` returns the idea to its rating filter and closes its assignment without completion. These actions create or update the linked task without starting an agent or copying text. Existing reports and task history remain available. `archived` hides the proposal; `restore` returns it with its implementation status and rating intact. Archiving does not cancel a running task and returns guarded undo. A conflict changes nothing; read the current status and review its task result before deciding again. Overview and card/portfolio contexts expose `idea_states` with the linked task snapshot and the guarded idea-status revision; an archive survives later report rewrites. A positive rating alone remains a preference, not implementation.
 
@@ -124,7 +124,7 @@ Idea implementation and archiving are owner decisions, separate from task report
 Create assignments only when the user requests them. Use project IDs from the selected projects and, for an existing suggestion or focus item, its source ID. Omit `--source-id` for independent work:
 
 ```powershell
-watchtower tasks create --project <project-id> --title "<task-title>" --done-when "<completion-criterion>"
+vwatch tasks create --project <project-id> --title "<task-title>" --done-when "<completion-criterion>"
 ```
 
 Optional `--why`, `--evidence` and `--source-id` preserve the source context. Repeat `--project` or use comma-separated IDs for several projects. For long text, use `tasks create --file <task-file>` instead of inline fields. The JSON file contains `projects` (ID array), `title`, and optional `why`, `evidence`, `done_when`, `source_id`.
@@ -134,7 +134,7 @@ Optional `--why`, `--evidence` and `--source-id` preserve the source context. Re
 For a multiline report or text containing quotes, write a UTF-8 JSON file in your temporary folder. Its fields are `status` (`done` or `blocked`), `result` and `evidence` (required for `done`, optional for `blocked`). Replace `<report-file>` with its path; the file replaces all inline report fields:
 
 ```powershell
-watchtower tasks report <task-id> --file "<report-file>"
+vwatch tasks report <task-id> --file "<report-file>"
 ```
 
 On the user's explicit decision, use `tasks confirm <task-id> --revision <revision>`, `tasks reopen <task-id> --revision <revision>` or `tasks cancel <task-id> --revision <revision>`. Take the revision from the task's current result. A conflict means the task changed; read it and reconcile the decision. Reports and task-status changes never edit a repository.
@@ -190,12 +190,12 @@ The measurements cover:
 
 - `code`: Tokei source lines, comments, blanks, languages and largest files from tracked and non-ignored untracked working-tree files. Language percentages use source lines, with documentation and configuration separate. Common dependency/build/generated directories, generated headers, lockfiles, minified files and symlinks are excluded heuristically. Unsupported/binary files are reported separately. Scans exceeding 8 seconds, 100 MB, 50,000 paths or 4 MB per file are incomplete and do not establish a comparable total.
 - `activity`: daily commits and added/removed text lines from up to 365 days of HEAD ancestry, and hotspots: the 20 source files changed by the most commits since `hotspots_from` (90 days) that still exist in the working tree; documentation and configuration files are not hotspots. Merge commits count but merge diffs and binary changes do not add lines; directory/filename exclusions apply. This reconstruction has its own coverage and is not a history of uncommitted work. Hotspot coverage is shown separately from the selected statistics period.
-- `head`, `branch`, `commits` (total, first/last, 7/30/90-day counts and 26 weekly counts oldest first), remotes and upstream. `ahead`, `behind` and `unpushed_since` are null without an upstream and otherwise compare locally known refs; Watchtower never fetches. A configured remote neither verifies a remote backup nor describes other backup methods.
+- `head`, `branch`, `commits` (total, first/last, 7/30/90-day counts and 26 weekly counts oldest first), remotes and upstream. `ahead`, `behind` and `unpushed_since` are null without an upstream and otherwise compare locally known refs; vWatch never fetches. A configured remote neither verifies a remote backup nor describes other backup methods.
 - `dirty`: file/line counts, change signature and oldest/newest uncommitted edit times. These times use edits after the last commit; if all files predate it, that commit's time is used.
 - `worktrees`: additional checkouts, branch/head, prune eligibility and dirty counts/signatures. Null dirty counts mean unreadable; the main checkout is excluded. `branches` includes merged count and unmerged names, heads and last dates.
 - `release`: newest tag reachable from HEAD, its date and commits since; null without tags. `night`: work since 18:00 local time yesterday, including all local branches, reverts and touched uncommitted files.
 - `collisions`: overlapping changes between main checkout, worktrees and unmerged branches, with file count and up to five example files.
-- `space`: rebuildable folders measured once per day, byte totals and per-folder sizes. Watchtower measures but never deletes them.
+- `space`: rebuildable folders measured once per day, byte totals and per-folder sizes. vWatch measures but never deletes them.
 - `ci`: newest run of each default-branch workflow; the worst result decides `state` (`green`, `red`, `running`, `none`, `unknown`, `skipped`). With `--no-ci`, a prior CI result is retained; without one, the state is `skipped`. Cancelled and timed-out runs count as red. Workflow details include conclusion, timestamp and URL.
 - `docs_mtime`, `last_work` (local date of the latest commit or uncommitted edit) and collection timestamp. Facts only cover work git can see; ignored private data is outside these measurements.
 
@@ -205,4 +205,4 @@ When code parses a result, add global `--json`, before or after the command. Ord
 
 Success exits 0 with one object containing `ok: true` and the operation's data. Failure, partial completion or an unfinished job exits 1; invalid usage exits 2. Errors include `error.code`, `error.message` and recovery information such as `hint`. Results and expected errors go to stdout; stderr is reserved for exceptional transport failures. Inspect the outcome and partial-effect fields, not the exit code alone.
 
-For a saved card or brief, code can read `saved`, `version`, `warnings` and `items`. Card writes also return `changed_fields` and `unfilled_fields`. `schema card --json` and `schema portfolio --json` return the complete document schema. A successful context read returns its opaque `context_token`; relevant changes make an old token fail rather than silently overwrite later work. Portfolio context protects whether the owner has opened Watchtower since its previous brief; further visits on the same side of that boundary do not invalidate it.
+For a saved card or brief, code can read `saved`, `version`, `warnings` and `items`. Card writes also return `changed_fields` and `unfilled_fields`. `schema card --json` and `schema portfolio --json` return the complete document schema. A successful context read returns its opaque `context_token`; relevant changes make an old token fail rather than silently overwrite later work. Portfolio context protects whether the owner has opened vWatch since its previous brief; further visits on the same side of that boundary do not invalidate it.

@@ -1,37 +1,37 @@
 # Agent interface
 
-Watchtower's console CLI and desktop window call the same service. People and agents read the same ordinary text; programs explicitly request complete JSON. The operating Skill teaches the daily observation run and user-requested owner actions without database access, GUI automation or a mandatory discovery call.
+vWatch's console CLI and desktop window call the same service. People and agents read the same ordinary text; programs explicitly request complete JSON. The operating Skill teaches the daily observation run and user-requested owner actions without database access, GUI automation or a mandatory discovery call.
 
 Owner-change JSON receipts expose an opaque `undo_token` alongside the compatible `undo` command. Desktop callers pass the token directly to `undo`; readable receipts omit that metadata and retain the printed Undo command. Overview `idea_states` entries carry the selected Task content together with its guarded source revision, so consumers do not select independently from another Task list.
 
-This document records capability coverage, call sequences, recovery contracts and validation scope. Update it with the CLI, desktop handlers and `skill/watchtower/` when those contracts change.
+This document records capability coverage, call sequences, recovery contracts and validation scope. Update it with the CLI, desktop handlers and `skill/vwatch/` when those contracts change.
 
 ## Entry points and test instances
 
-The installed console entry point is `%LOCALAPPDATA%/Programs/Watchtower/Watchtower.exe`; `Watchtower-UI.exe` is the independent desktop entry point. Production agents use shell execution in vBot or Codex. The operating Skill gives PowerShell and Git Bash forms. The CLI works with the window closed and never attaches a console to a GUI process.
+The installed console entry point is `%LOCALAPPDATA%/Programs/vWatch/vWatch.exe`; `vWatch-UI.exe` is the independent desktop entry point. Production agents use shell execution in vBot or Codex. The operating Skill gives PowerShell and Git Bash forms. The CLI works with the window closed and never attaches a console to a GUI process.
 
 Build the console without desktop dependencies:
 
 ```powershell
-cargo build --no-default-features --bin Watchtower
+cargo build --no-default-features --bin vWatch
 ```
 
 Use an absolute scratch folder under the repository's `.tmp/` for development calls. This example reads an isolated instance from the repository root:
 
 ```powershell
-$env:WATCHTOWER_HOME = Join-Path (Get-Location).Path '.tmp/watchtower-agent-interface'
-& ./target/debug/Watchtower.exe projects list
+$env:VWATCH_HOME = Join-Path (Get-Location).Path '.tmp/vwatch-agent-interface'
+& ./target/debug/vWatch.exe projects list
 ```
 
 Git Bash equivalent:
 
 ```bash
-WATCHTOWER_HOME="$PWD/.tmp/watchtower-agent-interface" ./target/debug/Watchtower.exe projects list
+VWATCH_HOME="$PWD/.tmp/vwatch-agent-interface" ./target/debug/vWatch.exe projects list
 ```
 
-The global `--data-dir <folder>` overrides `WATCHTOWER_HOME`. Non-default instances identify themselves in text and JSON. Printed continuations preserve the selected instance through an opaque `--instance` locator; copy them unchanged. The locator is an encoded path, not a secret or permission grant.
+The global `--data-dir <folder>` overrides `VWATCH_HOME`. Non-default instances identify themselves in text and JSON. Printed continuations preserve the selected instance through an opaque `--instance` locator; copy them unchanged. The locator is an encoded path, not a secret or permission grant.
 
-Job fault injection requires both a non-default data folder and `WATCHTOWER_TEST_INSTANCE=1`. Tests can set `WATCHTOWER_TEST_JOB_DEADLINE_MS` (20–45000 milliseconds), `WATCHTOWER_TEST_JOB_DELAY_MS`, `WATCHTOWER_TEST_JOB_CRASH=1` or `WATCHTOWER_TEST_JOB_BLOCK=1`. The blocking switch waits for `.release-test-job` in that scratch folder, with a 30-second cap. Production's default instance ignores these switches. Tests in `tests/process.rs` and the job test module create isolated fixtures; do not enable faults for the installed owner's instance.
+Job fault injection requires both a non-default data folder and `VWATCH_TEST_INSTANCE=1`. Tests can set `VWATCH_TEST_JOB_DEADLINE_MS` (20–45000 milliseconds), `VWATCH_TEST_JOB_DELAY_MS`, `VWATCH_TEST_JOB_CRASH=1` or `VWATCH_TEST_JOB_BLOCK=1`. The blocking switch waits for `.release-test-job` in that scratch folder, with a 30-second cap. Production's default instance ignores these switches. Tests in `tests/process.rs` and the job test module create isolated fixtures; do not enable faults for the installed owner's instance.
 
 ## Capability coverage
 
@@ -191,7 +191,7 @@ Measured real-process samples in an isolated instance:
 | Invalid option containing 25,000 characters, first saved page | 8,127 | 2 |
 | Project context | 2,435 | 0 |
 
-Stderr was empty in every sample. The capture is `%TEMP%/watchtower-rename-cli-work/agent-interface-output-samples.json`; these measurements characterize the sampled fixtures, while the contract tests exercise larger and adversarial content.
+Stderr was empty in every sample. The capture is `%TEMP%/vwatch-rename-cli-work/agent-interface-output-samples.json`; these measurements characterize the sampled fixtures, while the contract tests exercise larger and adversarial content.
 
 ## Decisions and rejected alternatives
 
@@ -243,13 +243,13 @@ All state, snapshots, worker files and usage metadata stay in the selected local
 
 Metadata reads omit their own in-progress `activity`/`usage` entry from their result. The log still records these reads and later reports include their completion; interrupted mutations remain visible as unknown.
 
-Job request/result files and output snapshots are different from usage metadata: they retain arguments, instance/working-directory paths and result text needed for recovery. Treat those files like the private database. Do not attach unredacted snapshots, worker requests or owner documents to an external report. No model-session corpus is collected by Watchtower.
+Job request/result files and output snapshots are different from usage metadata: they retain arguments, instance/working-directory paths and result text needed for recovery. Treat those files like the private database. Do not attach unredacted snapshots, worker requests or owner documents to an external report. No model-session corpus is collected by vWatch.
 
 ## Runtime text and its reasons
 
 | Surface | Constraint and reason |
 |---|---|
-| Skill description | Select operating Watchtower, not coding its repository; avoids taking over unrelated tasks |
+| Skill description | Select operating vWatch, not coding its repository; avoids taking over unrelated tasks |
 | Skill calling/output sections | Default text, exact shell fallback and continuations; avoids forced JSON, late-output polling and repeated mutations |
 | Skill authority rules | Daily observation versus explicit owner changes; prevents invented decisions and unintended repository edits |
 | Skill card/brief recipes | Context reconciliation, first-card behavior and whole-field merge semantics; prevents stale overwrites and missing list entries |
@@ -262,12 +262,12 @@ Job request/result files and output snapshots are different from usage metadata:
 
 The complete source Skill measured 12,887 → 11,033 `o200k_base` tokens, a reduction of 1,854 tokens (14.4%). The main body changed from 3,407 to 2,806 tokens while adding recovery and owner-operation guidance. `AGENTS.md` changed from 2,668 to 2,908 tokens: the 240-token increase records owner authority, recovery ownership and the on-demand interface reference. README changed from 1,289 to 1,480 tokens to explain continuations, explicit JSON and restoration. Keep shared rules in their owning surface rather than repeating them in every prompt.
 
-Static trigger review used five requests that require this Skill: a Watchtower daily run, a card update, a watched-project rename/reconnection, rating a displayed suggestion and reporting a Watchtower assignment. Five neighboring requests do not require it: implementing Watchtower Rust code, fixing another repository's CI, unsaved brainstorming, renaming a Codex project and generic Windows PATH configuration. These are static scope checks, not model trigger measurements.
+Static trigger review used five requests that require this Skill: a vWatch daily run, a card update, a watched-project rename/reconnection, rating a displayed suggestion and reporting a vWatch assignment. Five neighboring requests do not require it: implementing vWatch Rust code, fixing another repository's CI, unsaved brainstorming, renaming a Codex project and generic Windows PATH configuration. These are static scope checks, not model trigger measurements.
 
-The exact before/after Skill text is preserved in the repository, with review baseline `479455e27c59a77c54ddbfcc29c86f324cbe8c7c`. The after text is the source in `skill/watchtower/`; do not duplicate the four complete documents in this report. Review their changes from the repository root:
+The exact before/after Skill text is preserved in the repository, with review baseline `479455e27c59a77c54ddbfcc29c86f324cbe8c7c`. The after text is the source in `skill/vwatch/`; do not duplicate the four complete documents in this report. Review their changes from the repository root:
 
 ```powershell
-git diff 479455e -- skill/watchtower/SKILL.md skill/watchtower/references/cli.md skill/watchtower/references/card-guide.md skill/watchtower/references/portfolio-guide.md
+git diff 479455e -- skill/vwatch/SKILL.md skill/vwatch/references/cli.md skill/vwatch/references/card-guide.md skill/vwatch/references/portfolio-guide.md
 ```
 
 ## Validation and release evidence
@@ -285,7 +285,7 @@ node --test tests/ui.cjs tests/ui-project.cjs tests/ui-handoff.cjs tests/ui-idea
 cargo fmt --check
 ```
 
-The Skill review verified 63 actual command-help calls, and its extracted PowerShell recipes passed against isolated data. The Bash fallback is normalized to the same executable in that recipe test; the process suite separately checks actual Git Bash argument and Unicode behavior. Independent static review corrected the first-card merge recipe, per-kind feedback values, snooze default, response-field distinctions, undo scope and CI-state coverage. The provided Skill checker returned: `watchtower: description 218 characters, body 159 lines, 3 other files (308 reference lines); no findings`.
+The Skill review verified 63 actual command-help calls, and its extracted PowerShell recipes passed against isolated data. The Bash fallback is normalized to the same executable in that recipe test; the process suite separately checks actual Git Bash argument and Unicode behavior. Independent static review corrected the first-card merge recipe, per-kind feedback values, snooze default, response-field distinctions, undo scope and CI-state coverage. The provided Skill checker returned: `vwatch: description 218 characters, body 159 lines, 3 other files (308 reference lines); no findings`.
 
 Completed validation at this report update:
 
@@ -331,11 +331,11 @@ Installed both release executables and reopened the previously running window. B
 
 At the owner's request, one fresh subagent received the installed Skill and a normal daily-run task, without prior conversation or implementation context. The authorized production run completed as run 4: two due project cards and the portfolio were saved, six current cards retained, and no work remained failed or pending. A portfolio write first returned `version_conflict` with an explicit no-save outcome; the agent reread and reconciled context before succeeding. This is one observed run with recovery, not a capability-selection test or a reliability claim across models.
 
-The retrospective identified an unclear conflict cause, ten pages of portfolio context to reread, legacy effort estimates still visible in agent contexts, and no concise distinction between added, edited and retained suggestions in save receipts. The only visibly changed context field the agent identified during recovery was the owner's last-open timestamp; the actual conflict cause was not established. One tool-output truncation came from the agent batching too many pages, not Watchtower pagination. The run added a pattern and a focus item, but no new product/app idea. These findings remain review evidence, not claims of implemented fixes. Tool definitions and the operating Skill were unchanged during this trial, so their before/after definition-token delta is zero; no whole-run token saving was measured.
+The retrospective identified an unclear conflict cause, ten pages of portfolio context to reread, legacy effort estimates still visible in agent contexts, and no concise distinction between added, edited and retained suggestions in save receipts. The only visibly changed context field the agent identified during recovery was the owner's last-open timestamp; the actual conflict cause was not established. One tool-output truncation came from the agent batching too many pages, not vWatch pagination. The run added a pattern and a focus item, but no new product/app idea. These findings remain review evidence, not claims of implemented fixes. Tool definitions and the operating Skill were unchanged during this trial, so their before/after definition-token delta is zero; no whole-run token saving was measured.
 
 ## Context follow-up from the fresh-agent review
 
-Inspection established that every changed `last_visit` timestamp invalidated portfolio context. The guard now compares only whether the owner has opened Watchtower since the previous brief. The first crossing of that boundary still rejects an older draft; later visits on the same side do not. With no previous brief, visits do not affect the token. Cards, facts, owner instructions, feedback, ideas, tasks and warning decisions remain guarded. Opening is not an acknowledgement that the brief was read. This explains a reproducible source of avoidable conflicts without claiming it was the sole cause of the observed trial conflict.
+Inspection established that every changed `last_visit` timestamp invalidated portfolio context. The guard now compares only whether the owner has opened vWatch since the previous brief. The first crossing of that boundary still rejects an older draft; later visits on the same side do not. With no previous brief, visits do not affect the token. Cards, facts, owner instructions, feedback, ideas, tasks and warning decisions remain guarded. Opening is not an acknowledgement that the brief was read. This explains a reproducible source of avoidable conflicts without claiming it was the sole cause of the observed trial conflict.
 
 Current card/portfolio contexts and readable latest-document views omit the six former `effort` slots. Known rated-item snapshots in context also omit that obsolete field. The projection changes neither stored content/history nor raw JSON document views; arbitrary extension data and quoted evidence are preserved. Readable portfolio context renders each uniquely matched weekly finding once, moving its full evidence into the existing card row and identifying the weekly subset by 1-based row positions in that project. Ambiguous matches keep the original complete evidence. JSON context keeps both arrays. No additional fetch is required and no general summary replaces evidence.
 
@@ -343,7 +343,7 @@ The portfolio guide permits correcting demonstrated errors in retained fields, i
 
 On the same isolated owner-data backup, real CLI output changed from 19,778 to 19,303 `o200k_base` tokens (−475, −2.4%), 1,130 to 1,084 lines and 76,093 to 74,779 Unicode characters. Both versions required ten pages. Every returned page is counted once, including instance framing and continuation text; payload input, repeated conversation exposure and Provider wrappers are excluded. These local estimates use tiktoken 0.14.0, not Provider billing. The four Skill files measured 11,496 to 11,611 tokens (+115) against `1783756`; CLI definitions, schemas and help were unchanged. Skill text adds to model context whenever loaded, subject to host caching and framing; no whole-run savings or new usability trial is claimed.
 
-Focused validation passed 11 concurrency, 19 service and 10 output-contract checks, plus strict no-default-features library Clippy. Real process checks on another scratch copy confirmed preserved tokens for repeated visits before/after the brief, rejection on the first post-brief opening, a successful write after a later repeat visit, and continued rejection after a new owner idea. Six historical card estimates remained in raw JSON and disappeared from current context. Private captures are in `%TEMP%/watchtower-context-review-r17t03p2`; no production document or owner state was changed.
+Focused validation passed 11 concurrency, 19 service and 10 output-contract checks, plus strict no-default-features library Clippy. Real process checks on another scratch copy confirmed preserved tokens for repeated visits before/after the brief, rejection on the first post-brief opening, a successful write after a later repeat visit, and continued rejection after a new owner idea. Six historical card estimates remained in raw JSON and disappeared from current context. Private captures are in `%TEMP%/vwatch-context-review-r17t03p2`; no production document or owner state was changed.
 
 
 ## Purpose-based overview review, 2026-10-08
@@ -360,7 +360,7 @@ The complete four-file operating Skill now measures 11,496 to 11,797 `o200k_base
 
 Both release executables were installed with `scripts/install.ps1` and match the built binaries byte for byte. All four Skill files match the repository, installed export and Nabu's existing private package. That package retained `agent:nabu` scope and had no independent local edits before replacement. Production owner data remained unchanged after installation.
 
-The final installed-window inspection was stopped by the owner through the Computer Use Escape gesture. No further native input was issued. The earlier native-window observations above cover the pre-release build; the final search reconciliation, removed-project handoff guard and two-column ideas layout passed source/harness review but were not subsequently exercised in the installed window. The last launched window uses the isolated data copy; closing it and launching Watchtower normally selects production data again.
+The final installed-window inspection was stopped by the owner through the Computer Use Escape gesture. No further native input was issued. The earlier native-window observations above cover the pre-release build; the final search reconciliation, removed-project handoff guard and two-column ideas layout passed source/harness review but were not subsequently exercised in the installed window. The last launched window uses the isolated data copy; closing it and launching vWatch normally selects production data again.
 
 ## Reflection throughout the daily run, 2026-10-08
 
@@ -372,7 +372,7 @@ The revised workflow requires project reflection before each card save and a sel
 
 Independent static review found no remaining workflow skips or contradictory runtime instructions. Before the fresh trial, acceptance criteria were recorded separately from its prompt: project reflection beyond retained suggestions, incorporation of unchanged projects and worker observations, correct new/retained identity, meaningful selection outcomes, and preservation of owner decisions and repository contents. The trial receives an ordinary daily-run request and the installed Skill, without those criteria, the earlier failure or a request to generate a particular idea.
 
-Local token measurement against `a6c2436` uses `o200k_base` and tiktoken 0.14.0. The complete four-file operating Skill changes from 11,797 to 12,957 tokens (+1,160). The first trial used the intermediate 12,879-token version; its retrospective led to 78 further tokens distinguishing uncertain benefit from implementation questions. Run-start instruction and repair-task text, serialized together with identical JSON settings from real CLI calls on separate empty fixtures, change from 229 to 416 tokens (+187). Other CLI definitions and schemas are unchanged. These estimates exclude Provider wrappers and billing; loaded instructions recur in model context subject to host framing and caching. No whole-run token saving is claimed. Private measurements and the predeclared evaluation plans are in `%TEMP%/watchtower-ideation-pg86_yb_`.
+Local token measurement against `a6c2436` uses `o200k_base` and tiktoken 0.14.0. The complete four-file operating Skill changes from 11,797 to 12,957 tokens (+1,160). The first trial used the intermediate 12,879-token version; its retrospective led to 78 further tokens distinguishing uncertain benefit from implementation questions. Run-start instruction and repair-task text, serialized together with identical JSON settings from real CLI calls on separate empty fixtures, change from 229 to 416 tokens (+187). Other CLI definitions and schemas are unchanged. These estimates exclude Provider wrappers and billing; loaded instructions recur in model context subject to host framing and caching. No whole-run token saving is claimed. Private measurements and the predeclared evaluation plans are in `%TEMP%/vwatch-ideation-pg86_yb_`.
 
 The fresh daily trial completed production run 5: four due cards were rewritten, four current cards retained, and portfolio version 12 saved. All eight were current at completion, with no failed work. Three independently new proposal IDs were actually saved; eighteen existing idea IDs remained and two obsolete proposals left the current cards. Separate source review confirmed all three new product gaps and no duplication of prior open ends. One overly broad explanation was subsequently corrected through a guarded card merge: Needle Net's join recommendation applies after a postal code is present. This editorial follow-up is separate from the trial.
 
@@ -398,7 +398,7 @@ The review exercised 62 leaf help pages and inspected 71 actual readable outputs
 
 One initial executable-Skill test returned an unknown-worker result and passed when repeated. Subsequent code inspection identified a real race between checking the saved result and worker liveness. A deterministic test reproduces completion in that interval; the reader now checks the durable result again. The initial fixture was already deleted, so this establishes the race and its fix without asserting that it caused that particular test failure.
 
-The operating Skill retains both reflection stages and owner authority, targets investigation by the due reason, includes staged changes and clarifies capability questions versus project-state reads. The description remains 218 characters. The Skill validator reports no findings: 174 body lines and three reference files totaling 339 lines. Exact text changes are available through `git diff 5bdfdf2 -- skill/watchtower src/cli.rs src/cards.rs src/service.rs ui/app.js`. Review accounting retained 292 of 335 nonblank Skill source lines, 75 of 103 help-text lines and 152 output prose templates; counts include code/table source units and are not linguistic sentence counts. The four Skill files measure 12,957 → 12,820 `o200k_base` tokens (−137, −1.1%); the main body grows from 3,227 to 3,265 while repeated reference prose shrinks. Measurements use tiktoken 0.14.0 and exclude provider framing; no whole-run cost saving is claimed.
+The operating Skill retains both reflection stages and owner authority, targets investigation by the due reason, includes staged changes and clarifies capability questions versus project-state reads. The description remains 218 characters. The Skill validator reports no findings: 174 body lines and three reference files totaling 339 lines. Exact text changes are available through `git diff 5bdfdf2 -- skill/vwatch src/cli.rs src/cards.rs src/service.rs ui/app.js`. Review accounting retained 292 of 335 nonblank Skill source lines, 75 of 103 help-text lines and 152 output prose templates; counts include code/table source units and are not linguistic sentence counts. The four Skill files measure 12,957 → 12,820 `o200k_base` tokens (−137, −1.1%); the main body grows from 3,227 to 3,265 while repeated reference prose shrinks. Measurements use tiktoken 0.14.0 and exclude provider framing; no whole-run cost saving is claimed.
 
 Fresh-agent trials used Codex exec with `gpt-6-luna`, normal host configuration, a separate fixture database and executable per run, and the Skill installed by the evaluation harness. Goals and end-state criteria were written before dispatch. All four attempts loaded the Skill; none used production data.
 
@@ -411,7 +411,7 @@ Fresh-agent trials used Codex exec with `gpt-6-luna`, normal host configuration,
 
 Extra calls remain visible: rename read the reference and top-level help; the first report listed/showed an already known task and read two help pages; the capability question read project state unnecessarily. The second report still listed the known task and recovered from a PowerShell quoting error; combining file creation and the write made the aggregate call count look ideal despite those extra operations. The main Skill now places the file recipe before the short inline alternative, distinguishes recording a supplied report from executing work, and names the literal here-string syntax that avoids the observed quote error. That final syntax clarification was not followed by another model trial. The failed attempt remains part of the record; these trials do not establish daily synthesis quality, production vBot behavior or general model reliability.
 
-Private goal files, fixture state, textual review diffs and end-state checks are under `%TEMP%/watchtower-interface-review-34b629028ce14ef99a2c86b1869f5ffd`; raw trial transcripts are under `%TEMP%/eval-runs-l02a2rjx` and `%TEMP%/eval-runs-k3asflkt`. They contain test content, not owner documents. This review does not install executables or alter any installed Skill scope. Copied task text was exercised in the UI harness; no native-window interaction is claimed.
+Private goal files, fixture state, textual review diffs and end-state checks are under `%TEMP%/vwatch-interface-review-34b629028ce14ef99a2c86b1869f5ffd`; raw trial transcripts are under `%TEMP%/eval-runs-l02a2rjx` and `%TEMP%/eval-runs-k3asflkt`. They contain test content, not owner documents. This review does not install executables or alter any installed Skill scope. Copied task text was exercised in the UI harness; no native-window interaction is claimed.
 
 Final verification passed: 147 Rust tests with desktop features and 147 without, strict Clippy for both configurations and all targets, formatting, 72 Node UI tests, and both Skill validators. The native executable recipes passed in both full suites after the worker-race correction. The work remains a source change on `main`; release installation and any existing private Skill deployment are separate from this audit.
 
@@ -420,7 +420,7 @@ Final verification passed: 147 Rust tests with desktop features and 147 without,
 
 The owner requested that feature and product ideas have their own place alongside actionable recommendations. Validation passed 166 Rust tests with desktop features, 166 without them, strict Clippy for all targets and 86 Node UI tests. The real release CLI on a separate copy of the owner database returned 16 ideas and 44 recommendations as disjoint, complete sets, with readable paging and classification requests in both contexts. The native test window displayed both categories and the recommendation-only rating round. No test ratings or assignments were written to the owner database.
 
-The Skill checker reported: `watchtower: description 218 characters, body 179 lines, 3 other files (365 reference lines); no findings`. Nabu's existing private package was updated in `agent:nabu` with no sharing grants; its independent recovery and input-format notes were retained. This verifies application behavior and instruction consistency, not future model ideation quality; a fresh-agent daily-run evaluation remains a separate check. Existing items retain their IDs and initial dates, and missing categories request review on the next run.
+The Skill checker reported: `vwatch: description 218 characters, body 179 lines, 3 other files (365 reference lines); no findings`. Nabu's existing private package was updated in `agent:nabu` with no sharing grants; its independent recovery and input-format notes were retained. This verifies application behavior and instruction consistency, not future model ideation quality; a fresh-agent daily-run evaluation remains a separate check. Existing items retain their IDs and initial dates, and missing categories request review on the next run.
 
 ## Lean contexts, kept items and idea reviews, 2026-10-20
 

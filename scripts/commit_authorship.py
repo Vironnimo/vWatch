@@ -8,7 +8,7 @@ Commits and merge commits in a checkout that enabled the tracked hooks
   committer is an AI tool identity such as ``Claude <noreply@anthropic.com>``.
 - ``message <file>`` (``commit-msg``) removes attribution lines from the message:
   ``Co-Authored-By`` and ``Claude-Session`` trailers and "Generated with" footers.
-- ``push <remote>`` refuses every push: Watchtower is a local-only repository.
+- ``push <remote>`` refuses every push: vWatch is a local-only repository.
 
 ``history`` checks every commit reachable from HEAD; the complete local check runs it.
 """
@@ -159,7 +159,7 @@ def main(argv: list[str]) -> int:
     if command == "message" and len(rest) == 1:
         return strip_message(Path(rest[0]))
     if command == "push":
-        print("Push blocked: Watchtower is local-only. Run python scripts/push.py --no-push "
+        print("Push blocked: vWatch is local-only. Run python scripts/push.py --no-push "
               "for the complete local check.", file=sys.stderr)
         return 1
     if command == "history":

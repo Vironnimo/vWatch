@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ref", default="main", help="local commit to check (default: main)")
     args = parser.parse_args(argv)
     if not args.no_push:
-        parser.error("Watchtower is local-only. Use --no-push; network publishing is disabled.")
+        parser.error("vWatch is local-only. Use --no-push; network publishing is disabled.")
     root = check.primary_root(ROOT)
     commit = check.git(root, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}").stdout.strip()
     stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:12]

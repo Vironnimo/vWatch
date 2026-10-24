@@ -18,7 +18,7 @@ function renderFoot() {
   if (collapsed.length) parts.push(`Eingeklappt: ${collapsed.map(id => `${esc(MOD_TITLES[id] || id)} <button type="button" data-mod-toggle="${esc(id)}">ausklappen</button>`).join(' · ')}`);
   if (ratedCount && S.prefs.style === 'board') parts.push(`Bewertete Einschätzungen in „Verlauf und Einordnung“ <button type="button" data-toggle-rated>${showRated ? 'wieder ausblenden' : 'einblenden'}</button>`);
   if (archived.length) parts.push(`Archiviert: ${archived.map(p => plink(p.id)).join(', ')}`);
-  parts.push(`Karten schreiben Agents mit <code class="mono">watchtower</code> · Fakten misst die App selbst`);
+  parts.push(`Karten schreiben Agents mit <code class="mono">vwatch</code> · Fakten misst die App selbst`);
   $('#foot').innerHTML = parts.map(x => `<span>${x}</span>`).join('');
 }
 
@@ -46,8 +46,8 @@ function discHtml(target) {
 }
 
 function renderEmpty() {
-  return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll Watchtower im Blick behalten?</h2>
-    <p class="muted">Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein einzelnes Projekt. Watchtower zeigt dir die gefundenen Git-Repos zum Abhaken und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
+  return `<div class="empty"><div class="kicker">Willkommen</div><h2>Welche Projekte soll vWatch im Blick behalten?</h2>
+    <p class="muted">Wähle den Ordner, in dem deine Projekte liegen, oder direkt ein einzelnes Projekt. vWatch zeigt dir die gefundenen Git-Repos zum Abhaken und misst sofort, wie es um sie steht. Die Einschätzungen schreibt danach ein Agent; wie du den einrichtest, steht in den Einstellungen.</p>
     ${discBusyOrListing('main') ? '' : '<div class="actions"><button class="btn primary" type="button" data-pick data-target="main">Ordner wählen …</button></div>'}
     ${discHtml('main')}</div>`;
 }
@@ -63,11 +63,11 @@ function projectEditor(p) {
   if (!edit) return '';
   const disabled = edit.busy ? ' disabled' : '';
   return `<div class="project-editor" aria-busy="${!!edit.busy}">
-    <label for="project-name-${esc(p.id)}">Name in Watchtower</label>
+    <label for="project-name-${esc(p.id)}">Name in vWatch</label>
     <input type="text" id="project-name-${esc(p.id)}" data-project-edit-field="name" data-project="${esc(p.id)}" value="${esc(edit.name)}"${disabled}>
     <label for="project-path-${esc(p.id)}">Projektordner</label>
     <div class="inrow"><input type="text" class="mono" id="project-path-${esc(p.id)}" data-project-edit-field="path" data-project="${esc(p.id)}" value="${esc(edit.path)}"${disabled}><button class="btn" type="button" data-project-folder="${esc(p.id)}"${disabled}>Ordner wählen …</button></div>
-    <p class="d">Karten, Antworten und Verlauf bleiben erhalten. Wenn du den Ordner bereits verschoben oder umbenannt hast, wähle seinen neuen Ort. Watchtower verschiebt keine Dateien.</p>
+    <p class="d">Karten, Antworten und Verlauf bleiben erhalten. Wenn du den Ordner bereits verschoben oder umbenannt hast, wähle seinen neuen Ort. vWatch verschiebt keine Dateien.</p>
     ${edit.error ? `<p class="project-edit-error bad-t" role="alert">${esc(edit.error)}</p>` : ''}
     <div class="actions"><button class="btn primary" type="button" data-project-save="${esc(p.id)}"${disabled}>${edit.busy === 'save' ? 'Speichert …' : 'Speichern'}</button><button class="btn" type="button" data-project-cancel="${esc(p.id)}"${disabled}>Abbrechen</button></div>
   </div>`;
@@ -87,11 +87,11 @@ function panelHtml() {
       ${discBusyOrListing('panel') ? '' : '<div class="actions"><button class="btn" type="button" data-pick data-target="panel">Projekte hinzufügen …</button></div>'}
       ${discHtml('panel')}</section>
     <section class="mod"><div class="mod-head"><div><h2>Start</h2></div></div>
-      ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'Watchtower geht auf, sobald du dich bei Windows anmeldest.')}</section>
-    <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „watchtower“.</div></div></div>
-      ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den Watchtower-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
-      <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. Watchtower hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
-      <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Gib den Befehl dem Agent, der Watchtower betreuen soll. Er installiert den Skill nur für sich. Danach kannst du ihm den täglichen Lauf zuweisen.</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
+      ${toggle('autostart', !!st.autostart, 'Beim Anmelden öffnen', 'vWatch geht auf, sobald du dich bei Windows anmeldest.')}</section>
+    <section class="mod"><div class="mod-head"><div><h2>Agents</h2><div class="sub">Agents lesen deine Repos und schreiben die Einschätzungen mit dem Befehl „vwatch“.</div></div></div>
+      ${toggle('agent_access', !!st.agent_access, 'Für Agents aufrufbar', 'Trägt den vWatch-Ordner in deinen PATH ein. Programme, die schon laufen (etwa vBot), sehen das erst nach einem Neustart.')}
+      <div class="setting-block"><div class="t">Skill für Agents</div><div class="d">Erklärt einem Agent den täglichen Lauf. vWatch hält ihn bei jedem Start aktuell.</div>${copyLine(st.skill_dir || '', 'Pfad')}</div>
+      <div class="setting-block"><div class="t">In vBot installieren</div><div class="d">Gib den Befehl dem Agent, der vWatch betreuen soll. Er installiert den Skill nur für sich. Danach kannst du ihm den täglichen Lauf zuweisen.</div>${copyLine(st.vbot_install || '', 'Befehl')}</div></section>
     <section class="mod"><div class="mod-head"><div><h2>Über</h2></div></div>
       <dl class="kv"><dt>Version</dt><dd class="mono">${esc(st.version || '')}</dd><dt>Programm</dt><dd class="mono">${esc(st.exe || '')}</dd><dt>Daten</dt><dd class="mono">${esc(st.data_dir || '')}</dd></dl></section>
   </aside>`;

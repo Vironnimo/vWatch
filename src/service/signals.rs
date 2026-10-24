@@ -283,7 +283,7 @@ pub(crate) fn risk_streaks(
     out
 }
 
-impl Watchtower {
+impl VWatch {
     /// Item appearances of one card scope (`Some(project)`) or of the brief (`None`).
     fn item_index(&self, project: Option<&str>) -> Result<HashMap<String, Seen>> {
         let scope = project.unwrap_or("@portfolio").to_owned();

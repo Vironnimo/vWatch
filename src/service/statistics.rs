@@ -24,14 +24,14 @@ fn sample_view(sample: &Value) -> Value {
         "worktrees":f["worktrees"],"branches":f["branches"],"release":f["release"],"ci":f["ci"],"space":f["space"]})
 }
 
-impl Watchtower {
+impl VWatch {
     fn historical_project(&self, id: &str) -> Result<Project> {
         self.store.project_including_removed(id)?.ok_or_else(|| {
-            WatchtowerError::new(
+            VWatchError::new(
                 "unknown_project",
                 format!("Project '{id}' is not registered. Nothing was changed."),
             )
-            .hint("Read watchtower projects list or watchtower projects trash for project IDs.")
+            .hint("Read vwatch projects list or vwatch projects trash for project IDs.")
         })
     }
 
@@ -46,7 +46,7 @@ impl Watchtower {
                 .ok()
                 .filter(|d| d.to_string() == input)
                 .ok_or_else(|| {
-                    WatchtowerError::new(
+                    VWatchError::new(
                         "invalid_date",
                         format!("'{input}' is not a YYYY-MM-DD date. Nothing was changed."),
                     )
@@ -58,7 +58,7 @@ impl Watchtower {
             .transpose()?
             .unwrap_or(end - chrono::Duration::days(29));
         if start > end {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_range",
                 "The start date is after the end date. Nothing was changed.",
             )
@@ -143,7 +143,7 @@ impl Watchtower {
                     }
                 }
             }
-            // Git dates can reconstruct activity before the first Watchtower observation.
+            // Git dates can reconstruct activity before the first vWatch observation.
             let activity = period.hotspots.as_ref();
             let mut activity_days = BTreeMap::<String, Value>::new();
             let mut coverage = Vec::new();
@@ -251,7 +251,7 @@ impl Watchtower {
             ]
             .contains(&entity)
             {
-                return Err(WatchtowerError::new(
+                return Err(VWatchError::new(
                     "invalid_entity",
                     "Unknown history entity. Nothing was changed.",
                 )
@@ -299,11 +299,11 @@ impl Watchtower {
             .into_iter()
             .find(|e| e["id"] == id)
             .ok_or_else(|| {
-                WatchtowerError::new(
+                VWatchError::new(
                     "history_not_found",
                     format!("History event {id} does not exist. Nothing was changed."),
                 )
-                .hint("Read watchtower history list for saved event IDs.")
+                .hint("Read vwatch history list for saved event IDs.")
             })?;
         event["changes"] = json!(differences(&event["before"], &event["after"]));
         Ok(json!({"event":event}))
@@ -327,7 +327,7 @@ impl Watchtower {
             (get(from)?, get(to)?)
         };
         let (Some(before), Some(after)) = (before, after) else {
-            return Err(WatchtowerError::new("version_not_found","One of the requested document versions does not exist. Nothing was changed.").hint("Read card history with the project ID, or portfolio history, for saved version numbers."));
+            return Err(VWatchError::new("version_not_found","One of the requested document versions does not exist. Nothing was changed.").hint("Read card history with the project ID, or portfolio history, for saved version numbers."));
         };
         Ok(
             json!({"project":project,"from":from,"to":to,"before_at":before["at"],"after_at":after["at"],"changes":differences(&before["document"],&after["document"])}),
@@ -336,7 +336,7 @@ impl Watchtower {
 
     pub fn proposals(&self, project: Option<&str>, category: Option<&str>) -> Result<Value> {
         if category.is_some_and(|c| !["idea", "recommendation"].contains(&c)) {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "invalid_category",
                 "Unknown proposal category. Nothing was changed.",
             )

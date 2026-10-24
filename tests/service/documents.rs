@@ -11,7 +11,7 @@ fn stored_cards_and_briefs_keep_working_when_content_bases_are_added() {
         .unwrap();
     drop(svc);
     // Simulate the previous database schema with existing data, then reopen it.
-    let db = rusqlite::Connection::open(tmp.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     db.execute_batch(
         "ALTER TABLE cards DROP COLUMN owner_basis; ALTER TABLE portfolio DROP COLUMN basis;",
     )
@@ -433,7 +433,7 @@ fn invalid_cards_are_refused_with_field_paths() {
         .add_card(
             "demo",
             &svc.now(),
-            &watchtower::store::CardBasis {
+            &vwatch::store::CardBasis {
                 fingerprint: &stored.fingerprint,
                 head: None,
                 ci: None,

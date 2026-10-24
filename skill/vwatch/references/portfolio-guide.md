@@ -1,14 +1,14 @@
-# Writing the Watchtower portfolio brief
+# Writing the vWatch portfolio brief
 
 This guide covers the cross-project brief: today's focus, shared findings, the user's parked ideas and the weekly review. Prioritize what changes a decision this morning.
 
 ## Read the full context
 
-Run `watchtower portfolio context` and follow every output page before writing. Keep its context token. The context includes compact cards and facts, tracked tasks, warning acknowledgements, reactions, parked ideas, the previous brief and `owner_last_opened`.
+Run `vwatch portfolio context` and follow every output page before writing. Keep its context token. The context includes compact cards and facts, tracked tasks, warning acknowledgements, reactions, parked ideas, the previous brief and `owner_last_opened`.
 
-A card the previous brief already built on appears as a summary (`detail: summary`): headline, next step, usage and the titles and IDs of its items. For details such as a suggestion's evidence or a question's options, run `watchtower portfolio context --project <project-id>`, repeating `--project` for several; it returns those projects in full with the same token. `retained_proposals` lists titles; `watchtower proposals` shows their full text.
+A card the previous brief already built on appears as a summary (`detail: summary`): headline, next step, usage and the titles and IDs of its items. For details such as a suggestion's evidence or a question's options, run `vwatch portfolio context --project <project-id>`, repeating `--project` for several; it returns those projects in full with the same token. `retained_proposals` lists titles; `vwatch proposals` shows their full text.
 
-- If `owner_last_opened` predates the previous brief or is absent, carry forward still-important focus items: the user has not opened Watchtower since that brief. Opening alone does not prove it was read. Otherwise retain items only while they remain true and among the highest priorities.
+- If `owner_last_opened` predates the previous brief or is absent, carry forward still-important focus items: the user has not opened vWatch since that brief. Opening alone does not prove it was read. Otherwise retain items only while they remain true and among the highest priorities.
 - Start with `changed_since_brief`: changed card fields the brief uses; an empty list means none changed, null means the project had no card then.
 - Fill each `new_fields` path; for `synergies[].category`, review the retained proposals and set their categories explicitly while keeping IDs.
 - Check every number, date and state against `facts.ok` and `facts.collected_at`; a failed or missing measurement is unknown, not zero. An `outdated` card predates changed facts, settled CI or user instructions; trust current evidence where it disagrees. The context includes card versions, finding sources and suggestion completion criteria. Attribute unchecked claims to their card; inspect the repository only when that evidence cannot establish a claim the brief needs. Git remotes do not establish whether other backups exist.
@@ -30,11 +30,11 @@ Evaluate the user's unmet need before choosing a project or implementation. Exis
 
 For `new_apps`, start from the user's days rather than the existing apps. The cards' `usage`, features and recent work show what the user actually does. Useful lenses: a step the user repeats by hand across several apps; a tool the user keeps rebuilding piecemeal inside different projects; a need outside coding that the projects reveal, such as data the user collects or plans they keep; a data flow that ends between two apps; a well-known product category that would serve the user better as a private, local version. An app idea names the situation it serves and its first useful version.
 
-Compare candidates with retained ideas rather than treating occupied slots as unavailable. Record worthwhile ideas in Watchtower, not only in chat. Keep discarded candidates and their reasons for the run reply, not as a checklist in the brief.
+Compare candidates with retained ideas rather than treating occupied slots as unavailable. Record worthwhile ideas in vWatch, not only in chat. Keep discarded candidates and their reasons for the run reply, not as a checklist in the brief.
 
 ## Field meanings
 
-Only `greeting` is required by the schema. Fill other fields when findings warrant them; use empty lists for no findings and null only for `week_review`. `watchtower schema portfolio` gives exact shapes and limits when needed. Project references use the stable IDs from context.
+Only `greeting` is required by the schema. Fill other fields when findings warrant them; use empty lists for no findings and null only for `week_review`. `vwatch schema portfolio` gives exact shapes and limits when needed. Project references use the stable IDs from context.
 
 Every text has at most 600 characters. Limits below are words; a word is a space-separated piece containing a letter or digit. `evidence` has no word limit. Retained items keep their IDs in `focus`, `patterns`, `synergies`, `new_apps` and `park_or_revive`; omit `id` for a new item. To keep an item unchanged, send only `{"id": "<its id>"}`; the saved wording is reused, also for a retained proposal. Never invent an ID: an unknown one is saved as a new item with a warning.
 
@@ -65,7 +65,7 @@ Check retained `why` and `evidence` against current facts and cards. Correct dem
 Write the brief as UTF-8 JSON in your own temporary folder. Replace `<context-token>` with the token from the complete context and `<brief-file>` with the absolute Windows path to the payload:
 
 ```powershell
-watchtower portfolio put --context-token <context-token> --file "<brief-file>"
+vwatch portfolio put --context-token <context-token> --file "<brief-file>"
 ```
 
 Read the receipt's save state, warnings and each item's change (`new`, `kept`, `edited`, `restored`). With `--merge`, a provided list or object replaces that whole field. On a schema error, fix the named fields.

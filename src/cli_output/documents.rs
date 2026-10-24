@@ -49,7 +49,7 @@ pub(super) fn render(command: &str, data: &Value, data_dir: &std::path::Path, ou
                 if let Some(first) = summaries.first() {
                     let details = crate::cli::scoped_command(
                         data_dir,
-                        &format!("watchtower portfolio context --project {first}"),
+                        &format!("vwatch portfolio context --project {first}"),
                     );
                     line(out, 0, &format!("Note: {} projects unchanged since the previous brief are summaries (detail: summary). For the full card details of one, run `{details}`; repeat --project for several.", summaries.len()));
                 }

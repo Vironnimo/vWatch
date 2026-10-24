@@ -32,7 +32,7 @@ fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions(
     let removed = svc.remove_project("demo").unwrap();
     assert_eq!(removed["changed"], true);
     assert_eq!(removed["project"]["removed_at"], svc.now());
-    assert_eq!(removed["undo"], "watchtower projects restore demo");
+    assert_eq!(removed["undo"], "vwatch projects restore demo");
     clock.advance(chrono::Duration::minutes(1));
     let removed_again = svc.remove_project("demo").unwrap();
     assert_eq!(removed_again["already_removed"], true);
@@ -362,8 +362,8 @@ fn due_preserves_failed_measurements_and_never_calls_their_cards_current() {
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     drop(svc);
-    let failed = watchtower::Watchtower::with_parts(
-        watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap(),
+    let failed = vwatch::VWatch::with_parts(
+        vwatch::store::Store::open(&tmp.path().join("vwatch.db")).unwrap(),
         Box::new(|| {
             chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
                 .unwrap()

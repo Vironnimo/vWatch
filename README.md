@@ -1,11 +1,11 @@
-# Watchtower
+# vWatch
 
 A local morning overview of all your software projects: where each one stands, what is at risk, what waits for your decision, and what to do next.
 
-Watchtower holds two kinds of data:
+vWatch holds two kinds of data:
 
 - **Facts** it measures itself from git: activity, configured remotes, uncommitted and unpushed work, additional worktrees and branches, GitHub CI state. A remote is not proof of a backup; missing measurements remain unknown.
-- **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `watchtower due` tells an agent which projects actually changed, so a daily run only re-analyses those.
+- **Interpretation** written by coding agents through the CLI: one card per project and one cross-project brief with focus items, patterns, synergies and ideas. `vwatch due` tells an agent which projects actually changed, so a daily run only re-analyses those.
 
 You rate every suggestion in the window (gut / später / Quatsch), optionally with a short reason, answer or dismiss the questions a card asks you, and tick off focus items. Agents read these reactions with the rated item itself, never bring back a rejected idea, learn your taste across projects and carry your answers into the next card.
 
@@ -21,7 +21,7 @@ A compact report-status control beside fact freshness shows the last check's com
 
 Overview sections collapse in place: their headings and an expand button remain visible. Previously hidden sections return as collapsed headings. "Was passiert ist" shows recent events first; events on the same day prioritize the most recently updated project card. The list-size control at its top switches between the latest ten and all entries.
 
-"Auftrag vorbereiten" opens a preview with the task, reason and completion criterion. "Nur kopieren" copies without assigning; "Beauftragen und kopieren" first saves the assignment, then copies its task number and reporting instructions. You paste that text into your agent. If copying fails after saving, the assignment remains available for another copy. Watchtower retains the task and its source even when a suggestion leaves the current report; you confirm a reported result or reopen the task.
+"Auftrag vorbereiten" opens a preview with the task, reason and completion criterion. "Nur kopieren" copies without assigning; "Beauftragen und kopieren" first saves the assignment, then copies its task number and reporting instructions. You paste that text into your agent. If copying fails after saving, the assignment remains available for another copy. vWatch retains the task and its source even when a suggestion leaves the current report; you confirm a reported result or reopen the task.
 
 Ideas also offer direct "In Umsetzung", "Umgesetzt" and "Archivieren" actions, including in the rating round. Use "In Umsetzung" after manually pasting an idea to an agent; "Umgesetzt" records your confirmation without requiring an agent report. Both use the retained task history. "Wieder offen" reverses the implementation status. "Archivieren" removes a proposal from open suggestions without changing its rating or cancelling running tasks; the "Archiviert" filter offers "Zurückholen". These decisions survive report rewrites and appear in agent contexts. The CLI equivalent is `ideas status <item-id>` to read the current status and revision, then `ideas status <item-id> <status> --revision <revision>` for `in_progress`, `implemented`, `open`, `archived` or `restore`.
 
@@ -33,29 +33,29 @@ Tasks and ideas show the action, reason and completion criterion without agent e
 
 The collection **Ideen & Empfehlungen** opens with product ideas: new capabilities, simpler user workflows, new apps and your own ideas. **Empfehlungen** separately holds next steps, upkeep, repairs and safeguarding. Agents classify project suggestions and cross-project proposals explicitly and evaluate both directions independently, without a quota to invent content. Project cards allow up to four proposals per category so maintenance does not occupy the space for ideas. Older feature suggestions remain ideas; other unclassified proposals initially appear as recommendations until reviewed.
 
-Both categories have their own counts and rating rounds: 1 gut, 2 später, 3 Quatsch, with an optional reason. Filters separate "Neu", "Gut gefunden", "Später", "In Umsetzung", "Umgesetzt", "Archiviert", "Abgelehnt" and "Alle" within the selected category. A positive rating never creates an assignment. Reclassification preserves stable IDs, first appearance, feedback and tasks. Every proposal remains findable after a later report omits it. Your own ideas can be edited in place with guarded undo and preserved history; an edit requires a new agent assessment. Removing an idea moves it to restorable trash. Deferred proposals return to "Neu" when their date arrives. Agents can read either category with `watchtower proposals --category idea` or `--category recommendation`.
+Both categories have their own counts and rating rounds: 1 gut, 2 später, 3 Quatsch, with an optional reason. Filters separate "Neu", "Gut gefunden", "Später", "In Umsetzung", "Umgesetzt", "Archiviert", "Abgelehnt" and "Alle" within the selected category. A positive rating never creates an assignment. Reclassification preserves stable IDs, first appearance, feedback and tasks. Every proposal remains findable after a later report omits it. Your own ideas can be edited in place with guarded undo and preserved history; an edit requires a new agent assessment. Removing an idea moves it to restorable trash. Deferred proposals return to "Neu" when their date arrives. Agents can read either category with `vwatch proposals --category idea` or `--category recommendation`.
 
 Ideas sort newest first by the first saved appearance of their stable ID, including on project pages. Rewriting or reintroducing an older idea does not make it new. Each project review includes reflection on useful improvements, followed by a synthesis across all projects, even when reports are current. Existing suggestions do not block new ones. Agents save worthwhile proposals, respect rejected or deferred ideas, and report what was newly added or why a considered direction did not qualify.
 
 ## One folder, two entry points
 
 ```
-%LOCALAPPDATA%\Programs\Watchtower\
-  Watchtower.exe        the console CLI for people and agents
-  Watchtower-UI.exe     the window for the owner
+%LOCALAPPDATA%\Programs\vWatch\
+  vWatch.exe        the console CLI for people and agents
+  vWatch-UI.exe     the window for the owner
   data\                 database and window cache
-  skill\watchtower\     the Skill for agents, written by Watchtower on start
+  skill\vwatch\     the Skill for agents, written by vWatch on start
 ```
 
-- Double-click `Watchtower-UI.exe` (or the Start menu entry "Watchtower") opens the window. On first start you pick your projects folder and tick the repositories to watch.
-- The gear opens the settings: add or remove projects, edit a project's name or folder with "Bearbeiten", "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `watchtower`), and the command that installs the Skill in vBot. Editing preserves the project ID, cards, ratings and history. Select the existing folder after moving or renaming it elsewhere.
-- `watchtower <command>` shows readable text for people and agents. Add `--json` when a program needs structured output, for example `watchtower projects list --json`. Document input uses `--file <path>`, `--file -` for stdin, or `--input-json '<object>'`.
+- Double-click `vWatch-UI.exe` (or the Start menu entry "vWatch") opens the window. On first start you pick your projects folder and tick the repositories to watch.
+- The gear opens the settings: add or remove projects, edit a project's name or folder with "Bearbeiten", "Beim Anmelden öffnen" (autostart), "Für Agents aufrufbar" (puts the folder on your user PATH so agents can run `vwatch`), and the command that installs the Skill in vBot. Editing preserves the project ID, cards, ratings and history. Select the existing folder after moving or renaming it elsewhere.
+- `vwatch <command>` shows readable text for people and agents. Add `--json` when a program needs structured output, for example `vwatch projects list --json`. Document input uses `--file <path>`, `--file -` for stdin, or `--input-json '<object>'`.
 - The CLI is a native console program independent of the window. A long operation returns within its 45-second wait budget with either its result or an exact `jobs wait` continuation. A command that is still running says so; follow its continuation instead of starting it again. Output is complete when the console process exits; there is no late GUI output to poll for.
-- Long text results have an exact `Next:` command for the remaining pages. Errors name what failed, any partial effect and the recovery. `Undo:` identifies a supported reversal. `watchtower activity` helps recover after a lost response.
-- Task reports also accept `watchtower tasks report <id> --file <path>` for multiline results and evidence. The file contains `status`, `result` and `evidence`; reporting `done` requests your review rather than confirming completion.
-- `WATCHTOWER_HOME` or `--data-dir <folder>` selects another data folder. Continuation commands retain the selected instance.
+- Long text results have an exact `Next:` command for the remaining pages. Errors name what failed, any partial effect and the recovery. `Undo:` identifies a supported reversal. `vwatch activity` helps recover after a lost response.
+- Task reports also accept `vwatch tasks report <id> --file <path>` for multiline results and evidence. The file contains `status`, `result` and `evidence`; reporting `done` requests your review rather than confirming completion.
+- `VWATCH_HOME` or `--data-dir <folder>` selects another data folder. Continuation commands retain the selected instance.
 
-Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin Watchtower`.
+Both entry points call the same service and share one SQLite database. The desktop adapter and its Tauri dependencies are optional; the CLI can be built with `cargo build --no-default-features --bin vWatch`.
 
 Requires git on the PATH (`gh` optional, for CI state) and the WebView2 runtime that ships with Windows 11.
 
@@ -65,27 +65,27 @@ Requires git on the PATH (`gh` optional, for CI state) and the WebView2 runtime 
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-Builds both release executables (needs Rust), copies them to `%LOCALAPPDATA%\Programs\Watchtower` and creates the Start menu entry for the window. Reinstalling keeps `data\` and the settings. An existing Watchtower autostart entry is redirected to the window executable without changing whether autostart is enabled. Installation refuses to replace a CLI executable while an agent is using it.
+Builds both release executables (needs Rust), copies them to `%LOCALAPPDATA%\Programs\vWatch` and creates the Start menu entry for the window. Reinstalling keeps `data\` and the settings. An existing vWatch autostart entry is redirected to the window executable without changing whether autostart is enabled. Installation refuses to replace a CLI executable while an agent is using it.
 
 ## Agents
 
-The [operating Skill](skill/watchtower/SKILL.md), embedded in the executables, teaches the tracked daily run: `runs start` → `context` and repository study → `card put` → `portfolio context` → `portfolio put` → `runs finish`. Agents read ordinary text output and follow continuations. Card and portfolio writes require the `--context-token` from their complete context. A conflicting write is rejected until the agent rereads and reconciles the changed information.
+The [operating Skill](skill/vwatch/SKILL.md), embedded in the executables, teaches the tracked daily run: `runs start` → `context` and repository study → `card put` → `portfolio context` → `portfolio put` → `runs finish`. Agents read ordinary text output and follow continuations. Card and portfolio writes require the `--context-token` from their complete context. A conflicting write is rejected until the agent rereads and reconciles the changed information.
 
-Agents can also manage watched projects, ideas, ratings, replies, tasks, warnings and display preferences through the CLI when you request those changes. A daily run only observes repositories and updates Watchtower's interpretation; it does not implement suggestions or invent your decisions. Task reports remain subject to your confirmation. Autostart and PATH remain your choices in the window's settings.
+Agents can also manage watched projects, ideas, ratings, replies, tasks, warnings and display preferences through the CLI when you request those changes. A daily run only observes repositories and updates vWatch's interpretation; it does not implement suggestions or invent your decisions. Task reports remain subject to your confirmation. Autostart and PATH remain your choices in the window's settings.
 
-In vBot, give the install command from Watchtower's settings to the Agent that should operate Watchtower. It installs the Skill privately for that Agent:
+In vBot, give the install command from vWatch's settings to the Agent that should operate vWatch. It installs the Skill privately for that Agent:
 
 ```powershell
-vbot skill install "$env:LOCALAPPDATA/Programs/Watchtower/skill/watchtower" --scope own
+vbot skill install "$env:LOCALAPPDATA/Programs/vWatch/skill/vwatch" --scope own
 ```
 
 `own` requires the calling vBot Agent's identity. From an external terminal, select that Agent explicitly with `--scope agent:<id>`. When updating an existing installation, keep its existing scope; install globally only when the owner explicitly requests global availability.
 
-Then schedule a daily task such as "Führe den täglichen Watchtower-Lauf durch." for that Agent with Bash access.
+Then schedule a daily task such as "Führe den täglichen vWatch-Lauf durch." for that Agent with Bash access.
 
-`watchtower schema card` and `watchtower schema portfolio` describe the document fields as readable text; add `--json` for their complete JSON schemas. `watchtower --help` lists commands, and the [CLI reference](skill/watchtower/references/cli.md) explains data, recovery and less common operations. The [agent interface specification](docs/agent-interface.md) records capability coverage, guarantees and validation scope.
+`vwatch schema card` and `vwatch schema portfolio` describe the document fields as readable text; add `--json` for their complete JSON schemas. `vwatch --help` lists commands, and the [CLI reference](skill/vwatch/references/cli.md) explains data, recovery and less common operations. The [agent interface specification](docs/agent-interface.md) records capability coverage, guarantees and validation scope.
 
-To rename a watched project or reconnect its moved folder, use its stable ID with `watchtower projects update <id> --name "New name" --path "C:/projects/new-folder"`. Either option can be used alone. If you do not know the ID, find it with `watchtower projects list`. Cards, ratings and history remain attached. Removed projects and ideas stay in their `trash` lists and can be restored with the same IDs; removal is not a rename operation.
+To rename a watched project or reconnect its moved folder, use its stable ID with `vwatch projects update <id> --name "New name" --path "C:/projects/new-folder"`. Either option can be used alone. If you do not know the ID, find it with `vwatch projects list`. Cards, ratings and history remain attached. Removed projects and ideas stay in their `trash` lists and can be restored with the same IDs; removal is not a rename operation.
 
 ## Development
 
@@ -95,10 +95,10 @@ cargo clippy --all-targets
 node --test tests/ui*.cjs
 cargo build --release
 cargo test --no-default-features
-cargo run --bin Watchtower -- due --no-refresh
+cargo run --bin vWatch -- due --no-refresh
 ```
 
-Run the window from source with `cargo run`; set `WATCHTOWER_HOME` to a task-specific folder under `.tmp/` to keep test data out of the installed app.
+Run the window from source with `cargo run`; set `VWATCH_HOME` to a task-specific folder under `.tmp/` to keep test data out of the installed app.
 
 All development scratch files belong in the repository-root `.tmp/`, whose contents are ignored by Git. Cargo configures `TEMP`, `TMP` and `TMPDIR` there for builds, tests and `cargo run`. Run Cargo from this checkout so it loads `.cargo/config.toml`. For other tools, set the same variables in the current PowerShell process from the repository root:
 
@@ -108,9 +108,9 @@ $env:TEMP = $repoTemp
 $env:TMP = $repoTemp
 $env:TMPDIR = $repoTemp
 $env:GIT_CEILING_DIRECTORIES = $repoTemp
-$env:WATCHTOWER_HOME = Join-Path $repoTemp 'dev-instance'
+$env:VWATCH_HOME = Join-Path $repoTemp 'dev-instance'
 ```
 
-Use task-specific subfolders for temporary scripts, logs, screenshots, payloads and database copies. `GIT_CEILING_DIRECTORIES` (also configured by Cargo) prevents temporary folders without their own repository from discovering Watchtower's parent Git repository. Keep build output in the existing `target/` folder.
+Use task-specific subfolders for temporary scripts, logs, screenshots, payloads and database copies. `GIT_CEILING_DIRECTORIES` (also configured by Cargo) prevents temporary folders without their own repository from discovering vWatch's parent Git repository. Keep build output in the existing `target/` folder.
 
 The UI behavior tests use Node's built-in test runner and need no browser packages.

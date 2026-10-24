@@ -34,7 +34,7 @@ The `measurement_reuse_*` tests in `tests/facts.rs` compare incremental results 
 
 ## Space
 
-`space` looks for known rebuildable directories at repository root and one level below; directory traversal does not follow symlinks/junctions. The service retains its dated result between daily measurements. This is an observation API only; any decision to clean or keep a directory happens outside Watchtower.
+`space` looks for known rebuildable directories at repository root and one level below; directory traversal does not follow symlinks/junctions. The service retains its dated result between daily measurements. This is an observation API only; any decision to clean or keep a directory happens outside vWatch.
 
 Discovery, entry/type/metadata and nested enumeration errors propagate into an incomplete result. A directory's bytes and the overall total are exact only when their respective `ok` flag is true; failures produce null, not zero. Complete sibling directories retain their sizes. Only complete same-day results are reused; a partial or uncertified result is retried on refresh. `measurement_quality` adapts older persisted facts and historical read models without completeness evidence to unknown totals; stored history is not rewritten. Exact public payload meanings are in `docs/agent-interface.md` -> Output and error contracts.
 

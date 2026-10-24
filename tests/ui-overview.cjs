@@ -198,7 +198,7 @@ test('Projects still provide assigned and completed task history after the last 
   assert.match(html, /data-search-anchor="task:22"/);
   assert.match(html, /abgeschlossene Aufträge/);
   assert.match(html, /data-task-status="assigned"/);
-  assert.doesNotMatch(html, /Watchtower konnte seine Daten nicht laden/);
+  assert.doesNotMatch(html, /vWatch konnte seine Daten nicht laden/);
 });
 
 test('opened attention, digest, history and fact disclosures survive rendering and state refreshes', async () => {

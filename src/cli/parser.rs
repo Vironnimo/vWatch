@@ -9,8 +9,8 @@ use crate::service::DEFAULT_MAX_AGE_DAYS;
 
 #[derive(Parser)]
 #[command(
-    name = "watchtower",
-    bin_name = "watchtower",
+    name = "vwatch",
+    bin_name = "vwatch",
     version,
     about = "Morning overview of all your agent-built projects.",
     after_help = "Commands show readable text. Use --json when a program parses the output. Exit codes: 0 success, 1 failed or incomplete, 2 invalid call."
@@ -22,7 +22,7 @@ pub(super) struct Cli {
     /// Output format: text or json. Omit for readable text.
     #[arg(long = "format", aliases = ["output"], short = 'o', global = true, value_enum, ignore_case = true)]
     pub(super) format: Option<OutputFormat>,
-    /// Data folder for this call. Omit to use WATCHTOWER_HOME or the installed data folder.
+    /// Data folder for this call. Omit to use VWATCH_HOME or the installed data folder.
     #[arg(long, global = true)]
     pub(super) data_dir: Option<PathBuf>,
     /// Portable instance locator printed by continuation commands.

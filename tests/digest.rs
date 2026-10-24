@@ -4,11 +4,11 @@ use chrono::Duration;
 use common::{card_with, demo_repo, service};
 use serde_json::{json, Value};
 
-fn changes(svc: &watchtower::Watchtower) -> Value {
+fn changes(svc: &vwatch::VWatch) -> Value {
     svc.state(false).unwrap()["changes"].clone()
 }
 
-fn acknowledge(svc: &watchtower::Watchtower) {
+fn acknowledge(svc: &vwatch::VWatch) {
     let current = changes(svc);
     svc.mark_changes_read(current["token"].as_str().unwrap())
         .unwrap();

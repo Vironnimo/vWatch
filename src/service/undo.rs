@@ -26,31 +26,31 @@ pub(super) fn with_receipt(mut result: Value, receipt: crate::store::OwnerReceip
         ("current".into(), receipt.current),
     ]));
     if let Some(token) = receipt.token {
-        fields.insert("undo".into(), json!(format!("watchtower undo {token}")));
+        fields.insert("undo".into(), json!(format!("vwatch undo {token}")));
         fields.insert("undo_token".into(), json!(token));
     }
     result
 }
 
-impl Watchtower {
+impl VWatch {
     /// Restore exactly the fields changed by one recorded owner edit.
     pub fn undo(&self, token: &str) -> Result<Value> {
         match self.store.undo_owner_change(token,&self.now())? {
             OwnerUndo::Restored(mut result) => {
                 if result["changed"] == true && result["target"]["fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field == "path")) {
                     result["notes"] = json!(["The folder registration was restored. Facts from the other folder were discarded; measure the restored folder before using its facts."]);
-                    result["next"] = json!(format!("watchtower facts refresh {}",result["target"]["project"].as_str().unwrap_or("")));
+                    result["next"] = json!(format!("vwatch facts refresh {}",result["target"]["project"].as_str().unwrap_or("")));
                 }
                 Ok(result)
             },
-            OwnerUndo::Missing => Err(WatchtowerError::new("unknown_undo",format!("No change has undo token '{token}'. Nothing was changed."))
-                .hint("Use the exact undo command returned by the change in this Watchtower instance.")),
+            OwnerUndo::Missing => Err(VWatchError::new("unknown_undo",format!("No change has undo token '{token}'. Nothing was changed."))
+                .hint("Use the exact undo command returned by the change in this vWatch instance.")),
             OwnerUndo::Conflict {target,current} => {
-                Err(WatchtowerError::new("undo_conflict",format!("The affected values changed after this operation ({}) or its undo. Nothing was changed. Current values: {}.",describe(&target),describe(&current)))
+                Err(VWatchError::new("undo_conflict",format!("The affected values changed after this operation ({}) or its undo. Nothing was changed. Current values: {}.",describe(&target),describe(&current)))
                     .hint("Keep these newer values, or use the undo command from their most recent change. This older undo cannot overwrite them."))
             }
-            OwnerUndo::PathTaken(id) => Err(WatchtowerError::new("undo_conflict",format!("The previous folder belongs to project '{id}'. Nothing was changed."))
-                .hint(format!("Keep the current folder, or resolve that project's registration before repeating this undo: watchtower projects show {id}"))),
+            OwnerUndo::PathTaken(id) => Err(VWatchError::new("undo_conflict",format!("The previous folder belongs to project '{id}'. Nothing was changed."))
+                .hint(format!("Keep the current folder, or resolve that project's registration before repeating this undo: vwatch projects show {id}"))),
         }
     }
 

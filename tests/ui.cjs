@@ -445,12 +445,12 @@ test('removing projects and ideas retains their data and offers targeted undo in
   assert.match(confirmation, /Karten, Antworten und Verlauf bleiben gespeichert/);
   assert.match(confirmation, /data-remove="sample"/);
   assert.match(confirmation, /data-remove-cancel/);
-  assert.doesNotMatch(confirmation, /werden gelöscht|verloren|watchtower projects restore/);
+  assert.doesNotMatch(confirmation, /werden gelöscht|verloren|vwatch projects restore/);
   await a.ui.removeProject('sample');
   assert.equal(a.state.projects.length, 0);
   assert.match(a.node('#toast').innerHTML, /Karten und Verlauf bleiben gespeichert/);
   assert.match(a.node('#toast').innerHTML, /Rückgängig/);
-  assert.doesNotMatch(a.node('#toast').innerHTML, /watchtower|CLI/);
+  assert.doesNotMatch(a.node('#toast').innerHTML, /vwatch|CLI/);
   a.node('#undo').onclick();
   await new Promise(setImmediate);
   assert.equal(a.calls.find(c => c.command === 'restore_project').args.id, 'sample');
@@ -460,7 +460,7 @@ test('removing projects and ideas retains their data and offers targeted undo in
   assert.equal(a.state.ideas.length, 0);
   assert.match(a.node('#toast').innerHTML, /bleibt gespeichert/);
   assert.match(a.node('#toast').innerHTML, /Rückgängig/);
-  assert.doesNotMatch(a.node('#toast').innerHTML, /watchtower|CLI/);
+  assert.doesNotMatch(a.node('#toast').innerHTML, /vwatch|CLI/);
   a.node('#undo').onclick();
   await new Promise(setImmediate);
   assert.equal(a.calls.find(c => c.command === 'restore_idea').args.id, 17);
@@ -638,7 +638,7 @@ test('copying never assigns; assignment is explicit and copied tracked tasks req
   await a.ui.assignTask('s1');
   assert.equal(a.calls.filter(c => c.command === 'create_task').length, 1);
   await a.ui.copyTask('s1');
-  assert.match(a.copied.at(-1), /watchtower tasks report 12 --status done/);
+  assert.match(a.copied.at(-1), /vwatch tasks report 12 --status done/);
 });
 
 test('tracked results await owner confirmation and survive replacement of the source card', async () => {
@@ -669,7 +669,7 @@ test('tracked task copies retain the original project after it leaves the watche
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }] });
   assert.match(prompt, /Original project \(C:\/original\)/);
   assert.doesNotMatch(prompt, /neues Projekt/);
-  assert.match(prompt, /watchtower tasks report 3/);
+  assert.match(prompt, /vwatch tasks report 3/);
   a.state.projects = [];
   a.state.tasks = [{ id: 3, revision: 2, projects: ['removed'], status: 'review', title: 'Fix the build', result: 'Build fixed',
     project_snapshots: [{ id: 'removed', name: 'Original project', path: 'C:/original' }], created_at: '2026-10-07T12:00:00Z' }];

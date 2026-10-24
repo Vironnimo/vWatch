@@ -4,9 +4,9 @@ use serde_json::{json, Value};
 
 fn run(home: &std::path::Path, args: &[&str]) -> (i32, Value) {
     let mut out = Vec::new();
-    let mut argv = vec!["watchtower", "--json"];
+    let mut argv = vec!["vwatch", "--json"];
     argv.extend_from_slice(args);
-    let code = watchtower::cli::run(argv, home, &mut std::io::empty(), &mut out);
+    let code = vwatch::cli::run(argv, home, &mut std::io::empty(), &mut out);
     (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
 }
 
@@ -20,9 +20,8 @@ fn card_token(home: &std::path::Path) -> String {
 fn streams(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let argv = std::iter::once("watchtower").chain(args.iter().copied());
-    let code =
-        watchtower::cli::run_with_streams(argv, home, &mut std::io::empty(), &mut out, &mut err);
+    let argv = std::iter::once("vwatch").chain(args.iter().copied());
+    let code = vwatch::cli::run_with_streams(argv, home, &mut std::io::empty(), &mut out, &mut err);
     (
         code,
         String::from_utf8(out).unwrap(),
@@ -50,7 +49,7 @@ fn ordinary_commands_present_readable_results_without_json() {
     std::fs::create_dir(&home).unwrap();
     let repo = common::demo_repo(tmp.path());
 
-    assert!(human_success(&home, &["status"]).contains("Watchtower"));
+    assert!(human_success(&home, &["status"]).contains("vWatch"));
     human_success(&home, &["projects", "list"]);
     let added = human_success(
         &home,
@@ -300,16 +299,8 @@ fn task_reports_accept_document_files_and_reject_mixed_or_invalid_input() {
 
     let blocked = br#"{"status":"blocked","result":"Awaiting local test data"}"#;
     let mut out = Vec::new();
-    let code = watchtower::cli::run(
-        [
-            "watchtower",
-            "--json",
-            "tasks",
-            "report",
-            &id,
-            "--file",
-            "-",
-        ],
+    let code = vwatch::cli::run(
+        ["vwatch", "--json", "tasks", "report", &id, "--file", "-"],
         home.path(),
         &mut blocked.as_slice(),
         &mut out,

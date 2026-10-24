@@ -93,8 +93,8 @@ async function load(visit) {
       // A failed read is not an acknowledged database version. Retain the
       // last usable page and retry, including when the first read failed.
       loadRetryAt = Date.now() + 10000;
-      if (S) toast('Aktualisierung fehlgeschlagen. Der bisherige Stand bleibt sichtbar; Watchtower versucht es erneut. ' + errText(e));
-      else $('#view').innerHTML = `<p class="note" style="margin-top:30px">Watchtower konnte seine Daten nicht laden: ${esc(errText(e))}. Ein neuer Versuch folgt automatisch.</p>`;
+      if (S) toast('Aktualisierung fehlgeschlagen. Der bisherige Stand bleibt sichtbar; vWatch versucht es erneut. ' + errText(e));
+      else $('#view').innerHTML = `<p class="note" style="margin-top:30px">vWatch konnte seine Daten nicht laden: ${esc(errText(e))}. Ein neuer Versuch folgt automatisch.</p>`;
     }
   } finally { loading--; }
   if (!shown) { shown = true; call('ready').catch(() => {}); }

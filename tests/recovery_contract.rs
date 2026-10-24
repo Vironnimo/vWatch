@@ -1,12 +1,12 @@
 use serde_json::Value;
 use std::path::Path;
-use watchtower::{cli, cli_usage, store::Store};
+use vwatch::{cli, cli_usage, store::Store};
 
 fn call(home: &Path, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = cli::run_with_streams(
-        std::iter::once("watchtower").chain(args.iter().copied()),
+        std::iter::once("vwatch").chain(args.iter().copied()),
         home,
         &mut std::io::empty(),
         &mut out,
@@ -20,7 +20,7 @@ fn call(home: &Path, args: &[&str]) -> (i32, String) {
 fn errors_and_nested_receipts_preserve_the_selected_database() {
     let home = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();
-    let store = Store::open(&home.path().join("watchtower.db")).unwrap();
+    let store = Store::open(&home.path().join("vwatch.db")).unwrap();
     store
         .add_project("demo", "Demo", "C:/example", "2026-10-07T08:00:00Z")
         .unwrap();
@@ -28,16 +28,16 @@ fn errors_and_nested_receipts_preserve_the_selected_database() {
     let (_, text) = call(home.path(), &["--json", "projects", "show", "demo"]);
     let body: Value = serde_json::from_str(&text).unwrap();
     let hint = body["error"]["hint"].as_str().unwrap();
-    assert!(hint.contains("watchtower --instance p_"), "{hint}");
-    assert!(!hint.contains("watchtower projects restore"));
+    assert!(hint.contains("vwatch --instance p_"), "{hint}");
+    assert!(!hint.contains("vwatch projects restore"));
     let (_, text) = call(home.path(), &["--json", "ideas", "add", "Keep history"]);
     let body: Value = serde_json::from_str(&text).unwrap();
     let command = body["idea"]["undo"].as_str().unwrap();
-    assert!(command.starts_with("watchtower --instance p_"), "{command}");
+    assert!(command.starts_with("vwatch --instance p_"), "{command}");
     let args: Vec<_> = command.split_whitespace().skip(1).collect();
     let (code, text) = call(other.path(), &args);
     assert_eq!(code, 0, "{text}");
-    assert!(!other.path().join("watchtower.db").exists());
+    assert!(!other.path().join("vwatch.db").exists());
     let (_, text) = call(home.path(), &["--json", "ideas", "list"]);
     assert!(serde_json::from_str::<Value>(&text).unwrap()["ideas"]
         .as_array()
@@ -55,13 +55,13 @@ fn long_errors_page_without_repeating_the_failed_call_and_json_is_complete() {
     assert!(text.chars().count() <= 10_000);
     let next = text
         .lines()
-        .find_map(|line| line.strip_prefix("Next: watchtower "))
+        .find_map(|line| line.strip_prefix("Next: vwatch "))
         .unwrap();
     let args: Vec<_> = next.split_whitespace().collect();
     let (code, text) = call(home.path(), &args);
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("continuing does not repeat"));
-    assert!(!home.path().join("watchtower.db").exists());
+    assert!(!home.path().join("vwatch.db").exists());
     let (code, text) = call(home.path(), &["--json", "projects", "list", &unknown]);
     assert_eq!(code, 2);
     let body: Value = serde_json::from_str(&text).unwrap();
@@ -93,8 +93,8 @@ fn invalid_recovery_explains_document_flags_and_names_the_requested_instance() {
         text.contains("--json only selects the output format"),
         "{text}"
     );
-    assert!(!home.path().join("watchtower.db").exists());
-    assert!(!fallback.path().join("watchtower.db").exists());
+    assert!(!home.path().join("vwatch.db").exists());
+    assert!(!fallback.path().join("vwatch.db").exists());
 
     let locator = format!(
         "p_{}",
@@ -118,8 +118,8 @@ fn invalid_recovery_explains_document_flags_and_names_the_requested_instance() {
         assert_eq!(code, 2, "{text}");
         let body: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(body["instance"]["data_dir"], home.path().to_str().unwrap());
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
-            .env("WATCHTOWER_HOME", fallback.path())
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_vWatch"))
+            .env("VWATCH_HOME", fallback.path())
             .args(&args)
             .output()
             .unwrap();
@@ -130,7 +130,7 @@ fn invalid_recovery_explains_document_flags_and_names_the_requested_instance() {
     }
     assert!(cli_usage::path(home.path()).exists());
     assert!(!cli_usage::path(fallback.path()).exists());
-    assert!(!home.path().join("watchtower.db").exists());
+    assert!(!home.path().join("vwatch.db").exists());
 
     // Instance-looking payload text stays data after the option terminator.
     let (code, text) = call(

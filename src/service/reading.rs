@@ -340,7 +340,7 @@ fn digest_items(
     items
 }
 
-impl Watchtower {
+impl VWatch {
     /// Record an owner visit; after SINCE_DAYS show commits and authored changes since it.
     pub fn open_project(&self, id: &str) -> Result<Value> {
         let p = self.project(id)?;
@@ -499,7 +499,7 @@ impl Watchtower {
                 .store
                 .acknowledge_changes(token, &state.current, &self.now())?
         {
-            return Err(WatchtowerError::new(
+            return Err(VWatchError::new(
                 "stale_changes",
                 "New changes arrived while you were reading.",
             )

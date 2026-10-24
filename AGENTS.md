@@ -30,7 +30,7 @@ For runtime Agent-facing text, explain the meaningful changes in the conversatio
 
 For larger changes, keep the conversation focused on the passages that materially affect Agent behavior. Make the complete changes available through the source-file diff. Do not create additional files solely to present the review. Show complete wording when the user requests it.
 
-Runtime Agent-facing text includes the operating Skill, CLI help/results/recovery hints, schema descriptions and copied task instructions supplied by Watchtower to an Agent or Model. Repository governance and development documentation are outside this review rule.
+Runtime Agent-facing text includes the operating Skill, CLI help/results/recovery hints, schema descriptions and copied task instructions supplied by vWatch to an Agent or Model. Repository governance and development documentation are outside this review rule.
 
 ## Agent-facing work
 
@@ -65,9 +65,9 @@ Before writing or changing a test, read `.vorch/domain-maps/development/testing.
 
 Do not run existing suites merely to analyze code. Read source and contract tests with a question in mind; use a targeted probe for an uncertain behavior claim. A requested survey or test audit runs the suite to measure it.
 
-## Watchtower development boundaries
+## vWatch development boundaries
 
-- Observe the owner's repositories; do not add Git-writing commands, cleanup, backup or repository-editing features to Watchtower. Development commits in this repository are separate from application behavior.
+- Observe the owner's repositories; do not add Git-writing commands, cleanup, backup or repository-editing features to vWatch. Development commits in this repository are separate from application behavior.
 - Keep the owner's data and OS choices intact. Use a task-specific scratch instance for development; do not leave test ratings, replies or ticks in the installed app. Never toggle the owner's autostart or PATH setting.
 - Verify changes to the window in the running window. VM tests do not establish layout or WebView behavior; follow the live-testing workflow.
 - UI text and agent-written report content are German, addressing the owner as `du`. Code, comments, repository documentation, the operating Skill and commit messages are English.

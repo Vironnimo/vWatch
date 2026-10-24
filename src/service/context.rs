@@ -6,7 +6,7 @@ const LONG_STANDING_DAYS: i64 = 7;
 
 const COMMITS_SINCE_LIMIT: usize = 150;
 
-/// A retained proposal as a one-line reminder; `watchtower proposals` has its full text,
+/// A retained proposal as a one-line reminder; `vwatch proposals` has its full text,
 /// and sending only its id in the document it belongs to restores it.
 fn proposal_summary(proposal: Value) -> Value {
     let p = without_effort(proposal);
@@ -63,7 +63,7 @@ fn commits_in_review_week(stored: &StoredFacts, from: NaiveDate) -> Option<u64> 
         .as_u64()
 }
 
-impl Watchtower {
+impl VWatch {
     pub fn context(&self, id: &str) -> Result<Value> {
         self.project(id)?;
         self.stored_facts(id)?;
@@ -87,12 +87,12 @@ impl Watchtower {
         Err(Self::version_conflict(project))
     }
 
-    pub(super) fn version_conflict(project: Option<&str>) -> WatchtowerError {
+    pub(super) fn version_conflict(project: Option<&str>) -> VWatchError {
         let command = project.map_or_else(
-            || "watchtower portfolio context".to_owned(),
-            |id| format!("watchtower context {id}"),
+            || "vwatch portfolio context".to_owned(),
+            |id| format!("vwatch context {id}"),
         );
-        WatchtowerError::new("version_conflict", "The context changed. Nothing was saved.")
+        VWatchError::new("version_conflict", "The context changed. Nothing was saved.")
             .hint(format!("Read `{command}` again, reconcile your document with the new facts, owner instructions and previous document, then retry with its context_token. Do not merely replace the token."))
     }
 
@@ -108,10 +108,10 @@ impl Watchtower {
             }
             None if !dry_run => {
                 let command = project.map_or_else(
-                    || "watchtower portfolio context".to_owned(),
-                    |id| format!("watchtower context {id}"),
+                    || "vwatch portfolio context".to_owned(),
+                    |id| format!("vwatch context {id}"),
                 );
-                Err(WatchtowerError::new("context_required", "Saving requires the context_token from the context you used.")
+                Err(VWatchError::new("context_required", "Saving requires the context_token from the context you used.")
                     .hint(format!("Read `{command}`, prepare your document from that context, and pass its context_token value with --context-token. Schema-only --dry-run may omit it.")))
             }
             _ => Ok(()),
@@ -132,7 +132,7 @@ impl Watchtower {
                     Kind::Card => ("invalid_card", "card"),
                     Kind::Portfolio => ("invalid_portfolio", "brief"),
                 };
-                Err(WatchtowerError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
+                Err(VWatchError::new(code, format!("The {name} was not saved: {}", conflicts.join("; ")))
                     .hint("Keep an existing id only for the same item in the same project card or brief. Omit id for a new item."))
             }
         }

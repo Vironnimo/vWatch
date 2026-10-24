@@ -118,7 +118,7 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     assert_eq!(started["latest"]["portfolio"]["status"], "current");
     // Current documents still lead the agent to cross-project synthesis;
     // freshness is not evidence that it has considered useful possibilities.
-    assert_eq!(started["next"], "watchtower portfolio context");
+    assert_eq!(started["next"], "vwatch portfolio context");
     assert_eq!(
         started["latest"]["portfolio"]["initial_version"],
         saved_brief["version"]
@@ -164,7 +164,7 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
     let resumed = svc.run_start(false).unwrap();
     assert_eq!(resumed["run_id"], id);
     assert_eq!(resumed["due"]["projects"], json!([]));
-    assert_eq!(resumed["next"], "watchtower context demo");
+    assert_eq!(resumed["next"], "vwatch context demo");
     let failed = svc.run_finish(id).unwrap();
     assert_eq!(failed["state"], "failed");
     assert_eq!(project(&failed, "demo")["status"], "failed");
@@ -210,7 +210,7 @@ fn unreadable_facts_cannot_be_covered_up_by_a_new_card() {
         .save_facts(
             "demo",
             &svc.now(),
-            &watchtower::facts::fingerprint(&missing),
+            &vwatch::facts::fingerprint(&missing),
             &missing,
         )
         .unwrap();
@@ -329,18 +329,18 @@ fn repairing_an_older_run_reports_its_own_outcome() {
 
 fn service_with_completion_race(
     dir: &std::path::Path,
-    stage: watchtower::service::RunCompletionStage,
-    change: impl Fn(&watchtower::store::Store) + Send + Sync + 'static,
+    stage: vwatch::service::RunCompletionStage,
+    change: impl Fn(&vwatch::store::Store) + Send + Sync + 'static,
 ) -> (
-    watchtower::Watchtower,
+    vwatch::VWatch,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
-    let db = dir.join("watchtower.db");
-    let store = watchtower::store::Store::open(&db).unwrap();
-    let concurrent = watchtower::store::Store::open(&db).unwrap();
+    let db = dir.join("vwatch.db");
+    let store = vwatch::store::Store::open(&db).unwrap();
+    let concurrent = vwatch::store::Store::open(&db).unwrap();
     let armed = Arc::new(AtomicBool::new(false));
     let calls = Arc::new(AtomicUsize::new(0));
     let clock_armed = armed.clone();
@@ -348,11 +348,11 @@ fn service_with_completion_race(
     let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    let svc = watchtower::Watchtower::with_parts(
+    let svc = vwatch::VWatch::with_parts(
         store,
         Box::new(move || now),
         Box::new(|path, today, _ci, previous| {
-            watchtower::facts::collect_reusing(path, today, false, previous)
+            vwatch::facts::collect_reusing(path, today, false, previous)
         }),
     )
     .with_run_completion_observer(move |reached| {
@@ -370,17 +370,17 @@ fn run_completion_rechecks_a_project_added_after_the_due_snapshot() {
     let tmp = tempfile::tempdir().unwrap();
     let second = make_repo(tmp.path(), "second", &["2026-09-29T10:00:00"]);
     let path = second.to_str().unwrap().to_owned();
-    let facts = watchtower::facts::collect(
+    let facts = vwatch::facts::collect(
         &path,
         chrono::NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
         false,
     );
     assert_eq!(facts["ok"], true);
-    let fingerprint = watchtower::facts::fingerprint(&facts);
+    let fingerprint = vwatch::facts::fingerprint(&facts);
     // Add the project after the due selection, before assembling the registered list.
     let (svc, armed, calls) = service_with_completion_race(
         tmp.path(),
-        watchtower::service::RunCompletionStage::DueEvaluated,
+        vwatch::service::RunCompletionStage::DueEvaluated,
         move |store| {
             store
                 .add_project("second", "second", &path, "2026-09-30T08:00:00Z")
@@ -412,7 +412,7 @@ fn run_completion_rechecks_an_owner_change_before_saving_success() {
     // Change owner evidence after status evaluation, before guarded persistence.
     let (svc, armed, calls) = service_with_completion_race(
         tmp.path(),
-        watchtower::service::RunCompletionStage::BeforeSave,
+        vwatch::service::RunCompletionStage::BeforeSave,
         |store| {
             store
                 .set_goal(
@@ -453,7 +453,7 @@ fn run_completion_rechecks_a_failure_reported_before_saving_success() {
     let reported_run = run.clone();
     let (svc, armed, _) = service_with_completion_race(
         tmp.path(),
-        watchtower::service::RunCompletionStage::BeforeSave,
+        vwatch::service::RunCompletionStage::BeforeSave,
         move |store| {
             store.fail_agent_run(reported_run.load(Ordering::SeqCst), "demo", &json!({
             "version": 1, "error": "Parallel gemeldeter Analysefehler", "at": "2026-09-30T08:00:00Z"
@@ -568,11 +568,11 @@ fn run_completion_stops_after_sustained_conflicts_without_recording_success() {
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_portfolio(brief(), false, false).unwrap();
     let id = run_id(&svc.run_start(false).unwrap());
-    let other = watchtower::store::Store::open(&tmp.path().join("watchtower.db")).unwrap();
+    let other = vwatch::store::Store::open(&tmp.path().join("vwatch.db")).unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let seen = count.clone();
     let svc = svc.with_run_completion_observer(move |stage| {
-        if stage == watchtower::service::RunCompletionStage::BeforeSave {
+        if stage == vwatch::service::RunCompletionStage::BeforeSave {
             let n = seen.fetch_add(1, Ordering::SeqCst);
             other
                 .fail_agent_run(

@@ -46,7 +46,7 @@ pub(super) fn render(command: &str, data: &Value, out: &mut String) {
                 out,
                 0,
                 &format!(
-                    "Watchtower {}: {} projects, {} with a card.",
+                    "vWatch {}: {} projects, {} with a card.",
                     text(&data["version"]),
                     text(&data["projects"]),
                     text(&data["with_card"])
@@ -300,7 +300,7 @@ pub(super) fn render(command: &str, data: &Value, out: &mut String) {
                 if command == "settings.update" {
                     "Settings saved."
                 } else {
-                    "Watchtower settings."
+                    "vWatch settings."
                 },
             );
             tree(out, data, 0);

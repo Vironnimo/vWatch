@@ -1,4 +1,4 @@
-# Writing Watchtower cards
+# Writing vWatch cards
 
 This guide covers investigating a project and writing every card field so the user understands its state, risk and next step within ten seconds.
 
@@ -26,7 +26,7 @@ Repository hygiene (commit, push, remove worktrees or branches, delete build out
 
 ## Fields and limits
 
-The required top-level fields are `one_liner`, `phase`, `headline` and `reentry`. Fill other fields when evidence exists; use empty lists for no findings and null only for nullable fields. Omitted optional fields receive defaults on a first save; in a merge they retain the previous value. `watchtower schema card` describes the accepted shape and limits when a detail is unclear.
+The required top-level fields are `one_liner`, `phase`, `headline` and `reentry`. Fill other fields when evidence exists; use empty lists for no findings and null only for nullable fields. Omitted optional fields receive defaults on a first save; in a merge they retain the previous value. `vwatch schema card` describes the accepted shape and limits when a detail is unclear.
 
 A word is a space-separated piece containing a letter or digit. A standalone dash does not count. Every text has at most 600 characters. The limits below are words unless stated otherwise. Paths, commands, `source` and `evidence` have no word limit. One-sentence fields allow 30 words. Suggested list lengths describe reading priorities, not a reason to fabricate entries.
 
@@ -102,7 +102,7 @@ For `changed`, `ci_changed`, `answered` or `stale`, update the affected fields a
 Use a UTF-8 file for the card payload. For a card that already exists, replace `<project-id>`, `<context-token>` and `<card-file>` with the project ID, token from its current context and your changed-field payload path:
 
 ```powershell
-watchtower card put <project-id> --context-token <context-token> --file "<card-file>" --merge
+vwatch card put <project-id> --context-token <context-token> --file "<card-file>" --merge
 ```
 
 For a first card, omit `--merge`. Read the receipt's save state, changed fields, each item's change (`new`, `kept`, `edited`, `restored`), omissions and warnings. A schema error saves nothing: fix the named fields. Resolve missing fields with supported content or their empty defaults, not invented conclusions.

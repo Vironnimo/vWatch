@@ -2,7 +2,7 @@ mod common;
 
 use serde_json::{json, Value};
 use std::path::Path;
-use watchtower::Watchtower;
+use vwatch::VWatch;
 
 fn run(home: &Path, args: &[&str]) -> Value {
     run_expecting(home, args, 0)
@@ -10,10 +10,8 @@ fn run(home: &Path, args: &[&str]) -> Value {
 
 fn run_expecting(home: &Path, args: &[&str], expected_exit: i32) -> Value {
     let mut out = Vec::new();
-    let argv = ["watchtower", "--json"]
-        .into_iter()
-        .chain(args.iter().copied());
-    let code = watchtower::cli::run(argv, home, &mut std::io::empty(), &mut out);
+    let argv = ["vwatch", "--json"].into_iter().chain(args.iter().copied());
+    let code = vwatch::cli::run(argv, home, &mut std::io::empty(), &mut out);
     let value: Value = serde_json::from_slice(&out).expect("CLI JSON");
     assert_eq!(code, expected_exit, "{args:?}: {value}");
     value
@@ -82,7 +80,7 @@ fn tracked_cli_run_and_reported_task_complete_only_after_the_required_steps() {
     assert_eq!(finished["run"]["state"], "complete");
     assert_eq!(finished["last_successful"]["id"].to_string(), id);
 
-    let owner = Watchtower::open(&home.join("watchtower.db")).unwrap();
+    let owner = VWatch::open(&home.join("vwatch.db")).unwrap();
     let task = owner.create_task(json!({"projects":["demo"],"source_id":"workflow-test","title":"Export prüfen","why":"Der Export muss lesbar sein","evidence":"README","done_when":"Eine exportierte Datei lässt sich wieder öffnen"})).unwrap();
     let task_id = task["task"]["id"].as_i64().unwrap();
     assert_eq!(

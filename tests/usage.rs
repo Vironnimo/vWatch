@@ -3,10 +3,8 @@ use serde_json::{json, Value};
 fn command(home: &std::path::Path, args: &[&str]) -> (i32, Value) {
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let code = watchtower::cli::run_with_streams(
-        ["watchtower", "--json"]
-            .into_iter()
-            .chain(args.iter().copied()),
+    let code = vwatch::cli::run_with_streams(
+        ["vwatch", "--json"].into_iter().chain(args.iter().copied()),
         home,
         &mut std::io::empty(),
         &mut out,
@@ -48,7 +46,7 @@ fn command_metadata_never_contains_ids_values_or_document_text() {
         .0,
         2
     );
-    let log = std::fs::read_to_string(watchtower::cli_usage::path(home.path())).unwrap();
+    let log = std::fs::read_to_string(vwatch::cli_usage::path(home.path())).unwrap();
     for secret in [
         "private-value-42",
         "private-project-99",
@@ -70,14 +68,14 @@ fn command_metadata_never_contains_ids_values_or_document_text() {
 
     // The metadata destination is optional even when a database write succeeds.
     let blocked = tempfile::tempdir().unwrap();
-    std::fs::create_dir(watchtower::cli_usage::path(blocked.path())).unwrap();
+    std::fs::create_dir(vwatch::cli_usage::path(blocked.path())).unwrap();
     let (code, saved) = command(
         blocked.path(),
         &["ideas", "add", "Saved despite unavailable metadata"],
     );
     assert_eq!(code, 0, "{saved}");
     assert_eq!(saved["ok"], true);
-    let service = watchtower::Watchtower::open(&blocked.path().join("watchtower.db")).unwrap();
+    let service = vwatch::VWatch::open(&blocked.path().join("vwatch.db")).unwrap();
     assert_eq!(
         service.ideas().unwrap()[0]["text"],
         "Saved despite unavailable metadata"
@@ -87,14 +85,13 @@ fn command_metadata_never_contains_ids_values_or_document_text() {
 #[test]
 fn an_unfinished_metadata_record_reports_unknown_not_unchanged() {
     let home = tempfile::tempdir().unwrap();
-    let ticket =
-        watchtower::cli_usage::begin(home.path(), "projects.update", &["--name".into()], 1);
+    let ticket = vwatch::cli_usage::begin(home.path(), "projects.update", &["--name".into()], 1);
     assert!(ticket.is_some());
     drop(ticket);
-    let result = watchtower::cli_usage::activity(home.path()).unwrap();
+    let result = vwatch::cli_usage::activity(home.path()).unwrap();
     assert_eq!(result["activity"][0]["outcome"], "unknown");
     assert!(result["note"].as_str().unwrap().contains("never proves"));
-    assert_eq!(result["next"], "watchtower jobs list");
+    assert_eq!(result["next"], "vwatch jobs list");
 
     let (code, activity) = command(home.path(), &["activity"]);
     assert_eq!(code, 0);
@@ -109,7 +106,7 @@ fn an_unfinished_metadata_record_reports_unknown_not_unchanged() {
         .unwrap()
         .iter()
         .all(|row| row["command"] != "usage"));
-    let recorded = watchtower::cli_usage::activity(home.path()).unwrap();
+    let recorded = vwatch::cli_usage::activity(home.path()).unwrap();
     assert_eq!(recorded["activity"].as_array().unwrap().len(), 3);
     assert!(recorded["activity"]
         .as_array()
@@ -121,7 +118,7 @@ fn an_unfinished_metadata_record_reports_unknown_not_unchanged() {
 #[test]
 fn parser_owned_metadata_ignores_flag_shaped_values() {
     let args: Vec<_> = [
-        "watchtower",
+        "vwatch",
         "projects",
         "update",
         "hidden-target",
@@ -130,7 +127,7 @@ fn parser_owned_metadata_ignores_flag_shaped_values() {
     .into_iter()
     .map(Into::into)
     .collect();
-    let metadata = watchtower::cli::runtime_metadata(&args);
+    let metadata = vwatch::cli::runtime_metadata(&args);
     assert_eq!(metadata.command, "projects.update");
     assert_eq!(metadata.flags, ["--name"]);
     assert!(

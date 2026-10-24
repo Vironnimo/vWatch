@@ -27,7 +27,7 @@ function warningControls(p) {
     return `<div class="warning-row"><strong>${esc(w.title || w.kind || w.key)}</strong>${control}</div>`;
   };
   const active = warnings.filter(w => !w.acknowledged), known = warnings.filter(w => w.acknowledged);
-  return dmod('Warnungen einordnen', active.map(row).join('') + (known.length ? `<details class="acknowledged-warnings"><summary>${known.length} bewusst akzeptiert</summary>${known.map(row).join('')}</details>` : ''), 'Deine Begründung gilt für diesen Befund. Wenn er sich wesentlich ändert, meldet Watchtower ihn wieder.');
+  return dmod('Warnungen einordnen', active.map(row).join('') + (known.length ? `<details class="acknowledged-warnings"><summary>${known.length} bewusst akzeptiert</summary>${known.map(row).join('')}</details>` : ''), 'Deine Begründung gilt für diesen Befund. Wenn er sich wesentlich ändert, meldet vWatch ihn wieder.');
 }
 function safety(p) {
   const f = p.facts || {};

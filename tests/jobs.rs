@@ -8,14 +8,14 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-const CLI: &str = env!("CARGO_BIN_EXE_Watchtower");
+const CLI: &str = env!("CARGO_BIN_EXE_vWatch");
 
 fn command(home: &Path, deadline_ms: u64) -> Command {
     let mut command = Command::new(CLI);
     command
-        .env("WATCHTOWER_HOME", home)
-        .env("WATCHTOWER_TEST_INSTANCE", "1")
-        .env("WATCHTOWER_TEST_JOB_DEADLINE_MS", deadline_ms.to_string())
+        .env("VWATCH_HOME", home)
+        .env("VWATCH_TEST_INSTANCE", "1")
+        .env("VWATCH_TEST_JOB_DEADLINE_MS", deadline_ms.to_string())
         .stdin(Stdio::null());
     command
 }
@@ -38,7 +38,7 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
     let home = tempfile::tempdir().unwrap();
     let start = Instant::now();
     let first = command(home.path(), 70)
-        .env("WATCHTOWER_TEST_JOB_BLOCK", "1")
+        .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["overview", "--refresh"])
         .output()
         .unwrap();
@@ -46,13 +46,13 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
     assert!(first.stderr.is_empty());
     let text = String::from_utf8_lossy(&first.stdout);
     assert!(text.starts_with("Not finished:"), "{text}");
-    assert!(text.contains("Next: watchtower --instance"), "{text}");
+    assert!(text.contains("Next: vwatch --instance"), "{text}");
     assert!(start.elapsed() < Duration::from_secs(2));
     let job = token(&first);
 
     // An identical call while work is active joins the same job, never starts it twice.
     let repeated = command(home.path(), 70)
-        .env("WATCHTOWER_TEST_JOB_BLOCK", "1")
+        .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["--json", "overview", "--refresh"])
         .output()
         .unwrap();
@@ -119,8 +119,8 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
 fn stopped_worker_reports_unknown_outcome_and_never_claims_rollback() {
     let home = tempfile::tempdir().unwrap();
     let first = command(home.path(), 60)
-        .env("WATCHTOWER_TEST_JOB_DELAY_MS", "180")
-        .env("WATCHTOWER_TEST_JOB_CRASH", "1")
+        .env("VWATCH_TEST_JOB_DELAY_MS", "180")
+        .env("VWATCH_TEST_JOB_CRASH", "1")
         .args(["--json", "facts", "refresh", "--no-ci"])
         .output()
         .unwrap();
@@ -186,7 +186,7 @@ fn fast_worker_returns_the_complete_error_in_one_call() {
 fn stopping_the_call_does_not_lose_the_worker_or_replay_the_operation() {
     let home = tempfile::tempdir().unwrap();
     let mut caller = command(home.path(), 5_000)
-        .env("WATCHTOWER_TEST_JOB_BLOCK", "1")
+        .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["--json", "facts", "refresh", "--no-ci"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -228,28 +228,28 @@ fn stopping_the_call_does_not_lose_the_worker_or_replay_the_operation() {
 #[test]
 fn only_reads_that_can_measure_repositories_need_a_worker() {
     for args in [
-        vec!["watchtower", "overview", "--refresh"],
-        vec!["watchtower", "state", "--refresh"],
-        vec!["watchtower", "facts", "show", "demo"],
-        vec!["watchtower", "projects", "visit", "demo"],
+        vec!["vwatch", "overview", "--refresh"],
+        vec!["vwatch", "state", "--refresh"],
+        vec!["vwatch", "facts", "show", "demo"],
+        vec!["vwatch", "projects", "visit", "demo"],
     ] {
         let args = args
             .into_iter()
             .map(std::ffi::OsString::from)
             .collect::<Vec<_>>();
-        assert!(watchtower::cli::job_plan(&args).is_some(), "{args:?}");
+        assert!(vwatch::cli::job_plan(&args).is_some(), "{args:?}");
     }
     for args in [
-        vec!["watchtower", "overview"],
-        vec!["watchtower", "projects", "show", "demo"],
-        vec!["watchtower", "projects", "list", "--query", "demo"],
-        vec!["watchtower", "portfolio", "context"],
+        vec!["vwatch", "overview"],
+        vec!["vwatch", "projects", "show", "demo"],
+        vec!["vwatch", "projects", "list", "--query", "demo"],
+        vec!["vwatch", "portfolio", "context"],
     ] {
         let args = args
             .into_iter()
             .map(std::ffi::OsString::from)
             .collect::<Vec<_>>();
-        assert!(watchtower::cli::job_plan(&args).is_none(), "{args:?}");
+        assert!(vwatch::cli::job_plan(&args).is_none(), "{args:?}");
     }
 }
 
@@ -278,7 +278,7 @@ fn a_relative_repository_job_keeps_its_request_directory_across_continuations() 
     std::fs::create_dir(&home).unwrap();
     let first = command(&home, 70)
         .current_dir(fixture.path())
-        .env("WATCHTOWER_TEST_JOB_BLOCK", "1")
+        .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["--json", "projects", "add", "demo", "--id", "relative"])
         .output()
         .unwrap();
@@ -322,7 +322,7 @@ fn a_relative_repository_job_keeps_its_request_directory_across_continuations() 
         .output()
         .unwrap();
     assert_eq!(json(&replay)["project"], project);
-    let service = watchtower::Watchtower::open(&home.join("watchtower.db")).unwrap();
+    let service = vwatch::VWatch::open(&home.join("vwatch.db")).unwrap();
     assert_eq!(
         service.list_projects().unwrap().as_array().unwrap().len(),
         1

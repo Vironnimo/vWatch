@@ -10,13 +10,13 @@ use super::parser::{
     PortfolioCmd, ProjectsCmd, RunsCmd, SchemaKind, SettingsCmd, TasksCmd, WarningsCmd,
 };
 use crate::cards::{self, Kind};
-use crate::service::{Result, Watchtower, WatchtowerError};
+use crate::service::{Result, VWatch, VWatchError};
 use crate::system;
 
 /// Decode a document: UTF-8 with or without BOM, or UTF-16 with BOM (Windows PowerShell's default).
 fn decode(bytes: &[u8], origin: &str) -> Result<String> {
     let invalid_encoding = || {
-        WatchtowerError::new("invalid_json", format!("{origin} has invalid text encoding. Nothing was saved."))
+        VWatchError::new("invalid_json", format!("{origin} has invalid text encoding. Nothing was saved."))
             .hint("Save the complete JSON document as UTF-8, or UTF-16 with a byte-order mark, and retry.")
     };
     let utf16 = |be: bool| {
@@ -63,7 +63,7 @@ fn read_input(file: Option<&str>, input_json: Option<&str>, stdin: &mut dyn Read
         }
         (None, Some(file)) => {
             if Path::new(file).is_dir() {
-                return Err(WatchtowerError::new("file_unreadable", format!("{file} is a folder, not a document file. Nothing was saved."))
+                return Err(VWatchError::new("file_unreadable", format!("{file} is a folder, not a document file. Nothing was saved."))
                     .hint("Pass the JSON document file inside that folder with --file."));
             }
             let bytes = std::fs::read(file).map_err(|e| {
@@ -73,22 +73,22 @@ fn read_input(file: Option<&str>, input_json: Option<&str>, stdin: &mut dyn Read
         }
         (None, None) => {
             return Err(
-                WatchtowerError::new("missing_document", "No document was supplied. Nothing was saved.")
+                VWatchError::new("missing_document", "No document was supplied. Nothing was saved.")
                     .hint("Write the document to a UTF-8 file, then repeat this command with --file followed by that file's path. Use --file - only when JSON is piped into stdin."),
             )
         }
     };
     if text.trim().is_empty() {
-        return Err(WatchtowerError::new("invalid_json", format!("{origin} is empty. Nothing was saved."))
+        return Err(VWatchError::new("invalid_json", format!("{origin} is empty. Nothing was saved."))
             .hint("Write the complete JSON document to a UTF-8 file and repeat this command with --file followed by its path. Closed stdin supplies no document."));
     }
     serde_json::from_str(&text).map_err(|e| {
-        WatchtowerError::new("invalid_json", format!("{origin} is not valid JSON at line {}, column {}: {e}. Nothing was saved.", e.line(), e.column()))
+        VWatchError::new("invalid_json", format!("{origin} is not valid JSON at line {}, column {}: {e}. Nothing was saved.", e.line(), e.column()))
             .hint("Fix the JSON at that location and repeat this command. Use a file-writing tool to preserve quotes and backslashes, and pass the file with --file.")
     })
 }
 
-fn input_error(origin: &str, error: &std::io::Error) -> WatchtowerError {
+fn input_error(origin: &str, error: &std::io::Error) -> VWatchError {
     use std::io::ErrorKind;
     let (cause, recovery) = match error.kind() {
         ErrorKind::NotFound => ("does not exist", "Write the document at that path or correct --file, then repeat this command."),
@@ -96,7 +96,7 @@ fn input_error(origin: &str, error: &std::io::Error) -> WatchtowerError {
         ErrorKind::IsADirectory => ("is a folder, not a document file", "Pass the JSON file inside that folder with --file."),
         _ => ("could not be read", "Ensure the document is a readable file, close any exclusive writer, then repeat this command."),
     };
-    WatchtowerError::new(
+    VWatchError::new(
         "file_unreadable",
         format!("{origin} {cause}. Nothing was saved."),
     )
@@ -105,7 +105,7 @@ fn input_error(origin: &str, error: &std::io::Error) -> WatchtowerError {
 
 fn reject_feedback_filter(project: Option<&str>) -> Result<()> {
     if project.is_some() {
-        return Err(WatchtowerError::new("invalid_arguments", "--project filters feedback reads; it cannot select a reaction to change. Nothing was changed.")
+        return Err(VWatchError::new("invalid_arguments", "--project filters feedback reads; it cannot select a reaction to change. Nothing was changed.")
             .hint("Remove --project from this command. The explicit item ID selects the reaction to change."));
     }
     Ok(())
@@ -145,14 +145,14 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
         return Ok(json!({"schema": cards::json_schema(kind)}));
     }
     std::fs::create_dir_all(data_dir).map_err(|e| {
-        WatchtowerError::new(
+        VWatchError::new(
             "storage_error",
             format!("Cannot create data folder {}: {e}.", data_dir.display()),
         )
-        .hint("Check that Watchtower can write to its data folder.")
+        .hint("Check that vWatch can write to its data folder.")
     })?;
     let db = system::db_path(data_dir);
-    let svc = Watchtower::open(&db)?;
+    let svc = VWatch::open(&db)?;
     Ok(match cmd {
         Cmd::Schema { .. }
         | Cmd::Output { .. }
@@ -256,7 +256,7 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
                 if paths.len() == 1 {
                     json!({"project": svc.add_project(&paths[0], id.as_deref(), name.as_deref())?})
                 } else if id.is_some() || name.is_some() {
-                    return Err(WatchtowerError::new("invalid_arguments", "--id and --name apply to one folder. No projects were added.")
+                    return Err(VWatchError::new("invalid_arguments", "--id and --name apply to one folder. No projects were added.")
                         .hint("Add these folders together without --id and --name, or run a separate projects add command for each custom ID and name."));
                 } else {
                     svc.add_projects(&paths)?
@@ -337,7 +337,7 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
             None => json!({"feedback": svc.feedback(project.as_deref())?}),
             Some(FeedbackCmd::List { project: selected }) => {
                 if project.is_some() && selected.is_some() && project != selected {
-                    return Err(WatchtowerError::new(
+                    return Err(VWatchError::new(
                         "invalid_arguments",
                         "Two different --project filters were supplied. Nothing was changed.",
                     )
@@ -372,7 +372,7 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
         },
         Cmd::Ideas { action } => match action {
             IdeasCmd::Status { id, status, revision } => match status {
-                Some(status) => svc.set_idea_status(&id, &status.to_ascii_lowercase(), revision.as_deref().ok_or_else(|| WatchtowerError::new("invalid_arguments", "A status change requires --revision from ideas status. Nothing was changed."))?)?,
+                Some(status) => svc.set_idea_status(&id, &status.to_ascii_lowercase(), revision.as_deref().ok_or_else(|| VWatchError::new("invalid_arguments", "A status change requires --revision from ideas status. Nothing was changed."))?)?,
                 None => svc.idea_status(&id)?,
             },
             IdeasCmd::Update { id, text, revision } => svc.update_idea(id, &text, revision)?,
@@ -457,7 +457,7 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
             } = action
             {
                 if style.is_none() && hidden_modules.is_none() {
-                    return Err(WatchtowerError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
+                    return Err(VWatchError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
                         .hint("Pass --style handover (Today), --style board (Projects), --style ideas or --style statistics, or pass --hidden-modules with comma-separated module IDs."));
                 }
                 let mut updates = Vec::new();

@@ -2,5 +2,5 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
-    watchtower::app::run();
+    vwatch::app::run();
 }

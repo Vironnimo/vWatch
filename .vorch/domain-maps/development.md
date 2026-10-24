@@ -1,6 +1,6 @@
 # Development
 
-This domain owns building, verifying, committing and installing Watchtower without disturbing owner data or concurrent work.
+This domain owns building, verifying, committing and installing vWatch without disturbing owner data or concurrent work.
 
 ## Overview
 

@@ -4,7 +4,7 @@
 
 `src/cards.rs` describes types, defaults, word limits and list limits once. `validate`, `Kind::missing_fields` and `json_schema` use that definition; readable schema output must stay aligned with it. Do not add an independent schema in an adapter.
 
-For a new card field, define a default, document it in `skill/watchtower/references/card-guide.md`, and render it in the UI. Update `portfolio-guide.md` for portfolio fields. Existing documents missing schema fields become due with `new_fields`; the recursive check also examines fields missing from existing list items. Update the operating Skill in the same change when a document or command contract changes.
+For a new card field, define a default, document it in `skill/vwatch/references/card-guide.md`, and render it in the UI. Update `portfolio-guide.md` for portfolio fields. Existing documents missing schema fields become due with `new_fields`; the recursive check also examines fields missing from existing list items. Update the operating Skill in the same change when a document or command contract changes.
 
 `BRIEF_FIELDS` in `src/service/freshness.rs` is the subset of card content the portfolio uses. Add a field only if the brief needs it. A handbook-only change must not force another cross-project analysis. Portfolio freshness also includes owner intent, idea revisions and tasks, including standalone tasks and tasks whose project was removed (`portfolio_basis`).
 

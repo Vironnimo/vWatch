@@ -1,6 +1,6 @@
 # Local Verification Workflow
 
-Watchtower is local-only, with no remote or CI. The Vorch push entry point verifies immutable commits; it cannot publish. Do not add a remote to make it run.
+vWatch is local-only, with no remote or CI. The Vorch push entry point verifies immutable commits; it cannot publish. Do not add a remote to make it run.
 
 ## Check the intended state
 

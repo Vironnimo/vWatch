@@ -1,7 +1,7 @@
-//! Where Watchtower lives on disk and how it plugs into Windows.
+//! Where vWatch lives on disk and how it plugs into Windows.
 //!
-//! Watchtower is one folder: the executables, `data\` with the database and `skill\watchtower\`
-//! with the Skill for agents. `WATCHTOWER_HOME` moves the data folder elsewhere.
+//! vWatch is one folder: the executables, `data\` with the database and `skill\vwatch\`
+//! with the Skill for agents. `VWATCH_HOME` moves the data folder elsewhere.
 
 use std::path::{Path, PathBuf};
 
@@ -9,23 +9,23 @@ use serde_json::{json, Value};
 
 /// The Skill for agents, embedded so the exe always carries the matching version.
 const SKILL_FILES: &[(&str, &str)] = &[
-    ("SKILL.md", include_str!("../skill/watchtower/SKILL.md")),
+    ("SKILL.md", include_str!("../skill/vwatch/SKILL.md")),
     (
         "references/cli.md",
-        include_str!("../skill/watchtower/references/cli.md"),
+        include_str!("../skill/vwatch/references/cli.md"),
     ),
     (
         "references/card-guide.md",
-        include_str!("../skill/watchtower/references/card-guide.md"),
+        include_str!("../skill/vwatch/references/card-guide.md"),
     ),
     (
         "references/portfolio-guide.md",
-        include_str!("../skill/watchtower/references/portfolio-guide.md"),
+        include_str!("../skill/vwatch/references/portfolio-guide.md"),
     ),
 ];
 
 pub fn exe_path() -> PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("Watchtower.exe"))
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vWatch.exe"))
 }
 
 pub fn app_dir() -> PathBuf {
@@ -36,12 +36,12 @@ pub fn app_dir() -> PathBuf {
 }
 
 pub fn gui_exe_path() -> PathBuf {
-    app_dir().join(format!("Watchtower-UI{}", std::env::consts::EXE_SUFFIX))
+    app_dir().join(format!("vWatch-UI{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// Resolve the data folder without creating it (help and usage must be read-only).
 pub fn data_path() -> PathBuf {
-    std::env::var_os("WATCHTOWER_HOME")
+    std::env::var_os("VWATCH_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| app_dir().join("data"))
 }
@@ -53,11 +53,11 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn db_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("watchtower.db")
+    data_dir.join("vwatch.db")
 }
 
 pub fn skill_dir() -> PathBuf {
-    app_dir().join("skill").join("watchtower")
+    app_dir().join("skill").join("vwatch")
 }
 
 /// Write the embedded Skill next to the exe, touching only files whose content differs.
@@ -104,7 +104,7 @@ mod win {
     use winreg::{RegKey, RegValue};
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    const RUN_VALUE: &str = "Watchtower";
+    const RUN_VALUE: &str = "vWatch";
 
     pub fn autostart_enabled() -> bool {
         RegKey::predef(HKEY_CURRENT_USER)
@@ -197,7 +197,7 @@ pub fn autostart_enabled() -> bool {
     false
 }
 
-/// Open Watchtower when the owner signs in to Windows.
+/// Open vWatch when the owner signs in to Windows.
 pub fn set_autostart(on: bool) -> std::io::Result<()> {
     #[cfg(windows)]
     return win::set_autostart(on, &gui_exe_path());
@@ -210,7 +210,7 @@ pub fn set_autostart(on: bool) -> std::io::Result<()> {
     }
 }
 
-/// Whether `watchtower` is on the owner's PATH, so agents can call it by name.
+/// Whether `vwatch` is on the owner's PATH, so agents can call it by name.
 pub fn agent_access_enabled() -> bool {
     #[cfg(windows)]
     return win::path_contains(&app_dir());
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn embedded_skill_export_is_exact_idempotent_and_separate_from_data_home() {
         let scratch = tempfile::tempdir().unwrap();
-        let exported = scratch.path().join("program/skill/watchtower");
+        let exported = scratch.path().join("program/skill/vwatch");
         assert_eq!(
             SKILL_FILES
                 .iter()
@@ -287,25 +287,25 @@ mod tests {
 
         // No export or OS integration is performed against the real executable.
         // The override selects data only; resolving it must not create folders.
-        let original = std::env::var_os("WATCHTOWER_HOME");
+        let original = std::env::var_os("VWATCH_HOME");
         struct RestoreHome(Option<std::ffi::OsString>);
         impl Drop for RestoreHome {
             fn drop(&mut self) {
                 if let Some(value) = &self.0 {
-                    std::env::set_var("WATCHTOWER_HOME", value);
+                    std::env::set_var("VWATCH_HOME", value);
                 } else {
-                    std::env::remove_var("WATCHTOWER_HOME");
+                    std::env::remove_var("VWATCH_HOME");
                 }
             }
         }
         let _restore = RestoreHome(original);
         let data = scratch.path().join("data-only");
         let installed_skill = skill_dir();
-        std::env::set_var("WATCHTOWER_HOME", &data);
+        std::env::set_var("VWATCH_HOME", &data);
         assert_eq!(data_path(), data);
         assert!(!data.exists());
         assert_eq!(skill_dir(), installed_skill);
-        assert_eq!(skill_dir(), app_dir().join("skill/watchtower"));
+        assert_eq!(skill_dir(), app_dir().join("skill/vwatch"));
         assert_eq!(data_dir(), data);
         assert!(data.is_dir());
         assert!(!data.join("skill").exists());

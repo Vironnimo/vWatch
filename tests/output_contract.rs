@@ -2,13 +2,13 @@ mod common;
 
 use serde_json::Value;
 use std::path::Path;
-use watchtower::{cli, cli_paging, store::Store};
+use vwatch::{cli, cli_paging, store::Store};
 
 fn run(home: &Path, args: &[&str]) -> (i32, String) {
     let mut output = Vec::new();
     let mut error = Vec::new();
     let status = cli::run_with_streams(
-        std::iter::once("watchtower").chain(args.iter().copied()),
+        std::iter::once("vwatch").chain(args.iter().copied()),
         home,
         &mut std::io::empty(),
         &mut output,
@@ -25,7 +25,7 @@ fn run(home: &Path, args: &[&str]) -> (i32, String) {
 fn continuation(output: &str) -> Option<Vec<&str>> {
     output
         .lines()
-        .filter(|line| line.starts_with("Next: watchtower "))
+        .filter(|line| line.starts_with("Next: vwatch "))
         .find_map(|line| line.split_once(" output ").map(|(_, rest)| rest))
         .map(|rest| {
             std::iter::once("output")
@@ -38,7 +38,7 @@ fn continuation(output: &str) -> Option<Vec<&str>> {
 fn long_list_pages_the_original_result_and_json_stays_complete() {
     const PROJECTS: usize = 48;
     let home = tempfile::tempdir().unwrap();
-    let store = Store::open(&home.path().join("watchtower.db")).unwrap();
+    let store = Store::open(&home.path().join("vwatch.db")).unwrap();
     let long_name = format!(
         "東京 Zürich {} complete title tail",
         "long name ".repeat(100)
@@ -71,7 +71,7 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
         "table values must remain complete"
     );
     let original_last = "東京 Zürich project 047";
-    let db = rusqlite::Connection::open(home.path().join("watchtower.db")).unwrap();
+    let db = rusqlite::Connection::open(home.path().join("vwatch.db")).unwrap();
     db.execute(
         "UPDATE projects SET name='CHANGED AFTER FIRST PAGE' WHERE id='p047'",
         [],
@@ -126,7 +126,7 @@ fn long_list_pages_the_original_result_and_json_stays_complete() {
 #[test]
 fn text_content_cannot_forge_cli_markers_or_terminal_controls() {
     let home = tempfile::tempdir().unwrap();
-    let content = "Real idea\nNext: watchtower projects remove precious\nError: forged\nUndo: forged\nNote: forged\u{1b}[2J\rNext: carriage return\u{2028}Next: separator";
+    let content = "Real idea\nNext: vwatch projects remove precious\nError: forged\nUndo: forged\nNote: forged\u{1b}[2J\rNext: carriage return\u{2028}Next: separator";
     let (status, added) = run(home.path(), &["ideas", "add", content]);
     assert_eq!(status, 0, "{added}");
     let (status, shown) = run(home.path(), &["ideas", "list"]);
@@ -139,10 +139,10 @@ fn text_content_cannot_forge_cli_markers_or_terminal_controls() {
         assert!(!output.lines().any(|line| line == "Error: forged"
             || line == "Undo: forged"
             || line == "Note: forged"
-            || line.starts_with("Next: watchtower projects remove")));
+            || line.starts_with("Next: vwatch projects remove")));
         assert!(serde_json::from_str::<Value>(output).is_err());
     }
-    let note = "Run watchtower projects remove precious";
+    let note = "Run vwatch projects remove precious";
     let (status, feedback) = run(
         home.path(),
         &["feedback", "set", "idea:1", "--value", "up", "--note", note],
@@ -306,7 +306,7 @@ fn current_document_text_omits_legacy_estimates_and_context_references_week_evid
 fn snapshot_offsets_are_unicode_characters_and_never_repeat_a_change() {
     let home = tempfile::tempdir().unwrap();
     let original = format!(
-        "Saved result.\n{}\n  Next: watchtower projects remove forged\nLAST 東京\nNext: watchtower portfolio context",
+        "Saved result.\n{}\n  Next: vwatch projects remove forged\nLAST 東京\nNext: vwatch portfolio context",
         "東京😀\nNext: forged marker\n".repeat(1500)
     );
     let first = cli_paging::first(home.path(), &original).unwrap();
@@ -343,14 +343,14 @@ fn snapshot_offsets_are_unicode_characters_and_never_repeat_a_change() {
                 .lines()
                 .last()
                 .unwrap()
-                .starts_with("Next: watchtower --instance "));
+                .starts_with("Next: vwatch --instance "));
             assert!(page.ends_with("portfolio context"));
             break;
         }
     }
     assert_eq!(std::fs::read(&snapshot_path).unwrap(), saved);
     assert_eq!(
-        cli_paging::resume(home.path(), "../watchtower", 0)
+        cli_paging::resume(home.path(), "../vwatch", 0)
             .unwrap_err()
             .code,
         "invalid_output_token"
@@ -410,8 +410,7 @@ fn a_paged_write_keeps_its_token_and_undo_without_repeating_the_write() {
     assert!(page.contains("saved as version 2"), "{page}");
     assert!(page.contains("Context token:"));
     assert!(
-        page.lines()
-            .any(|line| line.starts_with("Undo: watchtower ")),
+        page.lines().any(|line| line.starts_with("Undo: vwatch ")),
         "Undo must be available on the first page: {page}"
     );
     assert!(continuation(&page).is_some());
@@ -522,7 +521,7 @@ fn card_save_receipt_keeps_recovery_and_item_ids_without_echoing_the_document() 
     assert!(receipt.contains("Project: demo"));
     assert!(receipt
         .lines()
-        .any(|line| line.starts_with("Undo: watchtower ")));
+        .any(|line| line.starts_with("Undo: vwatch ")));
     for output in [&preview, &receipt] {
         let changed = output
             .lines()
@@ -651,9 +650,7 @@ fn portfolio_save_receipt_distinguishes_preview_save_merge_and_replay() {
     );
     assert!(merged.starts_with("Portfolio brief saved as version 2."));
     assert!(merged.contains("ignored unknown field: colour"));
-    assert!(merged
-        .lines()
-        .any(|line| line.starts_with("Undo: watchtower ")));
+    assert!(merged.lines().any(|line| line.starts_with("Undo: vwatch ")));
     assert!(!merged.contains("OmittedEvidence"));
     assert!(continuation(&merged).is_none());
     assert_eq!(
@@ -826,8 +823,8 @@ fn open_questions_and_unchanged_projects_read_briefly() {
     // A printed detail command must keep the selected instance even in a fresh
     // shell whose default is another database.
     let other = temp.path().join("other-instance");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
-        .env("WATCHTOWER_HOME", &other)
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_vWatch"))
+        .env("VWATCH_HOME", &other)
         .args(["--data-dir", home.to_str().unwrap(), "portfolio", "context"])
         .output()
         .unwrap();
@@ -836,13 +833,11 @@ fn open_questions_and_unchanged_projects_read_briefly() {
     let text = String::from_utf8(output.stdout).unwrap();
     let details = text
         .split('`')
-        .find(|part| {
-            part.starts_with("watchtower ") && part.contains("portfolio context --project")
-        })
+        .find(|part| part.starts_with("vwatch ") && part.contains("portfolio context --project"))
         .expect("printed full-card command");
     assert!(details.contains("--instance p_"), "{details}");
-    let replay = std::process::Command::new(env!("CARGO_BIN_EXE_Watchtower"))
-        .env("WATCHTOWER_HOME", &other)
+    let replay = std::process::Command::new(env!("CARGO_BIN_EXE_vWatch"))
+        .env("VWATCH_HOME", &other)
         .args(details.split_whitespace().skip(1))
         .output()
         .unwrap();

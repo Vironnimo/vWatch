@@ -3,7 +3,7 @@ mod common;
 use chrono::NaiveDate;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use watchtower::facts;
+use vwatch::facts;
 
 fn today() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 9, 30).unwrap()
