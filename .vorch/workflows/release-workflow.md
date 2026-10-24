@@ -12,7 +12,7 @@ Use when the owner requests installation of finished work or a GitHub release. T
 
    Both release binaries go to `%LOCALAPPDATA%/Programs/vWatch`. The script preserves data/preferences and updates the Start menu link. Existing enabled autostart can be retargeted to the GUI; it is not newly enabled. Leave autostart and PATH choices intact.
 4. Start the installed `vWatch-UI.exe` again. Verify changed behavior with the live-testing workflow, using separate data for mutations.
-5. `status` exports four embedded Skill files beside the executable. For an agent application's separate installed copy, locate and preserve its actual scope. Private installations stay private unless the owner requests otherwise. Preserve unrelated private adaptations.
+5. `status` exports the five embedded Skill files beside the executable. For an agent application's separate installed copy, locate and preserve its actual scope. Private installations stay private unless the owner requests otherwise. Preserve unrelated private adaptations.
 6. Report binaries/Skill copies updated, verification and any partial failure. A failed later step does not roll back earlier saved effects.
 
 After a build/replacement failure, inspect the error and existing files before retrying. Do not erase data, reset preferences or introduce repository cleanup.
