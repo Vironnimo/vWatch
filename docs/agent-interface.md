@@ -440,3 +440,19 @@ This reverses the 2026-10-08 decision against broad context compression, at the 
 
 Validation: 169 Rust tests in both configurations, strict Clippy for all targets, formatting and 86 Node UI tests passed. The real CLI on a scratch copy of the owner database produced the summaries, per-project detail, keep-by-ID receipts (21 kept, 1 new), the unknown-ID warning and error, and the questions list. These deterministic checks do not measure idea quality; that needs a fresh-agent daily run.
 
+
+## Working-practice review, 2026-10-24
+
+The owner asked for an opt-in Skill section that analyzes working practices across the watched projects and chose: a separate reference loaded only on request, the report in the conversation, and saving only the findings the owner selects as agent proposals (card `suggestions` or brief `synergies`). Own ideas, ratings and tasks stay owner decisions. The daily run is unchanged. No CLI, schema or window change was needed; `references/practice-review.md` is embedded and exported with the other Skill files.
+
+Volume on a copy of the owner database: 2 tasks, 5 reactions, 22 runs, fact observations since 2026-10-14 and Git reconstruction over 365 days. `statistics --json` for 90 days measured 1,063,715 characters, so the reference excludes it; `portfolio context` measured 117,218 characters and is read only before saving a brief finding.
+
+Fresh-agent evaluation: Codex with gpt-6-luna, one run per goal, each on its own database copy whose projects pointed to local clones (history, branches, tags and origin refs copied; no uncommitted work, extra worktrees or local Git configuration). All three runs loaded the Skill.
+
+| Goal | Result | Calls |
+|---|---|---|
+| German review request, then "save the first two" | pass: German report with coverage, four numbered findings with `Save as`, evidence gaps and a selection question; no write before the reply; afterwards one brief version with 8 synergies kept and 2 new; no ratings, ideas or tasks; clones unchanged | 32 + 4 (about 20 + 4 ideal) |
+| English, vague habits question, then "no need to save" | pass: three findings with done-when results; nothing written | 25 (about 20) |
+| Hours worked on one project last month | pass: says hours are not measured, gives active days and commits; nothing written | 4 (2-3) |
+
+Extra calls came from paging (one invented `portfolio show --start`, one mistyped instance locator, both recovered) and agent-written summary scripts. Input totals were about 1.07M, 0.59M and 0.10M tokens. One German finding ("hooks not active") was an artifact of the clones lacking `core.hooksPath`, not of the reference. All saved and proposed findings were brief recommendations; the rework and rhythm lenses produced no finding in either review. These runs do not establish idea quality, stronger-model behavior or stability across repeated runs.
