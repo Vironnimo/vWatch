@@ -1,0 +1,250 @@
+{
+  "one_liner": "Haushaltsbuch aus Bank-CSV-Exporten mit Kategorien und Monatssummen.",
+  "stack": "Python 3.12 mit reiner Standardbibliothek (csv, decimal, re); pyproject.toml ohne Abhängigkeiten.",
+  "phase": "active",
+  "phase_evidence": "ledger/rules.py heute geändert; letzter Commit am 2026-10-02, PDF-Branch am 2026-10-09.",
+  "headline": "PDF-Export wartet auf deine Bibliothekswahl.",
+  "personality": "Ich weiß genau, dass du bei Rewe, Edeka, Aldi und seit heute bei Lidl einkaufst – alles andere nenne ich einfach Sonstiges.",
+  "recent_changes": [
+    {
+      "date": "2026-10-24",
+      "title": "Lidl als Lebensmittel erkannt, uncommittet",
+      "detail": "ledger/rules.py ergänzt das Lebensmittel-Muster um lidl; die Änderung liegt nur im Arbeitsordner."
+    },
+    {
+      "date": "2026-10-09",
+      "title": "PDF-Export auf eigenem Branch begonnen",
+      "detail": "feature/pdf-export enthält nur ledger/pdf.py, das NotImplementedError mit „pick a PDF library first“ wirft; nicht in main gemergt."
+    },
+    {
+      "date": "2026-10-02",
+      "title": "Anleitung für den Bankexport",
+      "detail": "docs/export.md beschreibt den Weg Umsätze → Export → CSV mit Semikolon im Onlinebanking."
+    },
+    {
+      "date": "2026-09-23",
+      "title": "Neues Exportformat der Bank lesbar",
+      "detail": "importer.read erkennt beide Spaltensätze (Buchungstag/Empfaenger/Betrag und Datum/Zahlungsempfaenger/Betrag (EUR)) automatisch."
+    },
+    {
+      "date": "2026-09-02",
+      "title": "Monatssummen je Kategorie",
+      "detail": "report.monthly gruppiert Buchungen nach Monat und Kategorie; ein Kommando, das den Bericht ausgibt, gibt es noch nicht."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-07-20",
+      "title": "Projekt gestartet"
+    },
+    {
+      "date": "2026-07-28",
+      "title": "Import von Bank-CSV-Exporten"
+    },
+    {
+      "date": "2026-08-14",
+      "title": "Kategorien über Empfängermuster"
+    },
+    {
+      "date": "2026-09-02",
+      "title": "Monatssummen je Kategorie"
+    },
+    {
+      "date": "2026-09-23",
+      "title": "Zweites Exportformat der Bank unterstützt"
+    }
+  ],
+  "features": [
+    "Bank-CSV mit Semikolon einlesen",
+    "Zwei Spaltenformate der Bank automatisch erkennen",
+    "Beträge mit deutschem Dezimalkomma als Decimal",
+    "Kategorien per Regex auf den Empfänger",
+    "Monatssummen je Kategorie berechnen",
+    "Unbekannte Empfänger landen in Sonstiges"
+  ],
+  "usage": {
+    "summary": null,
+    "last_used": null,
+    "evidence": "Keine CSV-Exporte, Berichte oder Logs im Repository (git status --ignored leer); pyproject.toml definiert kein Skript, es gibt keinen Einstiegspunkt; keine Installation vorhanden."
+  },
+  "open_ends": [
+    {
+      "kind": "uncommitted",
+      "title": "Lidl-Regel in rules.py nicht committet",
+      "detail": "Eine Zeile in ledger/rules.py ergänzt lidl als Lebensmittel; ohne Commit geht sie beim Wechsel auf den PDF-Branch leicht verloren.",
+      "source": "git diff: ledger/rules.py",
+      "age_days": 0
+    },
+    {
+      "kind": "branch",
+      "title": "feature/pdf-export enthält nur einen Stub",
+      "detail": "ledger/pdf.py wirft NotImplementedError; der Branch wartet seit dem 2026-10-09 auf die Wahl einer PDF-Bibliothek.",
+      "source": "feature/pdf-export (076af17)",
+      "age_days": 15
+    },
+    {
+      "kind": "other",
+      "title": "Monatsbericht lässt sich nicht aufrufen",
+      "detail": "Die README verspricht einen ausgegebenen Monatsbericht; report.monthly liefert nur ein Dictionary, es gibt weder Kommando noch __main__.",
+      "source": "README.md, ledger/report.py, pyproject.toml",
+      "age_days": 52
+    },
+    {
+      "kind": "todo",
+      "title": "Regeln nur per Codeänderung erweiterbar",
+      "detail": "TODO in ledger/rules.py: Regeln sollen ohne Codeänderung anlegbar sein; die heutige Lidl-Zeile zeigt genau diesen Bedarf.",
+      "source": "ledger/rules.py: category()",
+      "age_days": 71
+    }
+  ],
+  "waiting_on_you": [
+    {
+      "id": "q-b9a64b9b",
+      "title": "Womit soll der Monatsbericht als PDF entstehen?",
+      "source": "feature/pdf-export: ledger/pdf.py („pick a PDF library first“)",
+      "options": [
+        {
+          "answer": "HTML-Bericht, im Browser als PDF drucken",
+          "effect": "Keine neue Abhängigkeit; der Bericht ist am Bildschirm lesbar, PDF entsteht über den Druckdialog."
+        },
+        {
+          "answer": "fpdf2 als reine Python-Bibliothek",
+          "effect": "Direkter PDF-Export per Kommando mit einer kleinen Abhängigkeit ohne Systembibliotheken."
+        },
+        {
+          "answer": "WeasyPrint aus einer HTML-Vorlage",
+          "effect": "Layout per CSS, braucht unter Windows aber zusätzliche Pango-Laufzeitbibliotheken."
+        }
+      ],
+      "recommended": 1
+    }
+  ],
+  "vision": {
+    "statement": "Haushaltsbudget aus den CSV-Exporten der Bank, kategorisiert und als Monatsbericht ausgegeben (README.md).",
+    "progress_note": "Import und Kategorisierung funktionieren; Berichtsausgabe, PDF-Export und eigene Regeln fehlen noch.",
+    "progress_pct": null
+  },
+  "reentry": {
+    "next_step": "Lidl-Regel committen und ein Kommando ergänzen, das den Monatsbericht für eine CSV-Datei ausgibt.",
+    "why": "Ohne Aufruf siehst du die Monatssummen nie; ein Textbericht ist zugleich die Grundlage für den PDF-Export auf dem Branch.",
+    "done_when": "`python -m ledger <export.csv>` gibt je Monat die Summen pro Kategorie aus; rules.py ist committet."
+  },
+  "health_notes": [
+    "tests/test_report.py enthält nur `assert True`; Import, Formaterkennung und Monatssummen sind ungetestet, obwohl die Bank ihr Format im September schon einmal geändert hat.",
+    "importer.read öffnet Exporte fest als UTF-8; viele deutsche Banken exportieren Windows-1252, dann scheitern Umlaute in Empfängernamen. Das Format deiner Bank ist nicht belegt.",
+    "Kein Git-Remote konfiguriert; ob es eine andere Sicherung gibt, ist aus dem Repository nicht erkennbar."
+  ],
+  "decisions": [],
+  "suggestions": [
+    {
+      "id": "sg-ef348a2e",
+      "category": "recommendation",
+      "type": "next",
+      "title": "Import mit echten Beispieldateien testen",
+      "why": "Die Bank hat ihr Format schon einmal geändert; Tests mit beiden Formaten fangen den nächsten Wechsel ab, bevor ein Monat falsch summiert wird.",
+      "evidence": "686ba20 fix(import); tests/test_report.py enthält nur assert True",
+      "done_when": "Tests lesen je eine anonymisierte CSV pro Format und prüfen Datum, Empfänger und Betrag jeder Zeile."
+    },
+    {
+      "id": "sg-a412ba6a",
+      "category": "idea",
+      "type": "feature",
+      "title": "Kategorieregeln aus einer Datei laden",
+      "why": "Ein neuer Händler wie heute Lidl braucht jetzt eine Codeänderung; eine Regeldatei neben den Exporten macht daraus eine Zeile Text.",
+      "evidence": "TODO in ledger/rules.py::category; uncommittete Lidl-Ergänzung in RULES",
+      "done_when": "Eine Datei mit Muster und Kategorie wird beim Bericht geladen; die Lidl-Regel steht dort statt in RULES."
+    },
+    {
+      "id": "sg-1c56df3c",
+      "category": "idea",
+      "type": "feature",
+      "title": "Unkategorisierte Empfänger im Bericht auflisten",
+      "why": "Nach dem Bericht suchst du sonst in der CSV, was in Sonstiges gelandet ist; die Liste zeigt direkt, welche Regel als Nächstes fehlt.",
+      "evidence": "rules.category liefert Sonstiges ohne Rückmeldung; report.monthly verwirft den Empfänger",
+      "done_when": "Der Bericht zeigt die zehn größten Empfänger in Sonstiges mit Monatssumme unter der Übersicht."
+    },
+    {
+      "id": "sg-bc2fee5c",
+      "category": "idea",
+      "type": "feature",
+      "title": "Vormonatsvergleich je Kategorie",
+      "why": "Ein Haushaltsbuch lohnt sich, wenn Ausreißer auffallen; die Differenz zum Vormonat zeigt sie, ohne dass du selbst rechnest.",
+      "evidence": "report.monthly gruppiert bereits nach Monat (YYYY-MM) und Kategorie",
+      "done_when": "Der Bericht zeigt pro Kategorie den Monatsbetrag und die Differenz zum Vormonat in Euro."
+    }
+  ],
+  "cross_project_hints": [
+    "recipe-box braucht Mengen mit Dezimalkomma für Portionen und Einkaufsliste; ledger-lite parst deutsche Beträge bereits mit Decimal in importer.read.",
+    "Die Lebensmittel-Kategorie zeigt Ausgaben, die recipe-box mit Einkaufslisten planen will; beide berühren denselben Wocheneinkauf."
+  ],
+  "handbook": {
+    "run": [
+      {
+        "what": "Tests ausführen",
+        "how": "python -m pytest",
+        "folder": "."
+      }
+    ],
+    "installed": null,
+    "architecture": "importer.read liest eine Bank-CSV in Transaction-Objekte, rules.category ordnet Empfänger per Regex einer Kategorie zu, report.monthly summiert Beträge je Monat und Kategorie. Ein Aufrufer, der die Teile verbindet und ausgibt, fehlt; ledger/pdf.py liegt nur auf feature/pdf-export.",
+    "places": [
+      {
+        "path": "ledger/importer.py",
+        "what": "CSV-Import mit Erkennung beider Bankformate"
+      },
+      {
+        "path": "ledger/rules.py",
+        "what": "Kategorieregeln als Regex-Liste, hier kommen neue Händler hin"
+      },
+      {
+        "path": "ledger/report.py",
+        "what": "Monatssummen je Kategorie"
+      },
+      {
+        "path": "docs/export.md",
+        "what": "Wie du den CSV-Export im Onlinebanking erzeugst"
+      },
+      {
+        "path": "tests/test_report.py",
+        "what": "Einziger Test, derzeit nur ein Platzhalter"
+      },
+      {
+        "path": "feature/pdf-export: ledger/pdf.py",
+        "what": "PDF-Export-Stub auf dem unfertigen Branch"
+      }
+    ],
+    "read_first": [
+      {
+        "path": "README.md",
+        "why": "Projektziel in einem Satz"
+      },
+      {
+        "path": "docs/export.md",
+        "why": "Woher die Eingabedateien kommen"
+      },
+      {
+        "path": "ledger/rules.py",
+        "why": "Kategorien, offenes TODO und die aktuelle Änderung"
+      }
+    ],
+    "needs": [
+      "Python 3.12 oder neuer (pyproject.toml)",
+      "pytest für die Tests, nicht als Abhängigkeit deklariert",
+      "Semikolon-getrennter CSV-Export aus dem Onlinebanking"
+    ],
+    "terms": [
+      {
+        "term": "Sonstiges",
+        "meaning": "Kategorie für Empfänger, auf die keine Regel in RULES passt."
+      },
+      {
+        "term": "Regel",
+        "meaning": "Paar aus Regex-Muster auf den Empfänger und Kategoriename in ledger/rules.py."
+      },
+      {
+        "term": "Altes und neues Exportformat",
+        "meaning": "Die zwei Spaltensätze der Bank-CSV; das neue Format kam im September 2026."
+      }
+    ]
+  }
+}
