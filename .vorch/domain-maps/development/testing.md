@@ -26,7 +26,7 @@ Each run keeps logs and `report.json` in the current checkout's `.tmp/test-runs/
 
 ## Fixture isolation and cleanup
 
-Test data lives outside the repository and the owner's profile: `<primary-checkout-parent>/.vorch-test-data/<primary-checkout-name>/<unique-run>/`. For the usual checkout this is `C:/Development/projects/.vorch-test-data/vwatch/`. Set the process-local `VORCH_TEST_ROOT` to another directory when that location is unsuitable; the runner rejects roots inside either checkout or the current HOME/USERPROFILE. Reports, compiler scratch and source-run scratch remain in `.tmp/`; only application-test fixture data uses this external root.
+Test data lives outside the repository and the owner's profile: `<primary-checkout-parent>/.vorch-test-data/<primary-checkout-name>/<unique-run>/`. For the usual checkout this is `C:/Development/projects/.vorch-test-data/vWatch/`. Set the process-local `VORCH_TEST_ROOT` to another directory when that location is unsuitable; the runner rejects roots inside either checkout or the current HOME/USERPROFILE. Reports, compiler scratch and source-run scratch remain in `.tmp/`; only application-test fixture data uses this external root.
 
 Every Rust case, UI file and Rust discovery process receives its own fixture directory. `isolated_environment` in `scripts/test.py` sets:
 

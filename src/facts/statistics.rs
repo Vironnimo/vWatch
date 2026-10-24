@@ -229,7 +229,7 @@ fn numstat(repo: &Path, from: NaiveDate, revs: &[&str]) -> Option<String> {
         "--diff-merges=off",
         "--no-ext-diff",
         "--no-textconv",
-        "--format=WT:%cs",
+        "--format=VWATCH:%cs",
         &since,
     ];
     args.extend_from_slice(revs);
@@ -240,7 +240,7 @@ fn numstat(repo: &Path, from: NaiveDate, revs: &[&str]) -> Option<String> {
 fn add_days(days: &mut Days, log: &str, from: NaiveDate, today: NaiveDate) {
     let mut date = None;
     for line in log.lines() {
-        if let Some(value) = line.strip_prefix("WT:") {
+        if let Some(value) = line.strip_prefix("VWATCH:") {
             date = NaiveDate::parse_from_str(value, "%Y-%m-%d")
                 .ok()
                 .filter(|d| *d <= today && *d >= from)
