@@ -95,7 +95,7 @@ class Development(unittest.TestCase):
         self.assertEqual(good_staged.returncode, 0, good_staged.stdout + good_staged.stderr)
 
     @unittest.skipUnless(os.name == "nt", "installer uses Windows PowerShell")
-    def test_installer_builds_and_copies_from_the_primary_target(self):
+    def test_installer_installs_from_the_primary_target_or_its_package(self):
         task = self.create()
         probe = self.base / "installer-probe.ps1"
         # Stop after observing the two copy sources. No copy, process shutdown,
@@ -118,6 +118,21 @@ try { & $Installer -Target $Destination; throw 'installer did not stop' }
 catch { if ($_.Exception.Message -ne 'probe complete') { throw } }
 @{ build = $global:build; copies = $global:copies } | ConvertTo-Json -Depth 5 -Compress
 ''', encoding="utf-8")
+
+        def install(installer, env):
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe),
+                 "-Installer", str(installer), "-Destination", str(self.base / "installation")],
+                cwd=self.base, env=env, capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return json.loads(result.stdout)
+
+        def assert_copied_from(observed, source):
+            for copied, binary in zip(observed["copies"], ("vWatch.exe", "vWatch-UI.exe"), strict=True):
+                self.assertEqual(Path(copied["source"]), source / binary)
+                self.assertEqual(Path(copied["destination"]), self.base / "installation" / binary)
+
         for checkout in (self.repo, task):
             for override in (False, True):
                 with self.subTest(checkout=checkout.name, override=override):
@@ -125,21 +140,22 @@ catch { if ($_.Exception.Message -ne 'probe complete') { throw } }
                     if override:
                         env["CARGO_TARGET_DIR"] = str(self.base / "wrong-target")
                         env["CARGO_BUILD_TARGET_DIR"] = str(self.base / "also-wrong")
-                    result = subprocess.run(
-                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe),
-                         "-Installer", str(checkout / "scripts" / "install.ps1"),
-                         "-Destination", str(self.base / "installation")],
-                        cwd=self.base, env=env, capture_output=True, text=True, timeout=15,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    observed = json.loads(result.stdout)
+                    observed = install(checkout / "scripts" / "install.ps1", env)
                     self.assertEqual(Path(observed["build"]["cwd"]), checkout)
                     self.assertEqual(observed["build"]["args"],
                                      ["build", "--release", "--bins", "--target-dir", str(self.repo / "target")])
-                    for copied, binary in zip(observed["copies"], ("vWatch.exe", "vWatch-UI.exe"), strict=True):
-                        self.assertEqual(Path(copied["source"]), self.repo / "target" / "release" / binary)
-                        self.assertEqual(Path(copied["destination"]), self.base / "installation" / binary)
+                    assert_copied_from(observed, self.repo / "target" / "release")
                     self.assertFalse((checkout / "target").exists())
+        # An extracted release package installs its own executables without building.
+        with self.subTest(checkout="package"):
+            package = self.base / "package"
+            package.mkdir()
+            shutil.copy2(self.repo / "scripts" / "install.ps1", package / "install.ps1")
+            for binary in ("vWatch.exe", "vWatch-UI.exe"):
+                (package / binary).write_bytes(b"")
+            observed = install(package / "install.ps1", dict(os.environ))
+            self.assertIsNone(observed["build"])
+            assert_copied_from(observed, package)
 
     def test_delete_preserves_ignored_data_and_unmerged_commits(self):
         task = self.create()
