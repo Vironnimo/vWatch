@@ -110,6 +110,8 @@ fn fixture(home: &Path, template: &Path, repo: &Path, command: &str) -> HashMap<
         ("display-name", "Renamed project".to_owned()),
         ("existing-folder", repo.to_string_lossy().into_owned()),
         ("YYYY-MM-DD", "2030-10-07".to_owned()),
+        ("first-date", "2026-01-05".to_owned()),
+        ("last-date", "2026-04-04".to_owned()),
         ("user's reason", "Other work first".to_owned()),
         ("user's goal", "Provide a readable export".to_owned()),
         ("item-id", item_id),

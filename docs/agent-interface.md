@@ -261,6 +261,7 @@ Job request/result files and output snapshots are different from usage metadata:
 | Errors and partial-effect notices | What failed, what remains saved and the available recovery; prevents blind retries and database recreation |
 | Output data framing | Stored text cannot forge `Next:`/`Undo:` instructions; prevents records from acquiring command authority |
 | Generated task prompt | Reports results through the CLI and leaves completion confirmation to the owner |
+| Working-practice review reference | Loaded only on the owner's request; reads only until the owner selects findings, then saves them as agent proposals; keeps the daily run and morning read unchanged |
 
 The complete source Skill measured 12,887 → 11,033 `o200k_base` tokens, a reduction of 1,854 tokens (14.4%). The main body changed from 3,407 to 2,806 tokens while adding recovery and owner-operation guidance. `AGENTS.md` changed from 2,668 to 2,908 tokens: the 240-token increase records owner authority, recovery ownership and the on-demand interface reference. README changed from 1,289 to 1,480 tokens to explain continuations, explicit JSON and restoration. Keep shared rules in their owning surface rather than repeating them in every prompt.
 

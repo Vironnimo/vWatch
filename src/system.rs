@@ -31,6 +31,10 @@ const SKILL_FILES: &[(&str, &str)] = &[
         "references/portfolio-guide.md",
         include_str!("../skill/vwatch/references/portfolio-guide.md"),
     ),
+    (
+        "references/practice-review.md",
+        include_str!("../skill/vwatch/references/practice-review.md"),
+    ),
 ];
 
 pub fn exe_path() -> PathBuf {
@@ -256,7 +260,8 @@ mod tests {
                 "SKILL.md",
                 "references/cli.md",
                 "references/card-guide.md",
-                "references/portfolio-guide.md"
+                "references/portfolio-guide.md",
+                "references/practice-review.md"
             ]
         );
         export_skill_to(&exported).unwrap();

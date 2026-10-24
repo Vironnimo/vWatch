@@ -10,7 +10,7 @@ The native console protocol and operating Skill let people and agents use vWatch
 
 Business behavior stays in `src/service.rs` and its modules; document validation stays in `src/cards.rs` (see `application.md`). The console and Tauri adapters call the same service. A new owner capability needs CLI coverage or a deliberate exclusion in `docs/agent-interface.md` -> Capability coverage. Window lifecycle and `src/system.rs` belong to `desktop.md`; building and installing belong to `development.md`.
 
-`skill/vwatch/SKILL.md` teaches operation of the installed application, not development of this repository. Its three references cover project cards, portfolio synthesis and less common CLI operations. Keep this runtime material self-contained for an agent that has never seen vWatch's source. Skill export belongs to the desktop domain's `system::export_skill`; this domain owns the exported content.
+`skill/vwatch/SKILL.md` teaches operation of the installed application, not development of this repository. Its four references cover project cards, portfolio synthesis, the on-demand working-practice review and less common CLI operations. Keep this runtime material self-contained for an agent that has never seen vWatch's source. Skill export belongs to the desktop domain's `system::export_skill`; this domain owns the exported content.
 
 ## Interfaces
 

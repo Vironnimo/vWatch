@@ -1,6 +1,6 @@
 ---
 name: vwatch
-description: Operate vWatch's project overview. Use when the user asks for a vWatch daily run, project cards or portfolio brief, changes to watched projects, ratings or tasks, or answers from its stored project information.
+description: Operate vWatch's project overview. Use when the user asks for a vWatch daily run, project cards or portfolio brief, changes to watched projects, ratings or tasks, answers from its stored data, or a review of how they work across projects.
 ---
 
 # vWatch
@@ -162,6 +162,10 @@ vwatch tasks report <task-id> --status done --result "<outcome>" --evidence "<ch
 ```
 
 This requests review; it does not confirm completion on the user's behalf. For a blocker, use `--status blocked --result "<blocker and next step>"`. For creating, confirming, reopening or cancelling tasks at the user's request, read `references/cli.md` under "Assigned work".
+
+### 6. Review how the user works across projects
+
+When the user asks for an analysis of their working practices, habits or workflow across the watched projects, read `references/practice-review.md` and follow it. A daily run never includes this review: it keeps the morning read short.
 
 ## Respect the user's decisions in every card and brief
 

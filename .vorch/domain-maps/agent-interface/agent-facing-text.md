@@ -56,12 +56,14 @@ Source: `skill/vwatch/SKILL.md`. General rationale: `docs/agent-interface.md` ->
 | `later`: wait until | Respect the owner's deferral instead of asking the same question again. |
 | `Reactions come only from the user.` | Evidence can resolve a card question without fabricating owner feedback. |
 | `Keep a retained item's wording unless its evidence changed` | Rewording unchanged findings creates unread noise. |
+| `or a review of how they work across projects` (description) | Load the Skill for the owner's on-demand working-practice review; the owner requested it on 2026-10-24. |
+| `A daily run never includes this review: it keeps the morning read short.` | The owner wants the review only on request; PROJECT.md -> Context makes a shorter morning read the goal. |
 | `It does not run models or schedule agents.` | Place recurring execution in the user's agent application rather than inventing a vWatch capability. |
 | `Do not change these operating-system settings through other tools to bypass this boundary.` | Respect the deliberate owner-only autostart/PATH boundary across tools. |
 
 ## Field and CLI references
 
-Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portfolio-guide.md` and `skill/vwatch/references/cli.md`. The table identifies the source where an excerpt is not unique. Field definitions remain in their guides and the schema; this is not a second field catalogue.
+Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portfolio-guide.md`, `skill/vwatch/references/practice-review.md` and `skill/vwatch/references/cli.md`. The table identifies the source where an excerpt is not unique. Field definitions remain in their guides and the schema; this is not a second field catalogue.
 
 | Text | Reason |
 |---|---|
@@ -82,6 +84,15 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 | CLI reference: `settings update --language en` or `--language de` | Select the same language through the service as the window; explain the English default, pending-token invalidation and preservation of saved content. |
 | CLI reference: `CLI-generated help, labels, outcomes and errors stay English` | Do not infer report language from command framing or translate existing owner-supplied text. |
 | CLI reference: `settings update --style` selects `"Today"`, `"Projects"`, `"Ideas"` or `"Statistics"` | Use the default-language labels while preserving existing style values and omitted-option semantics. |
+| Practice review: `Until the user selects findings, the review only reads` | The owner chose on 2026-10-24 that findings are reported first and only selected ones are saved. |
+| Practice review: `Do not record ratings, own ideas, tasks, goals or status from your findings` | Own ideas and ratings belong to the owner; an agent finding saved with `ideas add` would appear as the owner's idea. |
+| Practice review: `Agent chat transcripts and session logs are outside the review unless the user names their location` | Transcripts hold personal content beyond the projects and are not vWatch evidence. |
+| Practice review: `Use` `--json` `only for the project list` | The readable list omits folders, goals and status dates; other reads stay text. |
+| Practice review: `Do not run` `statistics --json` | Its daily series measured 1,063,715 characters for 90 days on the owner's data copy (2026-10-24). |
+| Practice review: `Call something a pattern only with at least 3 occurrences or 2 projects.` | vWatch's own records can be thin (2 tasks and 5 reactions on 2026-10-24); prevents generalizing from single events. |
+| Practice review: `Commits and lines measure activity, not time spent or quality` | vWatch does not see agent sessions or working hours; prevents judging the owner from commit counts. |
+| Practice review: `a card holds at most 4 of each category` | Card validation rejects a fifth suggestion per category (`src/cards.rs`); the owner decides which retained one a new finding replaces. |
+| Practice review: `holds every current suggestion as` | A supplied list replaces the whole field; omitted IDs would drop retained proposals. |
 | CLI reference: `Omitting a field and sending null differ` | Keep default/merge semantics separate from explicit nullable values. |
 | CLI reference: `Restored evidence stays historical, so the document can remain due.` | Restoring wording does not establish a fresh review. |
 | CLI reference: `A missing measurement is unknown, not zero.` | Avoid fabricated activity or size baselines. |
@@ -180,6 +191,6 @@ The following passages retain their existing meanings in both UI languages throu
 
 ## Coverage boundary
 
-This is a targeted reason register, not a claim that every runtime sentence has been mapped. It covers the existing rationale groups, high-consequence authority/recovery instructions, shared schema/service guidance and the copied task prompt. The four Skill files still contain field-specific prose, reflection examples, table mappings and recipes without individual rows. Command-specific help, renderer labels/outcome variants, many validation messages and service errors also remain individually unmapped. Their canonical content and complete contracts remain in source and `docs/agent-interface.md`.
+This is a targeted reason register, not a claim that every runtime sentence has been mapped. It covers the existing rationale groups, high-consequence authority/recovery instructions, shared schema/service guidance and the copied task prompt. The five Skill files still contain field-specific prose, reflection examples, table mappings and recipes without individual rows. Command-specific help, renderer labels/outcome variants, many validation messages and service errors also remain individually unmapped. Their canonical content and complete contracts remain in source and `docs/agent-interface.md`.
 
 When changing an uncovered sentence, read its source branch, adjacent text and relevant contract/tests, then add its identifiable row. Do not invent a historical incident to justify existing wording. Dated evaluation accounts establish only their recorded tasks and versions; preserve their failed attempts and stated limits when citing them.
