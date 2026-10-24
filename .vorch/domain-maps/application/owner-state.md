@@ -8,6 +8,8 @@ Owner status, notes, goals and replies become part of the evidence agents consum
 
 Feedback carries the item snapshot it referred to. Ratings do not assign work. An omitted note or snooze date must inherit the value current inside the write transaction, not a value read earlier by the service. Deferred items use a local calendar return date; note-only edits do not restart the snooze. Undo may restore an already expired date exactly. Tests: `tests/owner_controls.rs`, `tests/owner_undo.rs::concurrent_feedback_writers_preserve_omitted_notes_and_inherited_snooze_dates`.
 
+The saved `language` preference selects English (`en`, the default) or German (`de`) for the window and newly authored Cards/portfolio briefs. Both agent contexts expose `report_language`; the Store includes it in Context Tokens. A switch invalidates pending writes but does not rewrite documents, move the read baseline or make every current report Due. It uses the existing atomic preference edit and guarded Undo.
+
 ## Warnings and assignments
 
 `fact_warnings`, `acknowledged_warnings` and `warning_ack_applies` in `src/service/signals.rs` derive warnings from facts and apply an owner's reason against the acknowledged basis. Acknowledging a warning changes its treatment, not its measured facts. A materially worsened condition invalidates the acknowledgement. `tests/owner_controls.rs` covers both persistence of raw facts and return of warnings.

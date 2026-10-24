@@ -147,7 +147,11 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
     std::fs::create_dir_all(data_dir).map_err(|e| {
         VWatchError::new(
             "storage_error",
-            format!("Cannot create data folder {}: {e}.", data_dir.display()),
+            format!(
+                "Cannot create data folder {}: {}.",
+                data_dir.display(),
+                system::io_message(&e)
+            ),
         )
         .hint("Check that vWatch can write to its data folder.")
     })?;
@@ -454,13 +458,17 @@ pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result
             let mut result = if let SettingsCmd::Update {
                 style,
                 hidden_modules,
+                language,
             } = action
             {
-                if style.is_none() && hidden_modules.is_none() {
+                if style.is_none() && hidden_modules.is_none() && language.is_none() {
                     return Err(VWatchError::new("invalid_arguments", "No preference was supplied. Nothing was changed.")
-                        .hint("Pass --style handover (Today), --style board (Projects), --style ideas or --style statistics, or pass --hidden-modules with comma-separated module IDs."));
+                        .hint("Pass --language en or de, --style handover (Today), --style board (Projects), --style ideas or --style statistics, or --hidden-modules with comma-separated module IDs."));
                 }
                 let mut updates = Vec::new();
+                if let Some(language) = language {
+                    updates.push(("language", json!(language.to_lowercase())));
+                }
                 if let Some(style) = style {
                     updates.push(("style", json!(style.to_lowercase())));
                 }

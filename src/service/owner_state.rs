@@ -4,7 +4,7 @@ use super::*;
 /// How the owner rates suggestions, patterns, synergies, app ideas and verdicts.
 pub const RATINGS: &[&str] = &["up", "later", "down"];
 
-pub const PREFS: &[&str] = &["style", "hidden_modules"];
+pub const PREFS: &[&str] = &["style", "hidden_modules", "language"];
 
 pub const SNOOZE_DAYS: i64 = 14;
 
@@ -408,6 +408,10 @@ impl VWatch {
             "cards", "tasks", "changes", "night", "space", "parking", "week",
         ];
         match key {
+            "language" if !value.as_str().is_some_and(|v| ["en", "de"].contains(&v)) => Err(
+                VWatchError::new("invalid_pref", "Invalid language. Nothing was changed.")
+                    .hint("Use en (English) or de (German)."),
+            ),
             "style"
                 if !value.as_str().is_some_and(|style| {
                     ["handover", "board", "handbook", "ideas", "statistics"].contains(&style)
@@ -438,12 +442,26 @@ impl VWatch {
                 "invalid_pref",
                 format!("Unknown preference '{key}'. Nothing was changed."),
             )
-            .hint("Editable preferences: style, hidden_modules.")),
+            .hint("Editable preferences: style, hidden_modules, language.")),
             _ => Ok(()),
         }
     }
 
     pub fn set_pref(&self, key: &str, value: &Value) -> Result<()> {
         self.update_prefs(&[(key, value.clone())]).map(drop)
+    }
+
+    /// One owner choice governs the window and newly authored report content.
+    pub(crate) fn report_language(&self) -> Result<String> {
+        Ok(
+            match self
+                .store
+                .pref("language")?
+                .and_then(|v| v.as_str().map(str::to_owned))
+            {
+                Some(value) if value == "de" => value,
+                _ => "en".to_owned(),
+            },
+        )
     }
 }

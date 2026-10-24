@@ -208,6 +208,7 @@ fn preferences_undo_is_atomic_scoped_and_failure_creates_no_receipt() {
         .update_prefs(&[
             ("style", json!("board")),
             ("hidden_modules", json!(["pulse"])),
+            ("language", json!("de")),
         ])
         .unwrap();
     let before_count = count_receipts(dir.path());
@@ -219,12 +220,20 @@ fn preferences_undo_is_atomic_scoped_and_failure_creates_no_receipt() {
         .is_err());
     assert_eq!(count_receipts(dir.path()), before_count);
     assert_eq!(svc.store().pref("style").unwrap(), Some(json!("board")));
+    for invalid in [json!("fr"), json!(null), json!(["de"])] {
+        assert_eq!(
+            svc.set_pref("language", &invalid).unwrap_err().code,
+            "invalid_pref"
+        );
+        assert_eq!(svc.store().pref("language").unwrap(), Some(json!("de")));
+    }
     svc.store()
         .set_pref("last_visit", &json!("new visit"))
         .unwrap();
     svc.undo(token(&original)).unwrap();
     assert_eq!(svc.store().pref("style").unwrap(), None);
     assert_eq!(svc.store().pref("hidden_modules").unwrap(), None);
+    assert_eq!(svc.state(false).unwrap()["prefs"]["language"], "en");
     assert_eq!(
         svc.store().pref("last_visit").unwrap(),
         Some(json!("new visit"))

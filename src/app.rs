@@ -305,11 +305,16 @@ async fn add_projects(app: State<'_, AppState>, paths: Vec<String>) -> Reply {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn pick_folder(app: AppHandle) -> Reply {
+async fn pick_folder(app: AppHandle, state: State<'_, AppState>) -> Reply {
+    let language = work(&state, |s| s.report_language().map(Value::String)).await?;
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
-            .set_title("Ordner oder Projekt wählen")
+            .set_title(if language == "de" {
+                "Ordner oder Projekt wählen"
+            } else {
+                "Choose folder or Project"
+            })
             .blocking_pick_folder()
     })
     .await

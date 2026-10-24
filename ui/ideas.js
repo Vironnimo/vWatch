@@ -1,3 +1,4 @@
+import { tr, locale, localized } from './i18n.js';
 import { S, call, errText, load, render, setPref, toast } from './app.js';
 import { closeRound, drafts, fbButtons, hiddenByRating, myNote, noteFor, noteForm, rated, react, snoozeFor, snoozedUntil } from './feedback.js';
 import { TASK_STATUS, taskBtn, trackedTask } from './handoff.js';
@@ -18,19 +19,19 @@ function ideaCard(s, projects, projectId, kind, options = {}) {
   if (!options.collection && ideaClosed(s.id)) return '';
   if (!options.collection && hiddenByRating(s.id)) return '';
   const firstSeen = options.firstSeen || (projectId ? ((byId(projectId) || {}).suggestion_first_seen || {})[s.id] : (S.new_app_first_seen || {})[s.id]);
-  const stamp = firstSeen && Number.isFinite(Date.parse(firstSeen)) ? `<time class="faint" datetime="${esc(firstSeen)}" title="Erstmals vorgeschlagen: ${esc(new Date(firstSeen).toLocaleString('de-DE'))}">vorgeschlagen ${esc(new Date(firstSeen).toLocaleDateString('de-DE'))}</time>` : '';
+  const stamp = firstSeen && Number.isFinite(Date.parse(firstSeen)) ? `<time class="faint" datetime="${esc(firstSeen)}" title="${tr("First proposed: {0}", esc(new Date(firstSeen).toLocaleString(locale())))}">${tr("proposed {0}", esc(new Date(firstSeen).toLocaleDateString(locale())))}</time>` : '';
   const task = ideaTask(s.id);
   const assigned = S.idea_states?.[s.id]?.status === 'in_progress';
   const finished = task && S.idea_states?.[s.id]?.status === 'implemented';
   const returned = S.feedback[s.id]?.value === 'later' && snoozedUntil(S.feedback[s.id]) <= S.today;
   const missingProjects = (projects || []).filter(id => !byId(id));
   const action = S.idea_states?.[s.id]?.archived ? '' : finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(s.id || s.title, { projects: task ? task.projects : projectId ? [projectId] : (projects || []), title: s.title, why: s.why || s.pitch, evidence: s.evidence, done_when: s.done_when }, assigned ? task : null);
-  const taskDetails = options.collection && task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${s.id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
-  return `<div class="idea${ideaHighlight === s.id ? ' search-hit' : ''}" data-idea-id="${esc(s.id)}" tabindex="-1">${kind ? `<div class="kind">${esc(kind)}${options.retained ? ' · aus früherem Bericht gemerkt' : ''}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
-    ${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[s.id]))}</div>` : ''}
+  const taskDetails = options.collection && task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${s.id}:${task.id}`)}><summary class="more">${task.status === 'review' ? tr("Review result") : task.status === 'blocked' ? tr("View blocker") : tr("View Task")}</summary>${trackedTask(task, true)}</details>` : '';
+  return `<div class="idea${ideaHighlight === s.id ? ' search-hit' : ''}" data-idea-id="${esc(s.id)}" tabindex="-1">${kind ? `<div class="kind">${esc(kind)}${options.retained ? ` ${tr("· retained from an earlier report")}` : ''}</div>` : ''}<div class="h"><div class="t">${s.severity ? `<span class="sev-${esc(s.severity)}">●</span> ` : ''}${esc(s.title)}</div></div>
+    ${returned && !task ? `<div class="idea-returned">${tr("Back again · deferred until {0}", fmtDate(snoozedUntil(S.feedback[s.id])))}</div>` : ''}
     <div class="why">${esc(s.why || s.pitch)}</div>
-    ${s.because ? `<div class="why"><b>Weil:</b> ${esc(s.because)}</div>` : ''}
-    ${s.evidence ? `<details ${foldAttrs(`idea-evidence:${s.id}`)}><summary class="more">Beleg</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
+    ${s.because ? `<div class="why"><b>${tr("Because:")}</b> ${esc(s.because)}</div>` : ''}
+    ${s.evidence ? `<details ${foldAttrs(`idea-evidence:${s.id}`)}><summary class="more">${tr("Evidence")}</summary><div class="ev">${esc(s.evidence)}</div></details>` : ''}
     ${myNote(s.id)}${ideaStatusActions(s.id)}
     <div class="foot"><div class="who">${(projects || []).map(plink).join('')}${s.type ? `<span class="tag">${esc(TYPE[s.type] || s.type)}</span>` : ''}</div>${fbButtons(s.id)}</div>
     <div class="taskrow">${stamp}${action}</div>${taskDetails}</div>`;
@@ -39,9 +40,9 @@ function ideaCard(s, projects, projectId, kind, options = {}) {
 
 const ideaTime = at => Number.isFinite(Date.parse(at)) ? Date.parse(at) : -Infinity;
 const newestIdeas = items => [...items].sort((a, b) => ideaTime(b.firstSeen) - ideaTime(a.firstSeen));
-const IDEA_FILTERS = { new: 'Neu', up: 'Gut gefunden', later: 'Später', assigned: 'In Umsetzung', done: 'Umgesetzt', archived: 'Archiviert', down: 'Abgelehnt', all: 'Alle' };
-const IDEA_KINDS = { suggestion: 'Aus dem Projekt', new_app: 'Neue App', synergy: 'Querverbindung', owner_idea: 'Deine Idee' };
-const PROPOSAL_CATEGORIES = { idea: 'Ideen', recommendation: 'Empfehlungen' };
+const IDEA_FILTERS = localized(() => ({ new: tr("New"), up: tr("Liked"), later: tr("Later"), assigned: tr("In progress"), done: tr("Implemented"), archived: tr("Archived"), down: tr("Rejected"), all: tr("All") }));
+const IDEA_KINDS = localized(() => ({ suggestion: tr("From the Project"), new_app: tr("New app"), synergy: tr("Connection"), owner_idea: tr("Your idea") }));
+const PROPOSAL_CATEGORIES = localized(() => ({ idea: tr("Ideas"), recommendation: tr("Recommendations") }));
 const proposalCategory = (s, kind = 'suggestion') => ['idea', 'recommendation'].includes(s.category) ? s.category
   : ['new_app', 'owner_idea'].includes(kind) || s.type === 'feature' ? 'idea' : 'recommendation';
 const categoryEntries = () => ideaCollection().filter(e => proposalCategory(e.s, e.kind) === ideaCategory);
@@ -51,7 +52,7 @@ function setIdeaCategory(category) {
   $(`[data-idea-category="${category}"]`)?.focus({ preventScroll: true });
 }
 function ideaProjectRecovery(ids) {
-  return `<div class="idea-project-recovery"><p class="faint">Vor einem neuen Auftrag wieder aufnehmen:</p>${[...new Set(ids)].map(id => `<div><span>Projekt nicht mehr beobachtet: ${esc(id)}</span> <button class="linkish" type="button" data-idea-restore-project="${esc(id)}"${restoringIdeaProjects.has(id) ? ' disabled' : ''}>${restoringIdeaProjects.has(id) ? 'Wird wieder aufgenommen …' : 'Projekt wieder aufnehmen'}</button></div>`).join('')}</div>`;
+  return `<div class="idea-project-recovery"><p class="faint">${tr("Restore before assigning a new Task:")}</p>${[...new Set(ids)].map(id => `<div><span>${tr("Project no longer watched: {0}", esc(id))}</span> <button class="linkish" type="button" data-idea-restore-project="${esc(id)}"${restoringIdeaProjects.has(id) ? ' disabled' : ''}>${restoringIdeaProjects.has(id) ? tr("Restoring …") : tr("Restore Project")}</button></div>`).join('')}</div>`;
 }
 async function restoreIdeaProject(id) {
   if (restoringIdeaProjects.has(id)) return;
@@ -59,8 +60,8 @@ async function restoreIdeaProject(id) {
   try {
     const result = await call('restore_project', { id });
     await load(false);
-    toast(`${result.project?.name || id} ist wieder im Blick.`);
-  } catch (e) { toast(`Projekt nicht wieder aufgenommen: ${errText(e)}`); }
+    toast(tr("{0} is being watched again.", result.project?.name || id));
+  } catch (e) { toast(tr("Project not restored: {0}", errText(e))); }
   finally { restoringIdeaProjects.delete(id); render(); }
 }
 // The selected Task and guarded idea revision come from one service snapshot.
@@ -79,13 +80,13 @@ function ideaStatusActions(id) {
   const state = S.idea_states?.[id] || {};
   const progress = state.status || 'open';
   const button = (action, label, title) => `<button class="btn" type="button" data-idea-status="${action}" data-idea-target="${esc(id)}" data-idea-revision="${esc(state.revision || '')}" title="${esc(title)}"${busyIdeas.has(id) ? ' disabled' : ''}>${label}</button>`;
-  const actions = state.archived ? button('restore', 'Zurückholen', 'Zurück in die Sammlung; dein bisheriger Stand bleibt erhalten')
-    : (progress === 'open' ? button('in_progress', 'In Umsetzung', 'Die Arbeit läuft bereits, zum Beispiel nach Copy-paste an einen Agent') : '')
-      + (progress !== 'implemented' ? button('implemented', 'Umgesetzt', 'Du bestätigst, dass diese Idee umgesetzt ist') : '')
-      + (progress !== 'open' ? button('open', 'Wieder offen', 'Den Umsetzungsstand zurücknehmen; die Idee bleibt mit ihrer Bewertung erhalten') : '')
-      + button('archived', 'Archivieren', 'Aus den offenen Vorschlägen nehmen; Bewertung und laufende Aufträge bleiben erhalten');
-  const label = state.archived ? 'Archiviert' : progress === 'implemented' ? 'Umgesetzt' : progress === 'in_progress' ? 'In Umsetzung' : '';
-  return `<div class="idea-status-actions" aria-label="Umsetzungsstand">${label ? `<span class="tag">${label}</span>` : ''}${actions}</div>`;
+  const actions = state.archived ? button('restore', tr("Restore"), tr("Return to the collection; your previous state is preserved"))
+    : (progress === 'open' ? button('in_progress', tr("In progress"), tr("Work is already underway, for example after pasting into an Agent")) : '')
+      + (progress !== 'implemented' ? button('implemented', tr("Implemented"), tr("You confirm that this idea is implemented")) : '')
+      + (progress !== 'open' ? button('open', tr("Open again"), tr("Reset implementation status; the idea keeps its rating")) : '')
+      + button('archived', tr("Archive"), tr("Remove from open proposals; rating and active Tasks are preserved"));
+  const label = state.archived ? tr("Archived") : progress === 'implemented' ? tr("Implemented") : progress === 'in_progress' ? tr("In progress") : '';
+  return `<div class="idea-status-actions" aria-label="${tr("Implementation status")}">${label ? `<span class="tag">${label}</span>` : ''}${actions}</div>`;
 }
 async function changeIdeaStatus(id, status, revision) {
   if (busyIdeas.has(id)) return;
@@ -94,10 +95,10 @@ async function changeIdeaStatus(id, status, revision) {
     const result = await call('set_idea_status', { id, status, revision });
     await load(false);
     const undo = result.changed && ['archived', 'restore'].includes(status) ? () => changeIdeaStatus(id, status === 'archived' ? 'restore' : 'archived', result.idea_status.revision) : null;
-    toast(({ in_progress: 'Unter „In Umsetzung“ gespeichert.', implemented: 'Als umgesetzt bestätigt.', open: 'Die Idee ist wieder offen.', archived: 'Archiviert. Unter „Archiviert“ kannst du sie zurückholen.', restore: 'Aus dem Archiv zurückgeholt.' })[status], undo);
+    toast(({ in_progress: tr("Saved under “In progress”."), implemented: tr("Confirmed as implemented."), open: tr("The idea is open again."), archived: tr("Archived. You can restore it under “Archived”."), restore: tr("Restored from the archive.") })[status], undo);
   } catch (e) {
     await load(false);
-    toast(e?.code === 'idea_changed' ? 'Der Stand hat sich inzwischen geändert. Prüfe den aktualisierten Eintrag.' : 'Stand nicht bestätigt: ' + errText(e));
+    toast(e?.code === 'idea_changed' ? tr("The state has changed. Check the updated entry.") : `${tr("State not confirmed:")} ` + errText(e));
   } finally { busyIdeas.delete(id); render(); }
 }
 function ideaCollection() {
@@ -144,7 +145,7 @@ function renderIdeas() {
   const isIdea = ideaCategory === 'idea', label = PROPOSAL_CATEGORIES[ideaCategory];
   const categories = Object.entries(PROPOSAL_CATEGORIES).map(([key, title]) => {
     const fresh = all.filter(e => proposalCategory(e.s, e.kind) === key && ideaBucket(e) === 'new').length;
-    return `<button class="idea-category" type="button" data-idea-category="${key}" aria-pressed="${ideaCategory === key}" aria-controls="idea-collection">${title}${fresh ? ` <span>${fresh} neu</span>` : ''}</button>`;
+    return `<button class="idea-category" type="button" data-idea-category="${key}" aria-pressed="${ideaCategory === key}" aria-controls="idea-collection">${title}${fresh ? ` <span>${tr("{0} new", fresh)}</span>` : ''}</button>`;
   }).join('');
   const freshCount = entries.filter(e => ideaBucket(e) === 'new').length;
   const tabs = Object.entries(IDEA_FILTERS).map(([filter, label]) => {
@@ -152,18 +153,18 @@ function renderIdeas() {
     return `<button class="idea-filter" type="button" data-idea-filter="${filter}" aria-pressed="${ideaFilter === filter}" aria-controls="idea-collection">${label} <span>${count}</span></button>`;
   }).join('');
   const descriptions = {
-    new: 'Noch ohne Entscheidung oder nach „Später“ wieder da. Neueste zuerst nach ihrem ersten Auftauchen.',
-    up: 'Von dir gut gefunden. Ein Auftrag entsteht erst, wenn du ihn bewusst übergibst.',
-    later: 'Bis zum gewählten Tag zurückgestellt. Dann erscheinen sie wieder unter „Neu“.',
-    assigned: 'Bereits begonnene oder an einen Agent übergebene Vorschläge, einschließlich Blockaden und Ergebnissen zur Prüfung.',
-    done: 'Von dir als umgesetzt bestätigt. Du kannst den Stand wieder auf offen setzen.',
-    archived: 'Aus den offenen Vorschlägen genommen, ohne deine Bewertung zu ändern. Du kannst sie zurückholen; laufende Aufträge bleiben erhalten.',
-    down: 'Von dir abgelehnt. Die Agents sollen diese Vorschläge nicht wieder bringen.',
-    all: isIdea ? 'Neue Funktionen, bessere Abläufe, neue Apps und deine eigenen Ideen. Neueste zuerst.' : 'Konkrete nächste Schritte, Pflege und Absicherung. Neueste zuerst.',
+    new: tr("Awaiting a decision or back after “Later”. Newest first by first appearance."),
+    up: tr("Liked by you. A Task is created when you explicitly assign it."),
+    later: tr("Deferred until the chosen day. Then they return under “New”."),
+    assigned: tr("Proposals already started or handed to an Agent, including blockers and results for review."),
+    done: tr("Confirmed as implemented by you. You can reopen them."),
+    archived: tr("Removed from open proposals without changing your rating. You can restore them; active Tasks are preserved."),
+    down: tr("Rejected by you. Agents are instructed not to propose these again."),
+    all: isIdea ? tr("New features, better workflows, new apps and your own ideas. Newest first.") : tr("Concrete next steps, maintenance and safeguards. Newest first."),
   };
-  const empty = { new: `Gerade keine neuen ${label}. Deine gemerkten Vorschläge findest du in den anderen Filtern.`, up: 'Noch kein Vorschlag gut gefunden.', later: 'Keine Vorschläge zurückgestellt.', assigned: 'Noch kein Vorschlag in Umsetzung.', done: 'Noch keine umgesetzten Vorschläge.', archived: 'Keine Vorschläge archiviert.', down: 'Keine Vorschläge abgelehnt.', all: `Noch keine ${label}.` };
-  const roundLabel = freshCount === 1 ? `Neue ${isIdea ? 'Idee' : 'Empfehlung'} bewerten` : `${freshCount} neue ${label} nacheinander bewerten`;
-  return `<div class="ideas-page"><header class="ideas-heading"><h1>Ideen & Empfehlungen</h1><nav class="idea-categories" aria-label="Art des Vorschlags">${categories}</nav><p>${isIdea ? 'Was deine Projekte künftig können könnten: neue Funktionen, einfachere Abläufe und neue Anwendungen.' : 'Was jetzt sinnvoll zu tun ist: konkrete nächste Schritte, Pflege und Absicherung.'}</p></header>${isIdea ? ideaAddForm() : ''}${freshCount ? `<div class="idea-round-start"><button class="btn primary" type="button" data-iround-start>${roundLabel}</button><span class="faint">Gut, später oder Quatsch, je eine Taste. Die Agents lernen aus deiner Wahl.</span></div>` : ''}<nav class="idea-filters" aria-label="${label} filtern">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>Offene Eingabe</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
+  const empty = { new: tr("No new {0} right now. Find retained proposals in the other filters.", label), up: tr("No proposals liked yet."), later: tr("No deferred proposals."), assigned: tr("No proposals in progress yet."), done: tr("No implemented proposals yet."), archived: tr("No archived proposals."), down: tr("No rejected proposals."), all: tr("No {0} yet.", label) };
+  const roundLabel = freshCount === 1 ? tr("Rate new {0}", isIdea ? tr("Idea") : tr("Recommendation")) : tr("Rate {0} new {1} in sequence", freshCount, label);
+  return `<div class="ideas-page"><header class="ideas-heading"><h1>${tr("Ideas & recommendations")}</h1><nav class="idea-categories" aria-label="${tr("Proposal category")}">${categories}</nav><p>${isIdea ? tr("What your Projects could do in the future: new features, simpler workflows and new applications.") : tr("What makes sense now: concrete next steps, maintenance and safeguards.")}</p></header>${isIdea ? ideaAddForm() : ''}${freshCount ? `<div class="idea-round-start"><button class="btn primary" type="button" data-iround-start>${roundLabel}</button><span class="faint">${tr("Good, later or reject, one key each. Agents learn from your choices.")}</span></div>` : ''}<nav class="idea-filters" aria-label="${tr("Filter {0}", label)}">${tabs}</nav><p class="idea-filter-description">${descriptions[ideaFilter]}</p>${pinned.length ? `<section class="idea-pending"><h2>${tr("Open input")}</h2><div class="cards2">${pinned.map(ideaEntryCard).join('')}</div></section>` : ''}<div id="idea-collection" class="cards2">${matching.length ? matching.map(ideaEntryCard).join('') : `<p class="faint idea-empty">${empty[ideaFilter]}</p>`}</div></div>`;
 }
 function setIdeaFilter(filter) {
   if (!Object.hasOwn(IDEA_FILTERS, filter)) return;
@@ -172,7 +173,7 @@ function setIdeaFilter(filter) {
 }
 async function openIdeaResult(id) {
   const entry = ideaCollection().find(e => e.s.id === id);
-  if (!entry) { toast('Diese Idee ist nicht mehr in der Sammlung.'); return; }
+  if (!entry) { toast(tr("This idea is no longer in the collection.")); return; }
   ideaCategory = proposalCategory(entry.s, entry.kind); ideaFilter = ideaBucket(entry); ideaHighlight = id;
   await setPref('style', 'ideas');
   const card = $(`[data-idea-id="${CSS.escape(id)}"]`);
@@ -186,42 +187,42 @@ function blockIdeas() {
   const total = items.length, limit = 6;
   // Keep an open response form in place even when new ideas arrive ahead of it.
   const shown = expanded.ideas ? items : items.filter(({ s }, i) => i < limit || s.id === noteFor || s.id === snoozeFor);
-  const cards = shown.map(({ s, project }) => ideaCard(s, project ? [project] : [], project, project ? 'Aus dem Projekt' : 'Neue App'));
-  const count = cards.length < total ? `${cards.length} von ${total} Vorschlägen` : `${total} ${total === 1 ? 'Vorschlag' : 'Vorschläge'}`;
-  const control = `<div class="recent-controls"><span class="faint">${count}</span>${total > limit ? `<button class="more" type="button" data-expand="ideas" aria-expanded="${expanded.ideas}" aria-controls="ideas-list">${expanded.ideas ? `nur die ${limit} neuesten anzeigen` : `alle ${total} anzeigen`}</button>` : ''}</div>`;
-  return cards.length ? mod('ideas', 'Ideen', 'Neueste zuerst · Vorschläge aus deinen Projekten und neue App-Ideen', `${control}<div class="cards3" id="ideas-list">${cards.join('')}</div>`) : '';
+  const cards = shown.map(({ s, project }) => ideaCard(s, project ? [project] : [], project, project ? tr("From the Project") : tr("New app")));
+  const count = cards.length < total ? tr("{0} of {1} proposals", cards.length, total) : `${total} ${total === 1 ? tr("Proposal") : tr("Proposals")}`;
+  const control = `<div class="recent-controls"><span class="faint">${count}</span>${total > limit ? `<button class="more" type="button" data-expand="ideas" aria-expanded="${expanded.ideas}" aria-controls="ideas-list">${expanded.ideas ? tr("show only the {0} newest", limit) : tr("show all {0}", total)}</button>` : ''}</div>`;
+  return cards.length ? mod('ideas', tr("Ideas"), tr("Newest first · proposals from your Projects and new app ideas"), `${control}<div class="cards3" id="ideas-list">${cards.join('')}</div>`) : '';
 }
 
 // ideas the owner parks; the next brief says whether and where each one is worth doing
-const IDEA_VERDICT = { build: ['eigene App', 'good'], fold_in: ['in Projekt einbauen', 'good'], later: ['später', ''], drop: ['lieber nicht', 'bad'] };
+const IDEA_VERDICT = localized(() => ({ build: [tr("standalone app"), 'good'], fold_in: [tr("add to a Project"), 'good'], later: [tr("later"), ''], drop: [tr("rather not"), 'bad'] }));
 function ideaAddForm() {
-  return `<div class="idea-add"><label for="idea-text">Eigene Idee festhalten</label><div class="parkform"><input id="idea-text" type="text" value="${esc(ideaDraft)}" maxlength="600" placeholder="Was würdest du gern bauen oder verbessern?" aria-label="Neue Idee"><button class="btn" type="button" data-idea-add>Festhalten</button></div><p class="faint">Der nächste Agent-Lauf prüft, ob und wo sie sich lohnt.</p></div>`;
+  return `<div class="idea-add"><label for="idea-text">${tr("Save your own idea")}</label><div class="parkform"><input id="idea-text" type="text" value="${esc(ideaDraft)}" maxlength="600" placeholder="${tr("What would you like to build or improve?")}" aria-label="${tr("New idea")}"><button class="btn" type="button" data-idea-add>${tr("Save idea")}</button></div><p class="faint">${tr("The next Agent Run assesses whether and where it is useful.")}</p></div>`;
 }
 function ownerIdeaCard(entry) {
   const { s, own, assessment: c } = entry, id = s.id, task = ideaTask(id);
   const assigned = S.idea_states?.[id]?.status === 'in_progress';
   const editing = ownerIdeaDrafts.get(own.id);
-  if (editing) return `<form class="idea owner-idea-edit" data-owner-idea-form="${own.id}"><label for="owner-idea-text-${own.id}">Deine Idee bearbeiten</label><textarea id="owner-idea-text-${own.id}" data-owner-idea-text="${own.id}" maxlength="600">${esc(editing.text)}</textarea><div class="foot"><button class="btn" type="submit"${editing.busy ? ' disabled' : ''}>${editing.busy ? 'Wird gespeichert …' : 'Speichern'}</button><button class="linkish" type="button" data-owner-idea-cancel="${own.id}">Abbrechen</button></div></form>`;
+  if (editing) return `<form class="idea owner-idea-edit" data-owner-idea-form="${own.id}"><label for="owner-idea-text-${own.id}">${tr("Edit your idea")}</label><textarea id="owner-idea-text-${own.id}" data-owner-idea-text="${own.id}" maxlength="600">${esc(editing.text)}</textarea><div class="foot"><button class="btn" type="submit"${editing.busy ? ' disabled' : ''}>${editing.busy ? tr("Saving …") : tr("Save\u0004button")}</button><button class="linkish" type="button" data-owner-idea-cancel="${own.id}">${tr("Cancel")}</button></div></form>`;
   if (noteFor === id) return noteForm(id, s.title);
   const v = c && (IDEA_VERDICT[c.verdict] || [c.verdict, '']);
-  const verdict = c ? `<div class="idea-assessment"><span class="faint">Agent-Einschätzung:</span> <span class="tag ${v[1]}">${esc(v[0])}</span><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}</div>` : '<div class="faint">Noch nicht eingeschätzt.</div>';
+  const verdict = c ? `<div class="idea-assessment"><span class="faint">${tr("Agent assessment:")}</span> <span class="tag ${v[1]}">${esc(v[0])}</span><div class="why">${esc(c.why)}</div>${(c.fits || []).length ? `<div class="who">${c.fits.map(plink).join('')}</div>` : ''}</div>` : `<div class="faint">${tr("Not assessed yet.")}</div>`;
   const returned = S.feedback[id]?.value === 'later' && snoozedUntil(S.feedback[id]) <= S.today;
   const finished = task && S.idea_states?.[id]?.status === 'implemented';
   const missingProjects = entry.projects.filter(project => !byId(project));
   const action = S.idea_states?.[s.id]?.archived ? '' : finished ? `<span class="task-status" data-status="${esc(task.status)}">${esc(TASK_STATUS[task.status])} · #${task.id}</span>` : !task && missingProjects.length ? ideaProjectRecovery(missingProjects) : taskBtn(id, { projects: task ? task.projects : entry.projects, title: s.title, why: c?.why || '' }, assigned ? task : null);
-  const details = task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${id}:${task.id}`)}><summary class="more">${task.status === 'review' ? 'Ergebnis prüfen' : task.status === 'blocked' ? 'Blockade ansehen' : 'Auftrag ansehen'}</summary>${trackedTask(task, true)}</details>` : '';
-  return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">Deine Idee</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish" type="button" data-owner-idea-edit="${own.id}">bearbeiten</button><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="Idee entfernen" aria-label="Idee entfernen">entfernen</button></div>${returned && !task ? `<div class="idea-returned">Wieder da · aufgeschoben bis ${fmtDate(snoozedUntil(S.feedback[id]))}</div>` : ''}${verdict}${myNote(id)}${ideaStatusActions(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">festgehalten ${fmtDate(own.added_at)}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
+  const details = task ? `<details class="idea-assignment" ${foldAttrs(`idea-task:${id}:${task.id}`)}><summary class="more">${task.status === 'review' ? tr("Review result") : task.status === 'blocked' ? tr("View blocker") : tr("View Task")}</summary>${trackedTask(task, true)}</details>` : '';
+  return `<div class="idea${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">${tr("Your idea")}</div><div class="h"><div class="t">${esc(s.title)}</div><button class="linkish" type="button" data-owner-idea-edit="${own.id}">${tr("edit")}</button><button class="linkish faint" type="button" data-idea-remove="${own.id}" title="${tr("Remove idea")}" aria-label="${tr("Remove idea")}">${tr("remove")}</button></div>${returned && !task ? `<div class="idea-returned">${tr("Back again · deferred until {0}", fmtDate(snoozedUntil(S.feedback[id])))}</div>` : ''}${verdict}${myNote(id)}${ideaStatusActions(id)}<div class="foot"><time class="faint" datetime="${esc(own.added_at)}">${tr("saved {0}", fmtDate(own.added_at))}</time>${fbButtons(id)}</div><div class="taskrow">${action}</div>${details}</div>`;
 }
 function blockParking() {
   const items = ideaCollection().filter(e => e.own && (e.s.id === noteFor || (!hiddenByRating(e.s.id) && !ideaClosed(e.s.id)))).map(ownerIdeaCard).join('');
-  return mod('parking', 'Eigene Ideen', 'Halt fest, was du gern bauen oder verbessern würdest', ideaAddForm() + (items ? `<div class="cards2">${items}</div>` : ''));
+  return mod('parking', tr("Your own ideas"), tr("Save what you would like to build or improve"), ideaAddForm() + (items ? `<div class="cards2">${items}</div>` : ''));
 }
 
 // the first brief of a week looks back on the week before; shown until the next one
 
 // ---------- idea round: every new idea, one at a time ----------
 let ideaRound = null;   // { queue: idea ids, i, stats, busy }
-const ideaRatings = () => [['up', 'Gut', 'Merken. Ein Auftrag entsteht erst, wenn du ihn übergibst'], ['later', 'Später', `Kommt in ${S.snooze_days || 7} Tagen wieder`], ['down', 'Quatsch', 'Die Agents bringen das nicht wieder']];
+const ideaRatings = () => [['up', tr("Good"), tr("Save for later. A Task is created when you assign it")], ['later', tr("Later"), tr("Returns in {0} days", S.snooze_days || 7)], ['down', tr("Reject"), tr("Agents will not propose this again")]];
 const freshIdea = id => { const entry = categoryEntries().find(e => e.s.id === id); return entry && ideaBucket(entry) === 'new' ? entry : null; };
 function startIdeaRound() {
   const queue = categoryEntries().filter(e => ideaBucket(e) === 'new').map(e => e.s.id);
@@ -243,20 +244,20 @@ function renderIdeaRound(keepFocus = false) {
   const n = ideaRound.queue.length, st = ideaRound.stats;
   let body;
   if (ideaRound.i >= n) {
-    body = `<h3>Geschafft.</h3><p class="muted">${st.up} gut, ${st.later} später, ${st.down} Quatsch, ${st.skipped} übersprungen. Die Agents richten künftige Vorschläge danach.</p>
-      <div class="actions"><button class="btn primary" type="button" data-iround-close>Schließen</button></div>`;
+    body = `<h3>${tr("All done.")}</h3><p class="muted">${tr("{0} good, {1} later, {2} rejected, {3} skipped. Agents use this for future proposals.", st.up, st.later, st.down, st.skipped)}</p>
+      <div class="actions"><button class="btn primary" type="button" data-iround-close>${tr("Close")}</button></div>`;
   } else {
     const entry = freshIdea(ideaRound.queue[ideaRound.i]), s = entry.s, id = s.id;
     const who = (entry.projects || []).filter(byId).map(pid => `<span class="rproj-name">${dot(pid)}${esc(byId(pid).name)}</span>`).join('');
     const choices = ideaRatings().map(([value, label, effect], i) => `<button type="button" class="ropt" data-iround-rate="${value}"><span class="k mono">${i + 1}</span><span><b>${label}</b><span class="muted">${esc(effect)}</span></span></button>`).join('');
     body = `<div class="rproj"><span class="faint">${esc(IDEA_KINDS[entry.kind] || '')}</span>${who}</div>
-      <h3>${esc(s.title)}</h3>${s.why || s.pitch ? `<p>${esc(s.why || s.pitch)}</p>` : ''}${s.because ? `<p class="muted"><b>Weil:</b> ${esc(s.because)}</p>` : ''}${entry.assessment ? `<p class="muted"><b>Agent-Einschätzung:</b> ${esc(entry.assessment.why)}</p>` : ''}${s.evidence ? `<div class="qsrc mono">${esc(s.evidence)}</div>` : ''}
+      <h3>${esc(s.title)}</h3>${s.why || s.pitch ? `<p>${esc(s.why || s.pitch)}</p>` : ''}${s.because ? `<p class="muted"><b>${tr("Because:")}</b> ${esc(s.because)}</p>` : ''}${entry.assessment ? `<p class="muted"><b>${tr("Agent assessment:")}</b> ${esc(entry.assessment.why)}</p>` : ''}${s.evidence ? `<div class="qsrc mono">${esc(s.evidence)}</div>` : ''}
       ${ideaStatusActions(id)}<div class="ropts">${choices}</div>
-      <div class="inrow"><input type="text" id="idea-round-note" data-iround-note="${esc(id)}" value="${esc(drafts[id] || '')}" maxlength="300" placeholder="Warum? Optional, die Agents lernen daraus" aria-label="Warum (optional)"></div>
-      <div class="actions"><button class="btn" type="button" data-iround-skip>Überspringen</button></div>`;
+      <div class="inrow"><input type="text" id="idea-round-note" data-iround-note="${esc(id)}" value="${esc(drafts[id] || '')}" maxlength="300" placeholder="${tr("Why? Optional; Agents learn from this")}" aria-label="${tr("Why (optional)")}"></div>
+      <div class="actions"><button class="btn" type="button" data-iround-skip>${tr("Skip")}</button></div>`;
   }
-  root.innerHTML = `<div class="scrim" data-iround-close></div><div class="round" role="dialog" aria-modal="true" aria-label="${PROPOSAL_CATEGORIES[ideaCategory]} bewerten">
-    <div class="rhead"><span class="faint">${PROPOSAL_CATEGORIES[ideaCategory]} bewerten${ideaRound.i < n ? ` · ${ideaRound.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-iround-close>beenden</button></div>
+  root.innerHTML = `<div class="scrim" data-iround-close></div><div class="round" role="dialog" aria-modal="true" aria-label="${tr("Rate {0}", PROPOSAL_CATEGORIES[ideaCategory])}">
+    <div class="rhead"><span class="faint">${tr("Rate {0}{1}", PROPOSAL_CATEGORIES[ideaCategory], ideaRound.i < n ? ` ${tr("· {0} of {1}", ideaRound.i + 1, n)}` : '')}</span><button class="linkish" type="button" data-iround-close>${tr("finish")}</button></div>
     <div class="rprog"><span style="width:${(Math.min(ideaRound.i, n) / n * 100).toFixed(1)}%"></span></div>${body}</div>`;
   if (!keepFocus) root.querySelector(ideaRound.i < n ? '[data-iround-rate]' : '[data-iround-close].btn')?.focus();
   else if (hadFocus) $('#idea-round-note')?.focus();
@@ -286,10 +287,10 @@ async function saveOwnerIdea(id) {
     const result = await call('update_idea', { id, text: draft.text, revision: draft.revision });
     ownerIdeaDrafts.delete(id); await load(false);
     const token = typeof result.undo_token === 'string' ? result.undo_token : null;
-    toast('Idee gespeichert. Die frühere Fassung bleibt im Verlauf.', token ? async () => {
+    toast(tr("Idea saved. The previous version remains in history."), token ? async () => {
       try { await call('undo', { token }); await load(false); } catch (e) { toast(errText(e)); }
     } : undefined);
-  } catch (e) { toast('Idee nicht gespeichert: ' + errText(e)); }
+  } catch (e) { toast(`${tr("Idea not saved:")} ` + errText(e)); }
   finally { draft.busy = false; if (ownerIdeaDrafts.has(id)) render(); }
 }
 
@@ -301,21 +302,21 @@ async function addIdea() {
     if (ideaDraft.trim() === text) ideaDraft = '';
     await load(false);
     if (Number.isInteger(result.id)) await openIdeaResult(`idea:${result.id}`);
-    toast(result.already_exists ? 'Diese Idee war bereits festgehalten.' : 'Idee festgehalten. Der nächste Agent-Lauf schätzt sie ein.');
-  } catch (e) { toast(`Nicht gespeichert: ${errText(e)}`); }
+    toast(result.already_exists ? tr("This idea was already saved.") : tr("Idea saved. The next Agent Run assesses it."));
+  } catch (e) { toast(tr("Not saved: {0}", errText(e))); }
 }
 async function removeIdea(id) {
   try {
     await call('remove_idea', { id });
     await load(false);
-    toast('Idee entfernt. Sie bleibt gespeichert.', async () => {
+    toast(tr("Idea removed. It remains saved."), async () => {
       try {
         await call('restore_idea', { id });
         await load(false);
-        toast('Idee wiederhergestellt.');
-      } catch (e) { toast(`Nicht wiederhergestellt: ${errText(e)}`); }
+        toast(tr("Idea restored."));
+      } catch (e) { toast(tr("Not restored: {0}", errText(e))); }
     });
-  } catch (e) { toast(`Nicht entfernt: ${errText(e)}`); }
+  } catch (e) { toast(tr("Not removed: {0}", errText(e))); }
 }
 
 document.addEventListener('submit', e => { if (e.target.dataset?.ownerIdeaForm) { e.preventDefault(); saveOwnerIdea(Number(e.target.dataset.ownerIdeaForm)); } });

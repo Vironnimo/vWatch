@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 import { S, call, errText, load, render, toast } from './app.js';
 import { closeIdeaRound, ideaCollection, ideaHighlight } from './ideas.js';
 import { risk } from './overview.js';
@@ -43,35 +44,35 @@ function findQ(id) {
 function fbButtons(id) {
   if (!id) return '';
   const cur = rated(id);
-  const buttons = `<span class="fb" data-item="${esc(id)}">${[['up', 'gut'], ['later', 'später'], ['down', 'Quatsch']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
+  const buttons = `<span class="fb" data-item="${esc(id)}">${[['up', tr("good")], ['later', tr("later")], ['down', tr("Reject")]].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
   return buttons + snoozeControls(id);
 }
 function snoozeControls(id) {
-  const until = rated(id) === 'later' ? `<span class="faint">Wieder am ${fmtDate(snoozedUntil(S.feedback[id]))} · <button class="linkish" type="button" data-snooze-open="${esc(id)}">Datum ändern</button> · <button class="linkish" type="button" data-snooze-clear="${esc(id)}">jetzt zeigen</button></span>` : '';
-  const picker = snoozeFor === id ? `<div class="snooze-picker"><span>Wann möchtest du das wieder sehen?</span><div class="snooze-options"><button class="btn" type="button" data-snooze-days="1">Morgen</button><button class="btn" type="button" data-snooze-days="7">In einer Woche</button><input type="date" id="snooze-date" aria-label="Wieder anzeigen am" min="${addDays(S.today, 1)}" value="${esc(snoozeDate)}"><button class="btn primary" type="button" data-snooze-save>Datum merken</button><button class="linkish" type="button" data-snooze-cancel>Abbrechen</button></div></div>` : '';
+  const until = rated(id) === 'later' ? `<span class="faint">${tr("Back on {0} ·", fmtDate(snoozedUntil(S.feedback[id])))} <button class="linkish" type="button" data-snooze-open="${esc(id)}">${tr("Change date")}</button> · <button class="linkish" type="button" data-snooze-clear="${esc(id)}">${tr("show now")}</button></span>` : '';
+  const picker = snoozeFor === id ? `<div class="snooze-picker"><span>${tr("When would you like to see this again?")}</span><div class="snooze-options"><button class="btn" type="button" data-snooze-days="1">${tr("Tomorrow")}</button><button class="btn" type="button" data-snooze-days="7">${tr("In a week")}</button><input type="date" id="snooze-date" aria-label="${tr("Show again on")}" min="${addDays(S.today, 1)}" value="${esc(snoozeDate)}"><button class="btn primary" type="button" data-snooze-save>${tr("Save date")}</button><button class="linkish" type="button" data-snooze-cancel>${tr("Cancel")}</button></div></div>` : '';
   return until + picker;
 }
 
 function noteForm(id, label) {
   const down = S.feedback[id] && S.feedback[id].value === 'down';
-  return `<div class="idea noteform${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">${down ? 'Abgelehnt' : 'Später'} · ${esc(label)}</div>
-    ${snoozeControls(id)}<div class="why">Magst du kurz sagen, warum? Die Agents richten künftige Vorschläge danach.</div>
-    <div class="inrow"><input type="text" aria-label="Warum" data-draft="${esc(id)}" data-kind="note" maxlength="300" value="${esc(drafts[id] || '')}" placeholder="${down ? 'z. B. passt nicht zum Projekt' : 'z. B. erst nach dem Release'}">
-    <button type="button" class="btn primary" data-note-save="${esc(id)}">Merken</button><button type="button" class="btn" data-note-skip>Überspringen</button></div></div>`;
+  return `<div class="idea noteform${ideaHighlight === id ? ' search-hit' : ''}" data-idea-id="${esc(id)}" tabindex="-1"><div class="kind">${down ? tr("Rejected") : tr("Later")} · ${esc(label)}</div>
+    ${snoozeControls(id)}<div class="why">${tr("Would you like to say why? Agents use this for future proposals.")}</div>
+    <div class="inrow"><input type="text" aria-label="${tr("Why")}" data-draft="${esc(id)}" data-kind="note" maxlength="300" value="${esc(drafts[id] || '')}" placeholder="${down ? tr("e.g. does not fit this project") : tr("e.g. after the release")}">
+    <button type="button" class="btn primary" data-note-save="${esc(id)}">${tr("Save")}</button><button type="button" class="btn" data-note-skip>${tr("Skip")}</button></div></div>`;
 }
-const myNote = id => { const f = S.feedback[id]; return f && f.note && !reply(id) ? `<div class="mynote">Deine Notiz: ${esc(f.note)}</div>` : ''; };
+const myNote = id => { const f = S.feedback[id]; return f && f.note && !reply(id) ? `<div class="mynote">${tr("Your note: {0}", esc(f.note))}</div>` : ''; };
 
 function question(w, withSource) {
   const f = reply(w.id);
-  if (!f && rated(w.id) === 'later') return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">Später · kommt am ${fmtDate(snoozedUntil(S.feedback[w.id]))} wieder · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">jetzt entscheiden</button></div></li>`;
-  if (f) return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">${f.value === 'answered' ? `Deine Antwort: ${esc(f.note)}` : 'Erledigt'} · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">zurücknehmen</button></div></li>`;
-  const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">antworten</button><button type="button" data-qdone="${esc(w.id)}">erledigt</button><button type="button" data-qlater="${esc(w.id)}" title="Eine Woche zurückstellen">später</button></span>` : '';
-  const form = answering === w.id ? `<div class="inrow"><input type="text" aria-label="Deine Antwort" data-draft="${esc(w.id)}" data-kind="answer" maxlength="600" value="${esc(drafts[w.id] || '')}" placeholder="Deine Antwort, der nächste Lauf nimmt sie in die Karte auf">
-    <button type="button" class="btn primary" data-answer-save="${esc(w.id)}">Senden</button><button type="button" class="btn" data-answer-cancel>Abbrechen</button></div>` : '';
-  const opts = (w.options || []).length && w.id && answering !== w.id ? `<div class="qopts">${w.options.map((o, i) => `<button type="button" class="opt${w.recommended === i + 1 ? ' rec' : ''}" data-opt="${esc(w.id)}" data-i="${i}" title="${esc(o.effect || '')}">${esc(o.answer)}${w.recommended === i + 1 ? ' <span class="rec-l">empfohlen</span>' : ''}</button>`).join('')}</div>` : '';
+  if (!f && rated(w.id) === 'later') return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">${tr("Later · back on {0} ·", fmtDate(snoozedUntil(S.feedback[w.id])))} <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">${tr("decide now")}</button></div></li>`;
+  if (f) return `<li class="q replied"><span class="qt">${esc(w.title)}</span><div class="qr">${f.value === 'answered' ? tr("Your answer: {0}", esc(f.note)) : tr("Done")} · <button type="button" class="linkish" data-reply-undo="${esc(w.id)}">${tr("undo")}</button></div></li>`;
+  const acts = w.id && answering !== w.id ? `<span class="qa"><button type="button" data-answer="${esc(w.id)}">${tr("answer")}</button><button type="button" data-qdone="${esc(w.id)}">${tr("done")}</button><button type="button" data-qlater="${esc(w.id)}" title="${tr("Defer for a week")}">${tr("later")}</button></span>` : '';
+  const form = answering === w.id ? `<div class="inrow"><input type="text" aria-label="${tr("Your answer")}" data-draft="${esc(w.id)}" data-kind="answer" maxlength="600" value="${esc(drafts[w.id] || '')}" placeholder="${tr("Your answer; the next Run incorporates it into the Card")}">
+    <button type="button" class="btn primary" data-answer-save="${esc(w.id)}">${tr("Send")}</button><button type="button" class="btn" data-answer-cancel>${tr("Cancel")}</button></div>` : '';
+  const opts = (w.options || []).length && w.id && answering !== w.id ? `<div class="qopts">${w.options.map((o, i) => `<button type="button" class="opt${w.recommended === i + 1 ? ' rec' : ''}" data-opt="${esc(w.id)}" data-i="${i}" title="${esc(o.effect || '')}">${esc(o.answer)}${w.recommended === i + 1 ? ` <span class="rec-l">${tr("recommended")}</span>` : ''}</button>`).join('')}</div>` : '';
   const src = w.source ? (withSource ? `<div class="qsrc mono">${esc(w.source)}</div>` : '') : '';
   const age = openSince(questionAge(w.id));
-  return `<li class="q"${w.source && !withSource ? ` title="Quelle: ${esc(w.source)}"` : ''}><div class="qrow"><span class="qt">${esc(w.title)}${age ? ` <span class="faint q-age">${esc(age)}</span>` : ''}</span>${acts}</div>${opts}${src}${form}</li>`;
+  return `<li class="q"${w.source && !withSource ? ` ${tr("title=\"Source: {0}\"", esc(w.source))}` : ''}><div class="qrow"><span class="qt">${esc(w.title)}${age ? ` <span class="faint q-age">${esc(age)}</span>` : ''}</span>${acts}</div>${opts}${src}${form}</li>`;
 }
 
 
@@ -96,20 +97,20 @@ function renderRound(keepFocus = false) {
   let body;
   if (round.i >= n) {
     const st = round.stats;
-    body = `<h3>Geschafft.</h3><p class="muted">${st.answered} beantwortet, ${st.done} erledigt, ${st.later} auf später gelegt, ${st.skipped} übersprungen. Die Agents lesen deine Antworten beim nächsten Lauf.</p>
-      <div class="actions"><button class="btn primary" type="button" data-round-close>Schließen</button></div>`;
+    body = `<h3>${tr("All done.")}</h3><p class="muted">${tr("{0} answered, {1} done, {2} deferred, {3} skipped. Agents read your answers in the next Run.", st.answered, st.done, st.later, st.skipped)}</p>
+      <div class="actions"><button class="btn primary" type="button" data-round-close>${tr("Close")}</button></div>`;
   } else {
     const { p, w } = findQ(round.queue[round.i]);
-    const opts = (w.options || []).map((o, i) => `<button type="button" class="ropt${w.recommended === i + 1 ? ' rec' : ''}" data-round-opt="${i}"><span class="k mono">${i + 1}</span><span><b>${esc(o.answer)}</b>${w.recommended === i + 1 ? ' <span class="rec-l">empfohlen</span>' : ''}${o.effect ? `<span class="muted">${esc(o.effect)}</span>` : ''}</span></button>`).join('');
+    const opts = (w.options || []).map((o, i) => `<button type="button" class="ropt${w.recommended === i + 1 ? ' rec' : ''}" data-round-opt="${i}"><span class="k mono">${i + 1}</span><span><b>${esc(o.answer)}</b>${w.recommended === i + 1 ? ` <span class="rec-l">${tr("recommended")}</span>` : ''}${o.effect ? `<span class="muted">${esc(o.effect)}</span>` : ''}</span></button>`).join('');
     const age = openSince(questionAge(w.id));
     body = `<div class="rproj">${dot(p.id)}<b>${esc(p.name)}</b>${p.card.headline ? `<span class="faint"> · ${esc(p.card.headline)}</span>` : ''}</div>
       <h3>${esc(w.title)}</h3>${age ? `<div class="faint">${esc(age)}</div>` : ''}${w.source ? `<div class="qsrc mono">${esc(w.source)}</div>` : ''}
       ${opts ? `<div class="ropts">${opts}</div>` : ''}
-      <div class="inrow"><input type="text" id="round-answer" data-draft="${esc(w.id)}" data-kind="answer" value="${esc(drafts[w.id] || '')}" maxlength="600" placeholder="${opts ? 'Oder eigene Antwort' : 'Deine Antwort'}" aria-label="Deine Antwort"><button class="btn primary" type="button" data-round-send>Antworten</button></div>
-      <div class="actions"><button class="btn" type="button" data-round-done title="Die Frage ist erledigt oder nicht mehr nötig">Erledigt</button><button class="btn" type="button" data-round-later title="Kommt in ${S.snooze_days || 7} Tagen wieder">Später</button><button class="btn" type="button" data-round-skip>Überspringen</button></div>`;
+      <div class="inrow"><input type="text" id="round-answer" data-draft="${esc(w.id)}" data-kind="answer" value="${esc(drafts[w.id] || '')}" maxlength="600" placeholder="${opts ? tr("Or write your own answer") : tr("Your answer")}" aria-label="${tr("Your answer")}"><button class="btn primary" type="button" data-round-send>${tr("Answer")}</button></div>
+      <div class="actions"><button class="btn" type="button" data-round-done title="${tr("This question is resolved or no longer needed")}">${tr("Done")}</button><button class="btn" type="button" data-round-later title="${tr("Returns in {0} days", S.snooze_days || 7)}">${tr("Later")}</button><button class="btn" type="button" data-round-skip>${tr("Skip")}</button></div>`;
   }
-  root.innerHTML = `<div class="scrim" data-round-close></div><div class="round" role="dialog" aria-modal="true" aria-label="Entscheidungsrunde">
-    <div class="rhead"><span class="faint">Entscheidungsrunde${round.i < n ? ` · Frage ${round.i + 1} von ${n}` : ''}</span><button class="linkish" type="button" data-round-close>beenden</button></div>
+  root.innerHTML = `<div class="scrim" data-round-close></div><div class="round" role="dialog" aria-modal="true" aria-label="${tr("Decision round")}">
+    <div class="rhead"><span class="faint">${tr("Decision round{0}", round.i < n ? ` ${tr("· Question {0} of {1}", round.i + 1, n)}` : '')}</span><button class="linkish" type="button" data-round-close>${tr("finish")}</button></div>
     <div class="rprog"><span style="width:${(Math.min(round.i, n) / n * 100).toFixed(1)}%"></span></div>${body}</div>`;
   const input = $('#round-answer');
   if (!keepFocus || hadFocus) {
@@ -152,11 +153,11 @@ async function react(id, value, note, msg, until) {
         await load(false);
       } catch (e) {
         await load(false);
-        toast('Rückgängig hat nicht geklappt: ' + errText(e));
+        toast(`${tr("Undo failed:")} ` + errText(e));
       }
     } : null);
     return true;
-  } catch (e) { toast('Nicht gespeichert: ' + errText(e)); return false; }
+  } catch (e) { toast(`${tr("Not saved:")} ` + errText(e)); return false; }
 }
 // a dialog renders after the page, so the last field is the one in front
 const focusDraft = id => { const all = document.querySelectorAll(`[data-draft="${CSS.escape(id)}"]`); if (all.length) all[all.length - 1].focus(); };
@@ -166,7 +167,7 @@ async function setFeedback(el, v) {
   const value = S.feedback[id] && S.feedback[id].value === v ? null : v;
   snoozeFor = null;
   noteFor = value === 'down' ? id : null;
-  const msg = value === 'down' ? 'Unter „Abgelehnt“ gemerkt. Die Agents schlagen das nicht mehr vor.' : value === 'up' && S.prefs.style === 'ideas' ? 'Unter „Gut gefunden“ gemerkt. Noch kein Auftrag.' : null;
+  const msg = value === 'down' ? tr("Saved under “Rejected”. Agents will not propose this again.") : value === 'up' && S.prefs.style === 'ideas' ? tr("Saved under “Liked”. No Task assigned yet.") : null;
   if (await react(id, value, undefined, msg)) focusDraft(id); else noteFor = null;
 }
 function openSnooze(id) {
@@ -178,9 +179,9 @@ function openSnooze(id) {
 async function saveSnooze(until) {
   const id = snoozeFor;
   if (!id) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(until || '') || until <= S.today) { toast('Wähle einen Tag nach heute.'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(until || '') || until <= S.today) { toast(tr("Choose a day after today.")); return; }
   snoozeFor = null; noteFor = id;
-  if (await react(id, 'later', undefined, `Wieder am ${fmtDate(until)}.`, until)) focusDraft(id);
+  if (await react(id, 'later', undefined, tr("Back on {0}.", fmtDate(until)), until)) focusDraft(id);
   else { noteFor = null; snoozeFor = id; render(); }
 }
 
@@ -190,14 +191,14 @@ async function saveNote(id) {
   if (!text || !S.feedback[id]) { delete drafts[id]; render(); return; }
   if (await react(id, S.feedback[id].value, text)) {
     delete drafts[id];
-    toast('Gemerkt. Die Agents lesen das beim nächsten Lauf.');
+    toast(tr("Saved. Agents read this in the next Run."));
   } else { noteFor = id; render(); focusDraft(id); }
 }
 async function saveAnswer(id) {
   const text = (drafts[id] || '').trim();
   if (!text) { focusDraft(id); return; }
   answering = null;
-  if (await react(id, 'answered', text, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.')) delete drafts[id];
+  if (await react(id, 'answered', text, tr("Answered. The next Run incorporates your answer into the Card."))) delete drafts[id];
   else { answering = id; render(); focusDraft(id); }
 }
 
@@ -209,7 +210,7 @@ function handleFeedbackClick(e, t) {
   if (t.closest('[data-snooze-save]')) { saveSnooze(snoozeDate); return true; }
   if (t.closest('[data-snooze-cancel]')) { snoozeFor = null; render(); return true; }
   const snoozeClear = t.closest('[data-snooze-clear]');
-  if (snoozeClear) { snoozeFor = null; noteFor = null; react(snoozeClear.dataset.snoozeClear, null, null, 'Wird wieder angezeigt.'); return true; }
+  if (snoozeClear) { snoozeFor = null; noteFor = null; react(snoozeClear.dataset.snoozeClear, null, null, tr("Shown again.")); return true; }
   if (t.closest('[data-round-start]')) { startRound(); return true; }
   if (t.closest('[data-round-close]')) { closeRound(); return true; }
   if (round) {
@@ -221,7 +222,7 @@ function handleFeedbackClick(e, t) {
     if (t.closest('[data-round-later]')) { roundStep('later'); return true; }
   }
   const opt = t.closest('[data-opt]');
-  if (opt) { const q = findQ(opt.dataset.opt); if (q) react(q.w.id, 'answered', q.w.options[Number(opt.dataset.i)].answer, 'Beantwortet. Der nächste Lauf nimmt deine Antwort in die Karte auf.'); return true; }
+  if (opt) { const q = findQ(opt.dataset.opt); if (q) react(q.w.id, 'answered', q.w.options[Number(opt.dataset.i)].answer, tr("Answered. The next Run incorporates your answer into the Card.")); return true; }
   const fbBtn = t.closest('.fb button');
   if (fbBtn) { e.stopPropagation(); setFeedback(fbBtn.parentElement, fbBtn.dataset.v); return true; }
   if (t.closest('[data-toggle-rated]')) { showRated = !showRated; render(); return true; }
@@ -234,9 +235,9 @@ function handleFeedbackClick(e, t) {
   if (as) { saveAnswer(as.dataset.answerSave); return true; }
   if (t.closest('[data-answer-cancel]')) { answering = null; render(); return true; }
   const qd = t.closest('[data-qdone]');
-  if (qd) { react(qd.dataset.qdone, 'done', null, 'Als erledigt markiert.'); return true; }
+  if (qd) { react(qd.dataset.qdone, 'done', null, tr("Marked as done.")); return true; }
   const ql = t.closest('[data-qlater]');
-  if (ql) { const until = addDays(S.today, S.snooze_days || 7); react(ql.dataset.qlater, 'later', undefined, `Zurückgestellt bis ${fmtDate(until)}.`, until); return true; }
+  if (ql) { const until = addDays(S.today, S.snooze_days || 7); react(ql.dataset.qlater, 'later', undefined, tr("Deferred until {0}.", fmtDate(until)), until); return true; }
   const ru = t.closest('[data-reply-undo]');
   if (ru) { react(ru.dataset.replyUndo, null); return true; }
   const fd = t.closest('[data-focus-done]');

@@ -6,6 +6,8 @@ Owner-change JSON receipts expose an opaque `undo_token` alongside the compatibl
 
 This document records capability coverage, call sequences, recovery contracts and validation scope. Update it with the CLI, desktop handlers and `skill/vwatch/` when those contracts change.
 
+The saved `language` preference (`en` or `de`, English when unset) governs the window and newly authored Card and portfolio brief content. `settings update --language` changes it atomically with other supplied preferences and returns the existing guarded Undo receipt. Both contexts expose `report_language`, covered by their Context Tokens; switching languages rejects a pending stale write but does not rewrite historical content, reset read acknowledgement or make otherwise current reports due. CLI-generated help, labels, outcomes and diagnostics remain English regardless of this choice; stored content, names, paths and owner-supplied text retain their language. Generated digest entries expose `title_prefix`, `source_title` and `generated_detail` so the window can translate its own framing without translating authored content. OS diagnostics use English error-kind descriptions and numeric OS codes; measured subprocesses request the C locale.
+
 ## Entry points and test instances
 
 The installed console entry point is `%LOCALAPPDATA%/Programs/vWatch/vWatch.exe`; `vWatch-UI.exe` is the independent desktop entry point. Production agents use shell execution in vBot or Codex. The operating Skill gives PowerShell and Git Bash forms. The CLI works with the window closed and never attaches a console to a GUI process.
@@ -49,7 +51,7 @@ The table covers every registered Tauri command in `src/app.rs`. "Covered" means
 | `set_warning_ack` | `warnings acknowledge`, `warnings clear` | Covered |
 | `mark_changes_read` | `changes read --token` | Covered |
 | `open_project` | `projects visit` | Covered; this records a visit, not Explorer navigation |
-| `set_pref` | `settings update --style` / `--hidden-modules` | Covered; both accepted display preference keys |
+| `set_pref` | `settings update --style` / `--hidden-modules` / `--language` | Covered; view, collapsed sections and the shared window/report language |
 | `set_status` | `projects status` | Covered |
 | `set_goal` | `projects goal` | Covered |
 | `add_idea` | `ideas add` | Covered |

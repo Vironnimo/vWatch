@@ -53,7 +53,7 @@ const expose = `globalThis.ui = {
 
 function fixture() {
   return {
-    today: '2026-10-07', review_week: '2026-W40', prefs: { style: 'handover' },
+    today: '2026-10-07', review_week: '2026-W40', prefs: { style: 'handover', language: 'de' },
     feedback: {}, ideas: [], idea_states: {}, snooze_days: 7,
     projects: [{
       id: 'sample', name: 'Sample', path: 'C:/sample', status: 'active',

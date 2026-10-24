@@ -441,7 +441,7 @@ impl VWatch {
             std::fs::read_dir(&base).map_err(|e| {
                 VWatchError::new(
                     "path_unreadable",
-                    format!("Cannot read {}: {e}", base.to_string_lossy()),
+                    format!("Cannot read {}: {}", base.to_string_lossy(), crate::system::io_message(&e)),
                 )
                 .hint("Check that the folder is accessible with your current account, then retry discovery. No projects were registered.")
             })?;

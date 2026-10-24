@@ -140,6 +140,9 @@ pub(super) fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -
             ("GIT_PAGER", "cat"),
             ("PAGER", "cat"),
             ("GH_PROMPT_DISABLED", "1"),
+            ("LC_ALL", "C"),
+            ("LANG", "C"),
+            ("LANGUAGE", "C"),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -147,12 +150,12 @@ pub(super) fn run(program: &str, args: &[&str], cwd: &Path, timeout: Duration) -
     #[cfg(windows)]
     let (mut child, _job) = match spawn_contained(&mut cmd) {
         Ok(spawned) => spawned,
-        Err(e) => return (false, e.to_string()),
+        Err(e) => return (false, crate::system::io_message(&e)),
     };
     #[cfg(not(windows))]
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return (false, e.to_string()),
+        Err(e) => return (false, crate::system::io_message(&e)),
     };
     let reader = |mut pipe: Box<dyn Read + Send>| {
         let (send, receive) = std::sync::mpsc::channel();

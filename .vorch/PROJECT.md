@@ -4,7 +4,7 @@
 
 vWatch is a local Windows morning overview for an owner running roughly eight software projects through coding agents. It helps the owner see what changed, decide what needs attention, resume an older project and hand a concrete task to an agent. The window is for reading and decisions; a native console CLI lets people and agents use the same application service and SQLite database.
 
-The installed folder contains `vWatch.exe`, `vWatch-UI.exe`, `data/` and `skill/vwatch/`. The window does not call a model. External agents read repository evidence and write German project Cards and a portfolio brief through guarded CLI operations.
+The installed folder contains `vWatch.exe`, `vWatch-UI.exe`, `data/` and `skill/vwatch/`. The window does not call a model. External agents read repository evidence and write project Cards and a portfolio brief in the selected language through guarded CLI operations.
 
 ## Architecture
 
@@ -52,7 +52,7 @@ How to read the maps: `AGENTS.md` -> Load context for the task.
 
 **Time:** service tests inject a fixed UTC clock and a fact collector through `VWatch::with_parts`. Facts distinguish local calendar activity from UTC observation history. Preserve the appropriate clock instead of replacing absent evidence with the wall clock.
 
-**Text and paths:** product text is German; code and developer/operating documentation are English. Card/window paths use forward slashes or environment placeholders as documented by the operating Skill. `.gitattributes` governs line endings: LF text and hooks, CRLF PowerShell/batch files.
+**Text and paths:** the window and newly authored report content share a saved English/German language choice, defaulting to English. CLI-generated text, code and developer/operating documentation are English. Card/window paths use forward slashes or environment placeholders as documented by the operating Skill. `.gitattributes` governs line endings: LF text and hooks, CRLF PowerShell/batch files.
 
 ## Development
 

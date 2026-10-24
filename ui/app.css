@@ -302,6 +302,7 @@ details > summary::-webkit-details-marker { display: none; }
 
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; }
 .setting .t, .setting-block .t { font-weight: 500; }
+.setting select { min-width: 144px; min-height: 38px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--bg); font: inherit; }
 .setting .d, .setting-block .d { font-size: 13px; color: var(--text-3); margin-top: 2px; }
 .setting-block { margin-top: 14px; }
 .toggle { flex-shrink: 0; width: 42px; height: 24px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--surface-2); position: relative; cursor: pointer; padding: 0; }

@@ -121,6 +121,41 @@ fn guarded_writes_require_context_but_dry_runs_do_not_consume_it() {
 }
 
 #[test]
+fn language_changes_guard_pending_reports_without_rewriting_content_or_read_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (svc, _) = service(tmp.path());
+    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
+        .unwrap();
+    assert_eq!(svc.context("demo").unwrap()["report_language"], "en");
+    assert_eq!(svc.portfolio_context(&[]).unwrap()["report_language"], "en");
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(json!({"greeting": "Stored content"}), false, false)
+        .unwrap();
+    let card = svc.card("demo").unwrap();
+    let portfolio = svc.portfolio().unwrap();
+    let state = svc.state(false).unwrap();
+    svc.mark_changes_read(state["changes"]["token"].as_str().unwrap())
+        .unwrap();
+    let before = svc.state(false).unwrap();
+    let due = svc.due(14, false).unwrap();
+    let card_before = card_token(&svc, "demo");
+    let brief_before = portfolio_token(&svc);
+    let (writer, _) = service(tmp.path());
+    writer.set_pref("language", &json!("de")).unwrap();
+    rejected_card_leaves_state(&svc, &card_before);
+    rejected_portfolio_leaves_state(&svc, &brief_before);
+    assert_eq!(svc.card("demo").unwrap(), card);
+    assert_eq!(svc.portfolio().unwrap(), portfolio);
+    assert_eq!(svc.state(false).unwrap()["changes"], before["changes"]);
+    assert_eq!(svc.due(14, false).unwrap(), due);
+    assert_eq!(svc.context("demo").unwrap()["report_language"], "de");
+    assert_eq!(svc.portfolio_context(&[]).unwrap()["report_language"], "de");
+    drop(writer);
+    let (reopened, _) = service(tmp.path());
+    assert_eq!(reopened.state(false).unwrap()["prefs"]["language"], "de");
+}
+
+#[test]
 fn legacy_document_rewrites_cannot_overwrite_newer_versions_or_content() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

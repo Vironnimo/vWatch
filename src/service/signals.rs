@@ -16,7 +16,7 @@ fn fact_warnings(facts: &Value) -> Vec<Value> {
         warnings.push(warning(
             "no_remote",
             "risk",
-            "Arbeit liegt nur lokal",
+            "Work exists only locally",
             json!({
                 "head": facts["head"], "commits": facts["commits"]["total"],
                 "dirty": pick(&facts["dirty"], &["files", "lines_added", "lines_removed"]),
@@ -28,7 +28,7 @@ fn fact_warnings(facts: &Value) -> Vec<Value> {
         warnings.push(warning(
             "ci_none",
             "info",
-            "Keine CI eingerichtet",
+            "No CI configured",
             json!({"state": "none"}),
             true,
         ));
@@ -36,7 +36,7 @@ fn fact_warnings(facts: &Value) -> Vec<Value> {
         warnings.push(warning(
             "ci_red",
             "risk",
-            "CI ist fehlgeschlagen",
+            "CI failed",
             json!({
                 "state": "red", "failing": facts["ci"]["failing"],
             }),
@@ -70,7 +70,7 @@ fn fact_warnings(facts: &Value) -> Vec<Value> {
         warnings.push(warning(
             "worktrees",
             severity,
-            "Weitere Arbeitsverzeichnisse vorhanden",
+            "Additional worktrees exist",
             json!({"items": worktrees}),
             true,
         ));

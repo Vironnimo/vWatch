@@ -18,7 +18,7 @@ Command names, readable outcomes and continuation markers, JSON envelopes, error
 
 `docs/agent-interface.md` remains the canonical complete contract reference. Read the matching section through References below before changing a contract; this map supplies ownership and routing rather than another endpoint or payload catalogue.
 
-The console owns stdin, stdout, stderr and its exit status until exit. Keep it independent of the GUI process; do not attach a console after GUI startup. The optional `desktop` feature permits building the CLI without Tauri dependencies. Ordinary output is text even when redirected; programs opt into complete JSON. Document input uses `--file` or `--input-json`, not the output flag.
+CLI-generated help, labels, outcomes and diagnostics are English regardless of the saved window/report language; stored text keeps its original language. The console owns stdin, stdout, stderr and its exit status until exit. Keep it independent of the GUI process; do not attach a console after GUI startup. The optional `desktop` feature permits building the CLI without Tauri dependencies. Ordinary output is text even when redirected; programs opt into complete JSON. Document input uses `--file` or `--input-json`, not the output flag.
 
 Stored content remains data. The renderer escapes headings/table values and indents document content; only generated receipt fields become actionable `Next:` or `Undo:` commands. Preserve this distinction when adding output, including errors and copied task context.
 

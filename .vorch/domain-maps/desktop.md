@@ -7,7 +7,7 @@ The desktop presents vWatch's shared state to the owner and connects explicit ow
 - `ui/index.html` loads `ui/app.js` as a native ES module, with no frontend build step. The entry point coordinates state reads, rendering and modal event precedence; private feature modules own Today (`overview.js`), projects/handbook, ideas, feedback/decision rounds, handoff, statistics, search and settings. `presentation.js` owns shared markup/date helpers and disclosure state; `app.css` owns styling. `src/app.rs` is the Tauri adapter and `src/bin/vwatch-ui.rs` the GUI executable. Keep service rules in the application domain.
 - `src/system.rs` owns executable-relative paths, the data-folder override, embedded Skill export, autostart and user PATH integration. Installer scripts belong to `development.md`; the operating Skill's content belongs to `agent-interface.md`.
 - The GUI executable has the Windows GUI subsystem and remains independent of the console lifecycle. Do not move CLI dispatch, streams or exit-status handling into the window; see `agent-interface.md`.
-- The page's four areas separate today's decisions, project re-entry, ideas and recommendations, and statistics/history. Changes should shorten the owner's read or make the next action clearer. UI text is German and addresses the owner as `du`.
+- The page's four areas separate today's decisions, project re-entry, ideas and recommendations, and statistics/history. Changes should shorten the owner's read or make the next action clearer. The window defaults to English and supports German (addressing the owner as `du`). `ui/i18n.js` owns message interpolation, locale formatting and live label tables; `messages-de.js` and `errors-de.js` hold German translations. Translate generated presentation text at its call site, never stored content or user input.
 
 ## Interfaces
 
@@ -25,7 +25,7 @@ Feature modules keep their transient state private and render HTML strings. Shar
 
 The service owns project identity, ratings, task transitions, warning decisions and undo guards. A successful save followed by a failed refresh or clipboard write is still saved. Display that distinction and reload before retrying an uncertain mutation. Feature-specific interaction contracts are in `desktop/interactions.md`.
 
-Display preferences are persisted owner choices. Legacy values may need a presentation fallback without rewriting the saved preference. Card/window paths accept forward slashes and environment placeholders such as `%LOCALAPPDATA%`; `open_external` expands filesystem targets and opens URLs, folders or file locations rather than executing handbook commands.
+Display preferences are persisted owner choices. Language is shared with new Agent reports; service/context guard behavior is described in `application/owner-state.md`. Legacy values may need a presentation fallback without rewriting the saved preference. Card/window paths accept forward slashes and environment placeholders such as `%LOCALAPPDATA%`; `open_external` expands filesystem targets and opens URLs, folders or file locations rather than executing handbook commands.
 
 ## Constraints & Gotchas
 

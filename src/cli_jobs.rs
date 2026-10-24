@@ -91,11 +91,13 @@ impl Drop for StreamInheritance {
 }
 
 fn io_error(action: &str, error: std::io::Error) -> VWatchError {
+    let error = crate::system::io_message(&error);
     VWatchError::new("job_io", format!("Cannot {action} the saved command: {error}. Its outcome is unknown; changes may have happened."))
         .hint("Run `vwatch jobs list` in the same data folder, then inspect the original command's show or status result before repeating a change.")
 }
 
 fn prepare_error(action: &str, error: std::io::Error) -> VWatchError {
+    let error = crate::system::io_message(&error);
     VWatchError::new("job_start_io", format!("Cannot {action} the command job: {error}. This call did not start project work."))
         .hint("Check the selected data folder and access to its jobs folder. After resolving that problem, run `vwatch jobs list` to inspect earlier calls before repeating a change.")
 }
@@ -468,6 +470,7 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
     let mut child = match spawned {
         Ok(child) => child,
         Err(cause) => {
+            let cause = crate::system::io_message(&cause);
             let error = VWatchError::new("job_start_failed", format!("The command worker could not start: {cause}. No work was started."))
                 .hint("Check that vWatch.exe is available and executable, then repeat the original command.");
             let result = Completed {
