@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-"""Check an immutable local commit completely; this repository never pushes.
+"""Check an immutable commit completely, then push it to origin's main.
 
-Use --no-push (required). The default is main; --ref checks a task commit before
-landing it. Each run owns a unique detached checkout and persistent logs under
-the primary checkout's .tmp/full-checks/. No fetch, pull or push is performed.
+The default is main. --no-push only checks; --ref checks another commit, such as
+a task commit before landing it, and implies --no-push. Each run owns a unique
+detached checkout and persistent logs under the primary checkout's
+.tmp/full-checks/. Only the checked commit is pushed, and only as a fast-forward
+of origin's main; nothing is fetched or pulled.
 """
 
 from __future__ import annotations
@@ -41,13 +43,17 @@ STEPS = [
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--no-push", action="store_true", help="required: perform a local check only")
-    parser.add_argument("--ref", default="main", help="local commit to check (default: main)")
+    parser.add_argument("--no-push", action="store_true", help="check only; do not push")
+    parser.add_argument("--ref", default="main", help="local commit to check only (default: main)")
     args = parser.parse_args(argv)
-    if not args.no_push:
-        parser.error("vWatch is local-only. Use --no-push; network publishing is disabled.")
+    if args.ref != "main" and not args.no_push:
+        parser.error("--ref checks without pushing; add --no-push, or land the work and push main.")
     root = check.primary_root(ROOT)
     commit = check.git(root, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}").stdout.strip()
+    # Fail before the long checks when there is nowhere to push.
+    if not args.no_push and subprocess.run(["git", "remote", "get-url", "origin"], cwd=root,
+                                           capture_output=True, check=False).returncode != 0:
+        parser.error("there is no origin remote to push to; add --no-push to check only.")
     stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:12]
     checkout = root / ".worktrees" / (".check-" + stamp)
     logs = root / ".tmp" / "full-checks" / stamp
@@ -87,7 +93,15 @@ def main(argv: list[str] | None = None) -> int:
     if not all(results.values()):
         print(f"Local check failed for {commit[:12]}; logs retained at {logs.as_posix()}.")
         return 1
-    print(f"Every check passed for {commit[:12]}. Local-only; nothing pushed.")
+    if args.no_push:
+        print(f"Every check passed for {commit[:12]}. Nothing pushed (--no-push).")
+        return 0
+    # The pre-push hook refuses AI attribution; Git refuses a non-fast-forward.
+    pushed = subprocess.run(["git", "push", "origin", f"{commit}:refs/heads/main"], cwd=root, check=False)
+    if pushed.returncode != 0:
+        print(f"Every check passed for {commit[:12]}, but the push failed.")
+        return 1
+    print(f"Every check passed for {commit[:12]}; pushed to origin/main.")
     return 0
 
 

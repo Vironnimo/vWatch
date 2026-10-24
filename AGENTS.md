@@ -61,7 +61,7 @@ Tests guard behavior against regressions from concurrent and later work. Every t
 
 Before writing or changing a test, read `.vorch/domain-maps/development/testing.md`: what to assert, how to wait, and what the shared fixtures isolate.
 
-**Commits and merges get static checks only.** Run the tests covering your change yourself and commit once they pass. Before completing a larger change or an installation, run the complete local check; this repository has no remote or CI gate. Investigate failures and report any unresolved ones.
+**Commits and merges get static checks only.** Run the tests covering your change yourself and commit once they pass. Before completing a larger change or an installation, run the complete local check; this repository has no CI gate. Investigate failures and report any unresolved ones.
 
 Do not run existing suites merely to analyze code. Read source and contract tests with a question in mind; use a targeted probe for an uncertain behavior claim. A requested survey or test audit runs the suite to measure it.
 
@@ -107,4 +107,4 @@ Maintain terminology as part of relevant work when a missing, stale, or ambiguou
 - Conventional format: `<type>(<scope>): <what>` - lowercase, <=72 chars, no trailing period. Types: `feat` `fix` `docs` `refactor` `perf` `test` `chore`. Breaking change -> `!`.
 - One logical unit per commit; never batch unrelated changes; commit once the tests covering your change pass.
 - **The commit hook checks every commit.** It checks the staged snapshot with Rust formatting and Clippy, JavaScript/Python syntax, and domain-map validation without rewriting or staging working-tree files (PROJECT.md -> Testing). Review the staged diff. When it blocks, fix the reported problems, stage, and commit again; never bypass it with `--no-verify`. It excludes other sessions' unstaged content entirely; all errors in the staged snapshot block. Leave other sessions' files alone. If a commit of source files prints no `Commit check` report, the hook is not enabled: enable it (PROJECT.md -> Development).
-- **Local repository:** do not add a remote or push. `python scripts/push.py --no-push` is the immutable-commit verification path; read `.vorch/workflows/push-workflow.md` before using it. `python scripts/check.py all` checks the current checkout.
+- **Push only when the user asks.** `origin` is the public GitHub repository `Vironnimo/vWatch`, so a push publishes. `python scripts/push.py` checks `main` completely and then pushes exactly that commit; read `.vorch/workflows/push-workflow.md` before using it. `python scripts/push.py --no-push` checks without pushing; `python scripts/check.py all` checks the current checkout.

@@ -8,7 +8,8 @@ Commits and merge commits in a checkout that enabled the tracked hooks
   committer is an AI tool identity such as ``Claude <noreply@anthropic.com>``.
 - ``message <file>`` (``commit-msg``) removes attribution lines from the message:
   ``Co-Authored-By`` and ``Claude-Session`` trailers and "Generated with" footers.
-- ``push <remote>`` refuses every push: vWatch is a local-only repository.
+- ``push <remote>`` (``pre-push``) refuses to push a commit that carries either, so a
+  commit made without the hooks never reaches the remote.
 
 ``history`` checks every commit reachable from HEAD; the complete local check runs it.
 """
@@ -32,6 +33,8 @@ ATTRIBUTION_LINE = re.compile(
     r"(?:\U0001f916\s*)?generated (?:with|by) \[?(?:claude|codex)\b)",
     re.IGNORECASE,
 )
+# The all-zero object name pre-push reports for a deleted ref.
+NO_COMMIT = "0" * 40
 FIELD = "\x1f"
 RECORD = "\x1e"
 # The identity the refusal tells an agent to commit as.
@@ -152,16 +155,24 @@ def strip_message(path: Path) -> int:
     return 0
 
 
+def check_push(remote: str, updates: str) -> int:
+    offending: list[Commit] = []
+    for update in updates.splitlines():
+        parts = update.split()
+        if len(parts) != 4 or parts[1] == NO_COMMIT:
+            continue
+        offending += commits(parts[1], "--not", f"--remotes={remote}")
+    return _report(offending)
+
+
 def main(argv: list[str]) -> int:
     command, *rest = argv or [""]
     if command == "identity":
         return check_identity()
     if command == "message" and len(rest) == 1:
         return strip_message(Path(rest[0]))
-    if command == "push":
-        print("Push blocked: vWatch is local-only. Run python scripts/push.py --no-push "
-              "for the complete local check.", file=sys.stderr)
-        return 1
+    if command == "push" and rest:
+        return check_push(rest[0], sys.stdin.read())
     if command == "history":
         return _report(commits("HEAD"))
     print("usage: commit_authorship.py identity | message <file> | push <remote> | history")
