@@ -2,7 +2,7 @@
 
 ## Context and document recovery
 
-`context_token` in `src/store/documents.rs` hashes the values an agent's interpretation depends on, not their collection time. It includes complete current facts, current document identity/content and relevant owner state. Project contexts also include ratings across projects so the owner's taste is shared. An unrelated project's card alone does not invalidate a project context. Portfolio context includes the previous brief, active owner ideas and whether the owner has opened vWatch since the previous brief; repeat visits after that boundary do not keep invalidating it.
+`context_token` in `src/store/documents.rs` hashes the values an agent's interpretation depends on, not their collection time. It includes complete current facts, current document identity/content, relevant owner state and the effective report language (English when unset). Language participates in both scopes, so a switch cannot admit a write based on the earlier language choice. Project contexts also include ratings across projects so the owner's taste is shared. An unrelated project's card alone does not invalidate a project context. Portfolio context includes the previous brief, active owner ideas and whether the owner has opened vWatch since the previous brief; repeat visits after that boundary do not keep invalidating it.
 
 Context coverage is deliberately broader than the facts fingerprint or portfolio due basis. An informational fact change can invalidate a pending write without requiring a new card in the ordinary daily due check. When adding context-visible state, decide explicitly whether it belongs in the token and in freshness comparisons; they answer different questions.
 

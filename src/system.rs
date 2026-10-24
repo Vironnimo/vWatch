@@ -7,6 +7,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+/// OS Display messages follow the Windows language. Keep diagnostics in English
+/// while retaining the numeric code needed to investigate platform failures.
+pub(crate) fn io_message(error: &std::io::Error) -> String {
+    match error.raw_os_error() {
+        Some(code) => format!("{} (OS error {code})", error.kind()),
+        None => error.kind().to_string(),
+    }
+}
+
 /// The Skill for agents, embedded so the exe always carries the matching version.
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/vwatch/SKILL.md")),

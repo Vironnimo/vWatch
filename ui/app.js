@@ -1,10 +1,11 @@
+import { errorText, tr, locale, setLanguage } from './i18n.js';
 import { handleFeedbackClick, handleFeedbackInput, handleFeedbackKey, handleRoundKey, renderRound, round } from './feedback.js';
 import { handleTaskClick, handleTaskPreviewClick, renderTaskPreview, taskPreviewKey } from './handoff.js';
 import { handleIdeaClick, handleIdeaInput, handleIdeaKey, ideaBucket, ideaCollection, ideaRound, renderIdeaRound, renderIdeas } from './ideas.js';
 import { blockAttention, handleAttentionClick, handleOverviewClick, handleWarningInput, markChangesRead, renderHandover, renderRunStatus } from './overview.js';
 import { $, collapsedMods, esc, handleFoldToggle, minutesAgo } from './presentation.js';
 import { closeProject, handleProjectChange, handleProjectClick, handleProjectInput, handleProjectKey, renderBoard, renderProjectPage } from './projects.js';
-import { handleSearchClick, handleSearchKey } from './search.js';
+import { handleSearchClick, handleSearchKey, renderSearchLanguage } from './search.js';
 import { closePanel, handleSettingsChange, handleSettingsClick, handleSettingsInput, handleSettingsKey, panelOpen, renderEmpty, renderFoot, renderPanel } from './settings.js';
 import { invalidateStatistics, renderStatistics } from './statistics.js';
 
@@ -32,17 +33,22 @@ function restoreInputFocus(saved) {
 
 // ---------- page ----------
 function render() {
+  const languageChanged = setLanguage(S.prefs.language);
+  if (document.documentElement) document.documentElement.lang = S.prefs.language === 'de' ? 'de' : 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = tr(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = tr(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-label]').forEach(el => { el.setAttribute('aria-label', tr(el.dataset.i18nLabel)); });
   const focused = inputFocus();
   const d = new Date(S.today + 'T12:00:00');
-  $('#date').textContent = d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  $('#date').textContent = d.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const collected = S.projects.map(p => p.facts_collected_at).filter(Boolean).sort()[0];
-  $('#fresh').textContent = collected ? `Git-Fakten vor ${minutesAgo(collected)} Min` : '';
+  $('#fresh').textContent = collected ? tr("Git facts measured {0} min ago", minutesAgo(collected)) : '';
   renderRunStatus();
   $('#refresh').hidden = !S.projects.length;
   $('.switch').hidden = false;
   document.querySelectorAll('.switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === S.prefs.style)));
   const freshIdeas = ideaCollection().filter(e => ideaBucket(e) === 'new').length, ideasTab = $('.switch [data-style="ideas"]');
-  if (ideasTab) ideasTab.innerHTML = `Ideen & Empfehlungen${freshIdeas ? ` <span class="nav-count" title="${freshIdeas} neue Vorschläge ohne deine Bewertung">${freshIdeas}</span>` : ''}`;
+  if (ideasTab) ideasTab.innerHTML = tr("Ideas & recommendations{0}", freshIdeas ? ` <span class="nav-count" title="${tr("{0} new proposals awaiting your rating", freshIdeas)}">${freshIdeas}</span>` : '');
   const style = { board: renderBoard, ideas: renderIdeas, statistics: renderStatistics }[S.prefs.style] || renderHandover;
   $('#view').innerHTML = !S.projects.length && (!S.prefs.style || S.prefs.style === 'handover') ? renderEmpty() + blockAttention() : style();
   renderFoot();
@@ -51,16 +57,17 @@ function render() {
   if (round) renderRound(true);
   if (ideaRound) renderIdeaRound(true);
   renderTaskPreview();
+  if (languageChanged) renderSearchLanguage();
   restoreInputFocus(focused);
 }
 
 // ---------- calls into the app ----------
 const call = (cmd, args) => window.__TAURI__.core.invoke(cmd, args || {});
-const errText = e => (e && e.message) || String(e);
+const errText = e => errorText((e && e.message) || String(e));
 let toastTimer = null;
 function toast(text, undo) {
   const t = $('#toast');
-  t.innerHTML = `<span>${esc(text)}</span>${undo ? '<button type="button" id="undo">Rückgängig</button>' : ''}`;
+  t.innerHTML = `<span>${esc(text)}</span>${undo ? `<button type="button" id="undo">${tr("Undo")}</button>` : ''}`;
   t.hidden = false;
   if (undo) $('#undo').onclick = () => { t.hidden = true; undo(); };
   clearTimeout(toastTimer);
@@ -93,8 +100,8 @@ async function load(visit) {
       // A failed read is not an acknowledged database version. Retain the
       // last usable page and retry, including when the first read failed.
       loadRetryAt = Date.now() + 10000;
-      if (S) toast('Aktualisierung fehlgeschlagen. Der bisherige Stand bleibt sichtbar; vWatch versucht es erneut. ' + errText(e));
-      else $('#view').innerHTML = `<p class="note" style="margin-top:30px">vWatch konnte seine Daten nicht laden: ${esc(errText(e))}. Ein neuer Versuch folgt automatisch.</p>`;
+      if (S) toast(`${tr("Refresh failed. The previous state remains visible; vWatch will retry.")} ` + errText(e));
+      else $('#view').innerHTML = `<p class="note" style="margin-top:30px">${tr("vWatch could not load its data: {0}. It will retry automatically.", esc(errText(e)))}</p>`;
     }
   } finally { loading--; }
   if (!shown) { shown = true; call('ready').catch(() => {}); }
@@ -106,12 +113,12 @@ async function refreshFacts() {
   const seq = ++loadSeq;
   refreshing = true; lastRefresh = Date.now();
   const b = $('#refresh');
-  b.disabled = true; b.textContent = 'Misst …';
+  b.disabled = true; b.textContent = tr("Measuring …");
   try {
     const next = await call('refresh');
     acceptState(seq, next);
-  } catch (e) { toast('Messen hat nicht geklappt: ' + errText(e)); }
-  b.disabled = false; b.textContent = 'Git-Fakten messen';
+  } catch (e) { toast(`${tr("Measurement failed:")} ` + errText(e)); }
+  b.disabled = false; b.textContent = tr("Measure Git facts");
   refreshing = false;
 }
 // Facts every watched project measured within the refresh interval, by the window or an agent's run.
@@ -131,7 +138,7 @@ async function setPref(key, value) {
   try { await call('set_pref', { key, value }); }
   catch (e) {
     if (S.prefs[key] === value) { S.prefs[key] = previous; render(); }
-    toast('Einstellung nicht gespeichert.');
+    toast(tr("Setting was not saved."));
   }
 }
 async function toggleModule(id) {
@@ -184,7 +191,7 @@ document.addEventListener('click', async e => {
   const toggle = t.closest('[data-mod-toggle]');
   if (toggle) { toggleModule(toggle.dataset.modToggle); return; }
   const copy = t.closest('[data-copy]');
-  if (copy) { navigator.clipboard.writeText(copy.dataset.copy).then(() => toast('Kopiert.'), () => toast('Kopieren hat nicht geklappt.')); return; }
+  if (copy) { navigator.clipboard.writeText(copy.dataset.copy).then(() => toast(tr("Copied.")), () => toast(tr("Copy failed."))); return; }
   const ext = t.closest('[data-external]');
   if (ext) call('open_external', { target: ext.dataset.external }).catch(err => toast(errText(err)));
 });

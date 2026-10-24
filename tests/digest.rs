@@ -67,10 +67,10 @@ fn meaningful_changes_persist_until_the_viewed_snapshot_is_acknowledged() {
         "Opening the window again does not acknowledge unread work"
     );
     assert_eq!(digest["total"], 3);
-    assert!(titles(&digest, "new").contains(&"Neu offen: Neue Suche prüfen".to_owned()));
-    assert!(titles(&digest, "new").contains(&"Neu: Suche ergänzt".to_owned()));
+    assert!(titles(&digest, "new").contains(&"New open end: Neue Suche prüfen".to_owned()));
+    assert!(titles(&digest, "new").contains(&"New: Suche ergänzt".to_owned()));
     assert!(titles(&digest, "resolved")
-        .contains(&"Nicht mehr offen in der Karte: Alten Export prüfen".to_owned()));
+        .contains(&"No longer open in the Card: Alten Export prüfen".to_owned()));
     assert_eq!(changes(&svc)["entries"], digest["entries"]);
 
     drop(svc);
@@ -151,7 +151,7 @@ fn an_owner_reply_is_only_incorporated_after_a_subsequent_card_consumes_it() {
     let applied = changes(&svc);
     assert_eq!(
         titles(&applied, "decision_applied"),
-        vec!["Antwort in Karte berücksichtigt: Welche Farbe?"]
+        vec!["Answer incorporated into Card: Welche Farbe?"]
     );
     assert_eq!(applied["entries"][0]["detail"], "Blau");
     assert!(!applied.to_string().contains("implementiert"));
@@ -313,7 +313,7 @@ fn legacy_fact_snapshots_keep_the_read_baseline_and_only_compare_card_changes() 
     let digest = svc.state(true).unwrap()["changes"].clone();
     assert_eq!(digest["since"], legacy["at"]);
     assert_eq!(digest["total"], 1);
-    assert_eq!(titles(&digest, "new"), vec!["Neu: Suche ergänzt"]);
+    assert_eq!(titles(&digest, "new"), vec!["New: Suche ergänzt"]);
     assert!(titles(&digest, "resolved").is_empty());
     assert_eq!(svc.store().pref("changes_read").unwrap().unwrap(), legacy);
     svc.mark_changes_read(digest["token"].as_str().unwrap())
@@ -355,7 +355,7 @@ fn concurrent_writes_cannot_be_silently_included_in_read_acknowledgement() {
     );
     assert_eq!(
         titles(&changes(&owner), "new"),
-        vec!["Neu offen: Concurrent new work"]
+        vec!["New open end: Concurrent new work"]
     );
 }
 

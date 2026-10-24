@@ -35,7 +35,7 @@
 </p>
 
 > [!NOTE]
-> The window is in German. This README, the user guide and the agent's instructions are in English; agents write their reports in German.
+> The window and new agent reports default to English. Choose English or German in Settings → Language; saved content keeps its original language. The CLI, documentation and agent instructions are in English. The screenshots below show the German interface.
 
 ## Features
 

@@ -3,6 +3,70 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { app, fixture, deferred } = require('./ui-helpers.cjs');
 
+test('language defaults to English, switches all areas and formats, and preserves authored content and drafts', async () => {
+  const a = await app(undefined, `Object.assign(ui, { setPref, panelHtml, num, fmtDate, renderBoard, renderIdeas, renderStatistics, taskPreviewOpen: openTaskPreview });`);
+  delete a.state.prefs.language;
+  a.state.projects[0].card.headline = 'Deutscher Inhalt {0} <saved>';
+  a.ui.draft('q1', 'Ungesendete Antwort'); a.ui.answer('q1');
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /Good morning/);
+  assert.match(a.ui.panelHtml(), /Window and new reports/);
+  assert.equal(a.ui.num(1234.5), '1,234.5');
+  assert.equal(a.ui.fmtDate('2026-10-07'), '10/07/2026');
+  await a.ui.setPref('language', 'de');
+  assert.equal(a.calls.at(-1).command, 'set_pref');
+  assert.equal(a.calls.at(-1).args.value, 'de');
+  assert.match(a.node('#view').innerHTML, /Guten Morgen/);
+  assert.match(a.ui.panelHtml(), /Oberfläche und neue Berichte/);
+  assert.equal(a.ui.num(1234.5), '1.234,5');
+  assert.equal(a.ui.fmtDate('2026-10-07'), '07.10.2026');
+  await a.ui.load(false);
+  assert.match(a.node('#view').innerHTML, /Guten Morgen/);
+  await a.ui.setPref('language', 'en');
+  assert.match(a.ui.renderBoard(), /Your Projects/);
+  a.ui.openProject('sample');
+  assert.match(a.node('#project-page').innerHTML, /Deutscher Inhalt \{0\} &lt;saved&gt;/);
+  assert.match(a.node('#project-page').innerHTML, /Ungesendete Antwort/);
+  assert.match(a.ui.renderIdeas(), /Ideas & recommendations/);
+  assert.match(a.ui.renderStatistics(), /Statistics &amp; history|Statistics & history/);
+});
+
+test('a failed language save restores the selected language and keeps the choice visible', async () => {
+  const a = await app(command => { if (command === 'set_pref') throw new Error('Write failed'); }, 'Object.assign(ui, { setPref, panelHtml });');
+  await a.ui.setPref('language', 'en');
+  assert.match(a.node('#view').innerHTML, /Guten Morgen/);
+  assert.match(a.node('#toast').innerHTML, /Einstellung nicht gespeichert/);
+  assert.match(a.ui.panelHtml(), /value="de" selected/);
+});
+
+test('translation slots preserve supplied text and every message has matching German slots', async () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const a = await app(undefined, 'Object.assign(ui, { tr, setLanguage, errText });');
+  const catalogue = fs.readFileSync(path.join(__dirname, '../ui/messages-de.js'), 'utf8');
+  const germanMessages = JSON.parse(catalogue.slice(catalogue.indexOf('{')).replace(/;\s*$/, ''));
+  const errorCatalogue = fs.readFileSync(path.join(__dirname, '../ui/errors-de.js'), 'utf8');
+  const errors = JSON.parse(errorCatalogue.slice(errorCatalogue.indexOf('{')).replace(/;\s*$/, ''));
+  for (const [english, german] of Object.entries({ ...germanMessages, ...errors })) {
+    const slots = text => [...text.matchAll(/\{(\d+)\}/g)].map(m => m[1]).sort().join(',');
+    assert.equal(slots(english), slots(german), english);
+  }
+  for (const file of fs.readdirSync(path.join(__dirname, '../ui')).filter(f => f.endsWith('.js') && !['i18n.js', 'messages-de.js'].includes(f))) {
+    const source = fs.readFileSync(path.join(__dirname, '../ui', file), 'utf8');
+    for (const match of source.matchAll(/\btr\(("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g)) {
+      const message = match[1][0] === '"' ? JSON.parse(match[1]) : match[1].slice(1, -1).replace(/\\'/g, "'").replace(/\\u0004/g, '\u0004');
+      assert.ok(Object.hasOwn(germanMessages, message), `${file}: missing German message ${message}`);
+    }
+  }
+  a.ui.setLanguage('en');
+  assert.equal(a.ui.tr('Not saved: {0}', '{1} <script>'), 'Not saved: {1} <script>');
+  a.ui.setLanguage('de');
+  assert.equal(a.ui.tr('Not saved: {0}', '{1} <script>'), 'Nicht gespeichert: {1} <script>');
+  assert.equal(a.ui.tr('toString'), 'toString');
+  assert.equal(a.ui.errText({ message: 'Folder does not exist: C:/English {0}' }), 'Ordner existiert nicht: C:/English {0}');
+  const index = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+  for (const match of index.matchAll(/data-i18n(?:-title|-label)?="([^"]*)"/g)) assert.ok(Object.hasOwn(germanMessages, match[1]), match[1]);
+});
+
 const recoveryExpose = `Object.assign(ui, {
   watch,
   advanceClock: () => { const now = Date.now() + 60000; Date.now = () => now; },

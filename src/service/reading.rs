@@ -262,7 +262,7 @@ fn digest_items(
                 category: "open",
                 title: item["title"].as_str().unwrap_or("").into(),
                 detail,
-                next_step: "Offenes Ende im Projekt prüfen oder als Auftrag übernehmen.".into(),
+                next_step: "Review the open end in the Project or assign it as a Task.".into(),
                 comparison: json!({"kind": item["kind"], "detail": digest_text(&item["detail"])}),
             },
         );
@@ -280,7 +280,7 @@ fn digest_items(
                     category: "question",
                     title: item["title"].as_str().unwrap_or("").into(),
                     detail: item["source"].as_str().unwrap_or("").into(),
-                    next_step: "Frage im Projekt beantworten.".into(),
+                    next_step: "Answer the question in the Project.".into(),
                     comparison: item["options"].clone(),
                 },
             );
@@ -304,7 +304,7 @@ fn digest_items(
             DigestItem {
                 category: "decision",
                 title: decision.as_str().unwrap_or("").into(),
-                detail: "In der aktuellen Karte dokumentiert.".into(),
+                detail: "Documented in the current Card.".into(),
                 next_step: String::new(),
                 comparison: Value::Null,
             },
@@ -332,7 +332,7 @@ fn digest_items(
                 category: "applied",
                 title: feedback["title"].as_str().unwrap_or("").into(),
                 detail: feedback["note"].as_str().unwrap_or("").into(),
-                next_step: "Aktuelle Karte lesen.".into(),
+                next_step: "Read the current Card.".into(),
                 comparison: Value::Null,
             },
         );
@@ -442,17 +442,19 @@ impl VWatch {
                         continue;
                     }
                     let (kind, prefix) = match item.category {
-                        "applied" => ("decision_applied", "Antwort in Karte berücksichtigt"),
-                        "open" if prior.is_some() => ("new", "Offenes Ende aktualisiert"),
-                        "open" => ("new", "Neu offen"),
-                        "question" if prior.is_some() => ("new", "Frage aktualisiert"),
-                        "question" => ("new", "Neue Frage"),
-                        "decision" => ("new", "Entscheidung dokumentiert"),
-                        _ => ("new", "Neu"),
+                        "applied" => ("decision_applied", "Answer incorporated into Card"),
+                        "open" if prior.is_some() => ("new", "Open end updated"),
+                        "open" => ("new", "New open end"),
+                        "question" if prior.is_some() => ("new", "Question updated"),
+                        "question" => ("new", "New question"),
+                        "decision" => ("new", "Decision documented"),
+                        _ => ("new", "New"),
                     };
                     entries.push(json!({
                         "project": project["id"], "kind": kind,
                         "title": format!("{prefix}: {}", item.title),
+                        "title_prefix": prefix, "source_title": item.title,
+                        "generated_detail": item.category == "decision",
                         "detail": item.detail, "next_step": item.next_step,
                     }));
                 }
@@ -461,13 +463,15 @@ impl VWatch {
                         continue;
                     }
                     let (prefix, detail) = match item.category {
-                        "open" => ("Nicht mehr offen in der Karte", "Die aktuelle Karte führt dieses offene Ende nicht mehr auf."),
-                        "question" => ("Frage nicht mehr offen", "Die Frage ist beantwortet, abgehakt oder wird in der aktuellen Karte nicht mehr gestellt."),
+                        "open" => ("No longer open in the Card", "The current Card no longer lists this open end."),
+                        "question" => ("Question no longer open", "The question is answered, marked done or no longer asked in the current Card."),
                         _ => continue,
                     };
                     entries.push(json!({
                         "project": project["id"], "kind": "resolved",
                         "title": format!("{prefix}: {}", item.title),
+                        "title_prefix": prefix, "source_title": item.title,
+                        "generated_detail": true,
                         "detail": detail, "next_step": "",
                     }));
                 }
@@ -817,6 +821,7 @@ impl VWatch {
             "feedback": feedback,
             "snooze_days": SNOOZE_DAYS,
             "prefs": {
+                "language": self.report_language()?,
                 "style": self.store.pref("style")?.unwrap_or_else(|| json!("handover")),
                 "hidden_modules": self.store.pref("hidden_modules")?.unwrap_or_else(|| json!([])),
             },

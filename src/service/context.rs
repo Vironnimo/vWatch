@@ -79,6 +79,7 @@ impl VWatch {
         for _ in 0..3 {
             let token = self.store.context_token(project)?;
             let mut data = read()?;
+            data["report_language"] = json!(self.report_language()?);
             if token == self.store.context_token(project)? {
                 data["context_token"] = json!(token);
                 return Ok(data);

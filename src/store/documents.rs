@@ -352,6 +352,14 @@ fn token_rows(db: &Connection, sql: &str, scope: Option<&str>) -> Result<Value> 
 pub(super) fn context_token(db: &Connection, scope: Option<&str>) -> Result<String> {
     use sha1::{Digest, Sha1};
     let mut basis = serde_json::json!({"scope": scope});
+    basis["report_language"] = db
+        .query_row(
+            "SELECT COALESCE((SELECT value FROM prefs WHERE key='language'), '\"en\"')",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .parse::<Value>()
+        .unwrap_or_else(|_| serde_json::json!("en"));
     basis["projects"] = token_rows(db,
         "SELECT id,name,path,status,status_note,goal,goal_due,added_at,identity_revision FROM projects WHERE removed_at IS NULL AND ((?1 IS NULL AND status != 'archived') OR id = ?1) ORDER BY id", scope)?;
     basis["cards"] = token_rows(db,

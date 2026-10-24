@@ -158,7 +158,7 @@ fn owner_choices_show_up_in_the_window_state() {
     );
     assert_eq!(
         state["prefs"],
-        json!({"style": "handover", "hidden_modules": ["pulse"]})
+        json!({"style": "handover", "hidden_modules": ["pulse"], "language": "en"})
     );
 }
 

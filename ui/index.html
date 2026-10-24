@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,22 +16,22 @@
         <summary id="report-status-summary"></summary>
         <div class="report-status-body" id="report-status-body"></div>
       </details>
-      <button class="btn" id="refresh" type="button">Git-Fakten messen</button>
-      <button class="icon-btn" type="button" data-search title="Suchen (Strg+K)" aria-label="Suchen">
+      <button class="btn" id="refresh" type="button" data-i18n="Measure Git facts">Measure Git facts</button>
+      <button class="icon-btn" type="button" data-search title="Search (Ctrl+K)" data-i18n-title="Search (Ctrl+K)" aria-label="Search" data-i18n-label="Search">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
-      <button class="icon-btn" type="button" data-open-settings title="Einstellungen" aria-label="Einstellungen">
+      <button class="icon-btn" type="button" data-open-settings title="Settings" data-i18n-title="Settings" aria-label="Settings" data-i18n-label="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       </button>
     </div>
-    <nav class="switch" aria-label="Bereiche">
-      <button data-style="handover" aria-pressed="true" type="button">Heute</button>
-      <button data-style="board" aria-pressed="false" type="button">Projekte</button>
-      <button data-style="ideas" aria-pressed="false" type="button">Ideen & Empfehlungen</button>
-      <button data-style="statistics" aria-pressed="false" type="button">Statistik</button>
+    <nav class="switch" aria-label="Sections" data-i18n-label="Sections">
+      <button data-style="handover" aria-pressed="true" type="button" data-i18n="Today">Today</button>
+      <button data-style="board" aria-pressed="false" type="button" data-i18n="Projects">Projects</button>
+      <button data-style="ideas" aria-pressed="false" type="button" data-i18n="Ideas & recommendations">Ideas & recommendations</button>
+      <button data-style="statistics" aria-pressed="false" type="button" data-i18n="Statistics">Statistics</button>
     </nav>
   </header>
-  <main id="view"><p class="muted" style="margin-top:40px">Lade …</p></main>
+  <main id="view"><p class="muted" style="margin-top:40px" data-i18n="Loading …">Loading …</p></main>
   <footer id="foot" class="pagefoot"></footer>
 </div>
 <div id="panel-root"></div>

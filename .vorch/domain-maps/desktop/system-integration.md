@@ -12,6 +12,8 @@ The system unit contract exports to an explicit scratch path through the same pr
 
 The settings response supplies the exported Skill path and a vBot install command with `--scope own`. Preserve the actual scope when updating an installed operating Skill: an agent-private installation must not become global/shared without the owner's explicit request. An external vBot caller needs the intended agent's scope as documented in `README.md`.
 
+`system::io_message` formats platform failures from English Rust error kinds and retains numeric OS codes; console and collector callers do not expose localized Windows Display messages.
+
 ## Window lifecycle
 
 `src/bin/vwatch-ui.rs` selects the Windows GUI subsystem and calls `app::run`. The adapter opens the service, exports the Skill and creates a hidden Tauri WebView using the selected data folder's `webview/` cache. The page's `ready` call shows the rendered window; a timed fallback avoids leaving the application invisible after a page failure. The single-instance plugin focuses the existing window rather than processing console commands there.

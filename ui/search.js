@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 import { S, toast, typing } from './app.js';
 import { reply } from './feedback.js';
 import { ideaCollection, openIdeaResult } from './ideas.js';
@@ -17,49 +18,49 @@ const searchIdentity = value => JSON.stringify(value, (_key, item) => item && ty
 function searchEntries() {
   const out = [];
   for (const p of S.projects) {
-    const add = (where, text, tab, anchor, source = text) => { if (text) out.push({ id: p.id, name: p.name, where, text: String(text), tab: tab || 'work', anchor, identity: searchIdentity([p.id, where, source]) }); };
+    const add = (whereKey, text, tab, anchor, source = text) => { if (text) out.push({ id: p.id, name: p.name, whereKey, where: tr(whereKey), text: String(text), tab: tab || 'work', anchor, identity: searchIdentity([p.id, whereKey, source]) }); };
     add('Name', p.name, 'work', 'name');
-    add('Ordner', p.path, 'handbook', 'path');
-    add('Deine Absicht', [p.status_note, p.goal].filter(Boolean).join(' · '), 'work', 'owner');
-    for (const [id, f] of pastReplies(p)) add('Frühere Antwort', [f.item.title || f.title, f.note].filter(Boolean).join(' · '), 'history', `answer:${id}`, id);
+    add("Folder", p.path, 'handbook', 'path');
+    add("Your intent", [p.status_note, p.goal].filter(Boolean).join(' · '), 'work', 'owner');
+    for (const [id, f] of pastReplies(p)) add("Earlier answer", [f.item.title || f.title, f.note].filter(Boolean).join(' · '), 'history', `answer:${id}`, id);
     for (const task of (S.tasks || []).filter(t => (t.projects || []).includes(p.id))) {
-      add('Auftrag', [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · '), 'work', `task:${task.id}`, task.id);
+      add("Task\u0004assignment", [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · '), 'work', `task:${task.id}`, task.id);
     }
     const c = p.card;
     if (!c) continue;
-    add('Kurz gesagt', c.one_liner, 'work', 'purpose'); add('Stack', c.stack, 'handbook', 'stack'); add('Aktueller Stand', c.headline, 'work', 'headline');
-    add('Projektstimme', c.personality, 'work', 'voice');
-    add('Nächster Schritt', c.reentry && [c.reentry.next_step, c.reentry.why, c.reentry.done_when].filter(Boolean).join(' · '), 'work', 'reentry');
-    add('Im Alltag', c.usage && [c.usage.summary, c.usage.evidence].filter(Boolean).join(' · '), 'work', 'usage');
-    if (c.vision) add('Vision und Fortschritt', [c.vision.statement, c.vision.progress_note].filter(Boolean).join(' · '), 'history', 'vision');
-    c.features.forEach((x, i) => add('Kann', x, 'handbook', `feature:${i}`, x));
-    c.recent_changes.forEach((x, i) => add('Zuletzt passiert', x.detail ? `${x.title} – ${x.detail}` : x.title, 'history', `recent:${i}`, x));
-    c.milestones.forEach((x, i) => add('Meilenstein', x.title, 'history', `milestone:${i}`, x));
-    c.open_ends.forEach((x, i) => add('Offenes Ende', [x.title, x.detail, x.source].filter(Boolean).join(' · '), 'work', `open:${i}`, x));
+    add("In brief", c.one_liner, 'work', 'purpose'); add('Stack', c.stack, 'handbook', 'stack'); add("Current state", c.headline, 'work', 'headline');
+    add("Project voice", c.personality, 'work', 'voice');
+    add("Next step", c.reentry && [c.reentry.next_step, c.reentry.why, c.reentry.done_when].filter(Boolean).join(' · '), 'work', 'reentry');
+    add("Everyday use", c.usage && [c.usage.summary, c.usage.evidence].filter(Boolean).join(' · '), 'work', 'usage');
+    if (c.vision) add("Vision and progress", [c.vision.statement, c.vision.progress_note].filter(Boolean).join(' · '), 'history', 'vision');
+    c.features.forEach((x, i) => add("Can do", x, 'handbook', `feature:${i}`, x));
+    c.recent_changes.forEach((x, i) => add("Recent changes", x.detail ? `${x.title} – ${x.detail}` : x.title, 'history', `recent:${i}`, x));
+    c.milestones.forEach((x, i) => add("Milestone", x.title, 'history', `milestone:${i}`, x));
+    c.open_ends.forEach((x, i) => add("Open end", [x.title, x.detail, x.source].filter(Boolean).join(' · '), 'work', `open:${i}`, x));
     c.waiting_on_you.forEach(x => {
-      add('Frage an dich', [x.title, x.source, ...(x.options || []).map(o => o.answer)].filter(Boolean).join(' · '), 'work', `question:${x.id}`, x.id);
+      add("Question for you", [x.title, x.source, ...(x.options || []).map(o => o.answer)].filter(Boolean).join(' · '), 'work', `question:${x.id}`, x.id);
       const answered = reply(x.id);
-      if (answered && answered.note) add('Deine Antwort', answered.note, 'work', `question:${x.id}`, x.id);
+      if (answered && answered.note) add("Your answer", answered.note, 'work', `question:${x.id}`, x.id);
     });
-    c.suggestions.forEach(x => add('Vorschlag', [x.title, x.why, x.evidence, x.done_when].filter(Boolean).join(' · '), 'work', `suggestion:${x.id}`, x.id));
-    c.health_notes.forEach((x, i) => add('Gesundheit', x, 'history', `health:${i}`));
-    (c.decisions || []).forEach((x, i) => add('Entscheidung', x, 'work', `decision:${i}`));
-    c.cross_project_hints.forEach((x, i) => add('Querverbindung', x, 'work', `connection:${i}`));
+    c.suggestions.forEach(x => add("Proposal", [x.title, x.why, x.evidence, x.done_when].filter(Boolean).join(' · '), 'work', `suggestion:${x.id}`, x.id));
+    c.health_notes.forEach((x, i) => add("Health", x, 'history', `health:${i}`));
+    (c.decisions || []).forEach((x, i) => add("Decision", x, 'work', `decision:${i}`));
+    c.cross_project_hints.forEach((x, i) => add("Connection", x, 'work', `connection:${i}`));
     const h = c.handbook || {};
-    (h.run || []).forEach((x, i) => add('Handbuch · Starten', `${x.what}: ${x.how}`, 'handbook', `hb-run:${i}`, x));
-    if (h.installed) add('Handbuch · Installiert', `${h.installed.version} ${h.installed.open || ''} ${h.installed.path}`, 'handbook', 'hb-installed', h.installed);
-    add('Handbuch · Aufbau', h.architecture, 'handbook', 'hb-architecture');
-    (h.places || []).forEach((x, i) => add('Handbuch · Wo was liegt', `${x.path} – ${x.what}`, 'handbook', `hb-place:${i}`, x));
-    (h.read_first || []).forEach((x, i) => add('Handbuch · Zuerst lesen', `${x.path} – ${x.why}`, 'handbook', `hb-read:${i}`, x));
-    (h.needs || []).forEach((x, i) => add('Handbuch · Braucht', x, 'handbook', `hb-need:${i}`));
-    (h.terms || []).forEach((x, i) => add('Handbuch · Begriff', `${x.term}: ${x.meaning}`, 'handbook', `hb-term:${i}`, x));
+    (h.run || []).forEach((x, i) => add("Handbook · Start", `${x.what}: ${x.how}`, 'handbook', `hb-run:${i}`, x));
+    if (h.installed) add("Handbook · Installed", `${h.installed.version} ${h.installed.open || ''} ${h.installed.path}`, 'handbook', 'hb-installed', h.installed);
+    add("Handbook · Structure", h.architecture, 'handbook', 'hb-architecture');
+    (h.places || []).forEach((x, i) => add("Handbook · Where things are", `${x.path} – ${x.what}`, 'handbook', `hb-place:${i}`, x));
+    (h.read_first || []).forEach((x, i) => add("Handbook · Read first", `${x.path} – ${x.why}`, 'handbook', `hb-read:${i}`, x));
+    (h.needs || []).forEach((x, i) => add("Handbook · Needs", x, 'handbook', `hb-need:${i}`));
+    (h.terms || []).forEach((x, i) => add("Handbook · Term", `${x.term}: ${x.meaning}`, 'handbook', `hb-term:${i}`, x));
   }
   for (const idea of ideaCollection()) {
     if (idea.project && !idea.retained && !idea.own) continue;
-    out.push({ ideaId: idea.s.id, identity: searchIdentity(['idea', idea.s.id]), name: idea.own ? 'Deine Ideen' : 'Ideen', where: idea.own ? 'Eigene Idee' : 'Vorschlag', text: [idea.s.title, idea.s.why, idea.s.pitch, idea.s.evidence].filter(Boolean).join(' · ') });
+    out.push({ ideaId: idea.s.id, identity: searchIdentity(['idea', idea.s.id]), nameGenerated: true, name: idea.own ? 'Your ideas' : 'Ideas', where: idea.own ? 'Own idea' : 'Proposal', text: [idea.s.title, idea.s.why, idea.s.pitch, idea.s.evidence].filter(Boolean).join(' · ') });
   }
   for (const task of (S.tasks || []).filter(t => !(t.projects || []).some(id => byId(id)))) {
-    out.push({ taskId: task.id, identity: searchIdentity(['task', task.id]), name: 'Aufträge', where: 'Auftrag', text: [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · ') });
+    out.push({ taskId: task.id, identity: searchIdentity(['task', task.id]), nameGenerated: true, name: 'Tasks', where: 'Task\u0004assignment', text: [task.title, task.why, task.done_when, task.result, task.result_evidence].filter(Boolean).join(' · ') });
   }
   return out;
 }
@@ -101,20 +102,24 @@ function renderSearchResults() {
   if (!searchSnapshot || searchSnapshot.query !== searchQ) searchSnapshot = { query: searchQ, results: searchResults() };
   const res = searchSnapshot.results;
   searchSel = Math.min(searchSel, Math.max(0, res.length - 1));
-  box.innerHTML = !searchQ.trim() ? '<p class="faint sempty">Sucht in Projekten, Handbüchern, Aufträgen, Ideen und deinen Antworten. Ein Treffer öffnet die Fundstelle.</p>'
-    : !res.length ? '<p class="faint sempty">Nichts gefunden.</p>'
-    : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" aria-selected="${i === searchSel}"><span class="w">${r.id ? dot(r.id) : ''}<b>${esc(r.name)}</b> · ${esc(r.where)}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
+  box.innerHTML = !searchQ.trim() ? `<p class="faint sempty">${tr("Searches Projects, handbooks, Tasks, ideas and your answers. A result opens its source.")}</p>`
+    : !res.length ? `<p class="faint sempty">${tr("Nothing found.")}</p>`
+    : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" aria-selected="${i === searchSel}"><span class="w">${r.id ? dot(r.id) : ''}<b>${esc(r.nameGenerated ? tr(r.name) : r.name)}</b> · ${esc(tr(r.whereKey || r.where))}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
   const sel = box.querySelector('[aria-selected="true"]');
   if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+function renderSearchLanguage() {
+  if (!searchOpen) return;
+  $('#search-root').innerHTML = `<div class="scrim" data-search-close></div><div class="search" role="dialog" aria-modal="true" aria-label="${tr("Search")}">
+    <input type="search" id="search-q" placeholder="${tr("Search, e.g. login, SQLite, port")}" value="${esc(searchQ)}" aria-label="${tr("Search term")}" autocomplete="off">
+    <div class="sresults"></div><div class="shint faint">${tr("↑ ↓ select · Enter opens source · Esc closes")}</div></div>`;
+  renderSearchResults();
 }
 function openSearch() {
   if (!S) return;
   searchSnapshot = null;
   searchOpen = true;
-  $('#search-root').innerHTML = `<div class="scrim" data-search-close></div><div class="search" role="dialog" aria-modal="true" aria-label="Suche">
-    <input type="search" id="search-q" placeholder="Suchen, z. B. Login, SQLite, Port" value="${esc(searchQ)}" aria-label="Suchbegriff" autocomplete="off">
-    <div class="sresults"></div><div class="shint faint">↑ ↓ wählen · Enter öffnet die Fundstelle · Esc schließt</div></div>`;
-  renderSearchResults();
+  renderSearchLanguage();
   const input = $('#search-q');
   input.focus();
   input.select();
@@ -127,7 +132,7 @@ function pickResult(btn) {
   // Array positions are presentation anchors, not item identities. Reconcile
   // the visible hit with the current document before choosing its new anchor.
   const matches = searchEntries().filter(entry => entry.identity === selected.identity);
-  if (matches.length !== 1) { toast('Treffer nicht mehr aktuell oder nicht mehr eindeutig. Öffne die Suche erneut.'); return; }
+  if (matches.length !== 1) { toast(tr("Result is outdated or ambiguous. Open the search again.")); return; }
   const result = matches[0];
   closeSearch();
   if (result.ideaId) { openIdeaResult(result.ideaId); return; }
@@ -158,4 +163,4 @@ function handleSearchKey(e) {
   return false;
 }
 
-export { handleSearchClick, handleSearchKey };
+export { handleSearchClick, handleSearchKey, renderSearchLanguage };

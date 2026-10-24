@@ -108,6 +108,7 @@ fn overview_project_details_search_visits_and_settings_are_available_without_the
     assert!(svc.store().pref("last_visit").unwrap().is_some());
 
     let before = ok(&home, &["settings", "show"]);
+    assert_eq!(before["prefs"]["language"], "en");
     assert!(before["settings"]["agent_access"].is_boolean());
     let updated = ok(
         &home,
@@ -118,9 +119,14 @@ fn overview_project_details_search_visits_and_settings_are_available_without_the
             "BOARD",
             "--hidden-modules",
             "ideas,week",
+            "--language",
+            "DE",
         ],
     );
     assert_eq!(updated["prefs"]["style"], "board");
+    assert_eq!(updated["prefs"]["language"], "de");
+    let (_, english) = call(&home, &["settings", "show"]);
+    assert!(english.contains("vWatch settings."));
     assert_eq!(updated["prefs"]["hidden_modules"], json!(["ideas", "week"]));
     assert_eq!(
         updated["settings"]["autostart"],
@@ -139,6 +145,8 @@ fn overview_project_details_search_visits_and_settings_are_available_without_the
             "handover",
             "--hidden-modules",
             "unknown-module",
+            "--language",
+            "en",
         ],
     );
     assert_eq!(code, 1);

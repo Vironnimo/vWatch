@@ -231,7 +231,7 @@ pub(super) enum FeedbackCmd {
     #[command(aliases = ["update", "rate"])]
     Set {
         id: String,
-        /// Owner reaction: up (Gut), later (Später), down (Quatsch), answered or done.
+        /// Owner reaction: up (good), later, down (rejected), answered or done.
         #[arg(long, value_parser = ["up", "later", "down", "answered", "done"], ignore_case = true)]
         value: String,
         /// The owner's answer or reason. Omit to keep the existing note.
@@ -298,13 +298,16 @@ pub(super) enum SettingsCmd {
     /// Set display preferences only when the owner asks; preserves omitted values
     #[command(alias = "set")]
     Update {
-        /// Initial view: handover (Heute), board (Projekte), ideas or statistics; handbook opens Projekte. Omit to keep it.
+        /// Initial view: handover (Today), board (Projects), ideas or statistics; handbook opens Projects. Omit to keep it.
         #[arg(long, value_parser = ["handover", "board", "ideas", "handbook", "statistics"], ignore_case = true)]
         style: Option<String>,
         /// Comma-separated section IDs to collapse; empty expands all. Omit to keep them.
         /// IDs: focus, projects, waiting, safety, recent, across, ideas, pulse, kpis, cards, tasks, changes, night, space, parking, week.
         #[arg(long)]
         hidden_modules: Option<String>,
+        /// Window and new report language: en (English) or de (German). Omit to keep it; unset uses English. CLI output stays English.
+        #[arg(long, value_parser = ["en", "de"], ignore_case = true)]
+        language: Option<String>,
     },
 }
 

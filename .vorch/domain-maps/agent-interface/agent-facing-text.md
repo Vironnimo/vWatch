@@ -12,7 +12,11 @@ Source: `skill/vwatch/SKILL.md`. General rationale: `docs/agent-interface.md` ->
 |---|---|
 | `Operate vWatch's project overview.` | Select the operating workflow rather than coding vWatch or an unrelated project. |
 | `Use its CLI to read and change vWatch, not its database or files.` | Keep changes behind service validation, identity, history and recovery contracts. |
-| `In Windows PowerShell, set UTF-8 output decoding` | Preserve German text through the native console pipe; shell behavior is exercised in `tests/process.rs`. |
+| `In Windows PowerShell, set UTF-8 output decoding` | Preserve non-ASCII stored content through the native console pipe regardless of the selected report language; shell behavior is exercised in `tests/process.rs`. |
+| `Write new or revised card and brief content in the report_language supplied by the context; use English when it is absent.` | Follow the owner's shared language selection without guessing from CLI text or historical reports. English is the explicit default chosen on 2026-10-24. |
+| `For German, address the user as "du".` | Preserve the established form of address when German is selected. |
+| `Support findings with files, functions, commits or measured facts.` | Keep assessments grounded when changing the language of the preceding instruction. |
+| `Words in the window` bilingual label mappings, including `"Language" / "Sprache"` | Recognize both supported UI languages without adding a discovery call; changing language remains an owner-requested preference edit. |
 | `If the shell cannot find` | Recover a missing PATH entry with the installed executable instead of changing the owner's PATH. |
 | `If that file is absent, report the missing installation.` | Stop executable discovery from becoming an unsolicited installation. |
 | `Wait for the process to exit; its output arrives before exit.` | Avoid late-output polling inherited from a GUI-owned console lifecycle. |
@@ -74,6 +78,10 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 | Portfolio guide: `A missing integration, shared format or identifier is design work` | Do not reject a useful opportunity merely because its implementation remains unresolved; see the dated 2026-10-08 reflection follow-up. |
 | Portfolio guide: `A retained review describes its historical week, not today's remaining work.` | Prevent a weekly recap from using current state as evidence of a past period. |
 | CLI reference: `The final page restores any workflow continuation from the original result.` | Agents must distinguish saved-output traversal from the next operation after reading. |
+| CLI reference: `settings show` includes installation paths, autostart/PATH state and preferences | Expose language alongside existing settings without implying a CLI mutation of autostart or PATH. |
+| CLI reference: `settings update --language en` or `--language de` | Select the same language through the service as the window; explain the English default, pending-token invalidation and preservation of saved content. |
+| CLI reference: `CLI-generated help, labels, outcomes and errors stay English` | Do not infer report language from command framing or translate existing owner-supplied text. |
+| CLI reference: `settings update --style` selects `"Today"`, `"Projects"`, `"Ideas"` or `"Statistics"` | Use the default-language labels while preserving existing style values and omitted-option semantics. |
 | CLI reference: `Omitting a field and sending null differ` | Keep default/merge semantics separate from explicit nullable values. |
 | CLI reference: `Restored evidence stays historical, so the document can remain due.` | Restoring wording does not establish a fresh review. |
 | CLI reference: `A missing measurement is unknown, not zero.` | Avoid fabricated activity or size baselines. |
@@ -94,6 +102,11 @@ Sources: `src/cli.rs` (console delivery), `src/cli/parser.rs` (help), `src/cli/d
 |---|---|
 | `cli/parser.rs` help: `Use --json when a program parses the output.` | Preserve text for people/agents and complete structured output for programs. |
 | `cli/parser.rs` help: `Exit codes: 0 success, 1 failed or incomplete, 2 invalid call.` | A nonzero result distinguishes invalid invocation from failed or unfinished work without hiding partial effects. |
+| `cli/parser.rs` help: `Owner reaction: up (good), later, down (rejected), answered or done.` | Explain canonical reaction values using English help, independently of UI labels. |
+| `cli/parser.rs` help: `Initial view: handover (Today), board (Projects)` | Map parser values to default-language view labels without changing stored values. |
+| `cli/parser.rs` help: `Window and new report language: en (English) or de (German).` | Name scope, accepted values, omit behavior and the independent English CLI. |
+| `cli/dispatch.rs`: `Pass --language en or de, --style handover` | Recover an empty settings edit with available supported options rather than a preliminary help call. |
+| `system::io_message`: English error kind and `(OS error {code})` | Localized Windows Display text cannot fulfill the English CLI contract; retain the numeric diagnostic for investigation. Job start/recovery and folder failures preserve their existing effect statements. |
 | `cli/dispatch.rs` input error: `Nothing was saved.` | Input rejection occurs before the document operation; distinguish it from an output failure after saving. |
 | `cli.rs`: `--file - needs piped input; terminal input is not read.` | A file-input request must not hang waiting for interactive terminal input. |
 | `cli_output/documents.rs`: `Use the exact field names below in the document.` | Readable labels are not aliases for JSON payload keys. |
@@ -128,6 +141,12 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 | `service/context.rs`: `Prepare the brief from this context and save the document to a UTF-8 file.` | Direct synthesis to the available context and file input instead of an invented output-as-input flag. |
 | `service/context.rs`: `To keep an earlier item, use its id from the context; for a new item, omit id.` | Unknown full-content IDs are accepted as new with a warning, not silently treated as retained. |
 | `service.rs`: `Stop writing and preserve the database and its -wal/-shm files.` | Corruption recovery must preserve evidence and later work instead of recreating storage. |
+| `owner_state.rs`: `Invalid language. Nothing was changed.` / `Use en (English) or de (German).` | Reject unsupported values before the atomic preference mutation and name the valid correction. |
+| `owner_state.rs`: `Editable preferences: style, hidden_modules, language.` | Recover an unknown preference using the complete supported set. |
+| `reading.rs`: `Review the open end in the Project or assign it as a Task.` / `Answer the question in the Project.` / `Read the current Card.` | Preserve the digest's existing owner actions in English CLI framing; the window translates generated text separately from authored content. |
+| `reading.rs`: `Documented in the current Card.` / `The current Card no longer lists this open end.` / `The question is answered, marked done or no longer asked in the current Card.` | Explain observed report changes without claiming implementation completion. |
+| `reading.rs` generated prefixes: `Answer incorporated into Card`, `Open end updated`, `New open end`, `Question updated`, `New question`, `Decision documented`, `New`, `No longer open in the Card`, `Question no longer open` | English CLI labels preserve the existing change categories; separate prefix/source fields let the window translate framing without changing the item's authored title. |
+| `signals.rs`: `Work exists only locally`, `No CI configured`, `CI failed`, `Additional worktrees exist` | Keep app-generated warning titles English on the CLI while preserving severity, acknowledgement and measured facts. |
 | `service.rs`: `Read the current state before retrying a write; this error does not confirm that earlier steps were undone.` | A storage error can follow earlier successful steps; retry decisions need actual saved state. |
 | `service/tasks.rs`: `Use done with a result and evidence; completion still needs the owner's confirmation.` | Separate agent reporting from owner completion. |
 | `service/tasks.rs`: `Reload the task and read its latest result before confirming, reopening or cancelling it.` | A stale revision must not authorize a decision on a different report. |
@@ -142,6 +161,8 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 ## Copied task instructions
 
 Source: `ui/handoff.js` -> `taskPrompt`. The desktop domain owns rendering/copying; this register owns the cross-surface rationale. Contract evidence: `docs/agent-interface.md` -> Output and error contracts and Runtime text and its reasons; behavior is covered by `tests/ui.cjs` and `tests/ui-handoff.cjs`.
+
+The following passages retain their existing meanings in both UI languages through `tr` and the German catalogue. English is the source/fallback; German excerpts below identify the corresponding original message. Task labels, evidence labels, completion labels, handbook headings and copy dates also follow that choice. `<result>`, `<evidence>` and `<blocker and next step>` are localized illustrative placeholders, with the existing explicit instruction to replace them; command names and flags stay unchanged.
 
 | Text | Reason |
 |---|---|
