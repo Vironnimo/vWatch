@@ -39,6 +39,57 @@ test('a failed language save restores the selected language and keeps the choice
   assert.match(a.ui.panelHtml(), /value="de" selected/);
 });
 
+test('preference choices save in order and remain visible across an older state read', async () => {
+  const first = deferred(), second = deferred(), duringRead = deferred(), oldRead = deferred();
+  const a = await app(undefined, `Object.assign(ui, {
+    setPref,
+    route: handler => { window.__TAURI__.core.invoke = handler; },
+    language: () => S.prefs.language,
+  });`);
+  const writes = []; let reads = 0;
+  a.ui.route((command, args) => {
+    if (command === 'state') return ++reads === 1 ? duringRead.promise : oldRead.promise;
+    if (command === 'set_pref') {
+      writes.push(args.value);
+      return writes.length === 1 ? first.promise : second.promise;
+    }
+    return Promise.resolve({});
+  });
+  const read = a.ui.load(false);
+  const en = a.ui.setPref('language', 'en');
+  const de = a.ui.setPref('language', 'de');
+  assert.deepEqual(writes, ['en']);
+  assert.equal(a.ui.language(), 'de');
+  const stale = structuredClone(a.state); stale.prefs.language = 'en';
+  duringRead.resolve(structuredClone(stale)); await read;
+  assert.equal(a.ui.language(), 'de');
+  const lateRead = a.ui.load(false);
+  first.resolve({}); await en;
+  assert.deepEqual(writes, ['en', 'de']);
+  second.resolve({}); await de;
+  oldRead.resolve(structuredClone(stale)); await lateRead;
+  assert.equal(a.ui.language(), 'de');
+  assert.match(a.node('#view').innerHTML, /Guten Morgen/);
+});
+
+test('a failed final preference save restores the last successful choice', async () => {
+  const first = deferred(), second = deferred();
+  let writes = 0;
+  const a = await app(undefined, `Object.assign(ui, {
+    setPref,
+    route: handler => { window.__TAURI__.core.invoke = handler; },
+    language: () => S.prefs.language,
+  });`);
+  a.ui.route(command => command === 'set_pref' ? (++writes === 1 ? first.promise : second.promise) : Promise.resolve({}));
+  const en = a.ui.setPref('language', 'en');
+  const de = a.ui.setPref('language', 'de');
+  first.resolve({}); await en;
+  second.reject(new Error('Write failed')); await de;
+  assert.equal(a.ui.language(), 'en');
+  assert.match(a.node('#view').innerHTML, /Good morning/);
+  assert.match(a.node('#toast').innerHTML, /Setting was not saved/);
+});
+
 test('translation slots preserve supplied text and every message has matching German slots', async () => {
   const fs = require('node:fs'), path = require('node:path');
   const a = await app(undefined, 'Object.assign(ui, { tr, setLanguage, errText });');
@@ -63,6 +114,8 @@ test('translation slots preserve supplied text and every message has matching Ge
   assert.equal(a.ui.tr('Not saved: {0}', '{1} <script>'), 'Nicht gespeichert: {1} <script>');
   assert.equal(a.ui.tr('toString'), 'toString');
   assert.equal(a.ui.errText({ message: 'Folder does not exist: C:/English {0}' }), 'Ordner existiert nicht: C:/English {0}');
+  assert.equal(a.ui.errText({ message: "Facts for 'sample' kept changing during refresh. The outdated measurements were discarded." }), "Die Facts für 'sample' haben sich während der Aktualisierung wiederholt geändert. Die veralteten Messwerte wurden verworfen.");
+  assert.equal(a.ui.errText({ message: 'Retry the facts refresh after concurrent refreshes finish.' }), 'Versuche die Aktualisierung der Facts erneut, nachdem die gleichzeitigen Aktualisierungen abgeschlossen sind.');
   const index = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
   for (const match of index.matchAll(/data-i18n(?:-title|-label)?="([^"]*)"/g)) assert.ok(Object.hasOwn(germanMessages, match[1]), match[1]);
 });
