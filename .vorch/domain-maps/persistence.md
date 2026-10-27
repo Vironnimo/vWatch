@@ -30,7 +30,7 @@ Content history and facts observations are append-only evidence. Normal current-
 
 An operation that must be consistent with its receipt, history or acknowledgement needs one database transaction. Trigger failure must roll back the originating mutation too. A process losing its response does not justify blindly replaying a mutation; document receipts and field-scoped owner undo encode narrower, verifiable recovery.
 
-`save_project_facts` rejects results whose registered path, identity revision or removal state changed while measurement ran. This guard belongs at persistence even though the repository collector runs outside it. Test helpers can use `save_facts` directly; production refresh must retain the guarded route.
+`save_project_facts` rejects results whose registered path, identity revision, removal state or stored Facts revision changed while measurement ran. This guard belongs at persistence even though the repository collector runs outside it; retry behavior is in `persistence/transactions-and-history.md`. Test helpers can use `save_facts` directly; production refresh must retain the guarded route.
 
 Item ownership is rechecked against current documents, retained proposals and feedback inside guarded document writes. `cards::Kind` supplies the item kinds; this dependency protects the schema's global identity contract, not general document validation in SQL.
 

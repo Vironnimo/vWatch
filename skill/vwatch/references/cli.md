@@ -20,7 +20,7 @@ The first line states the result. `Note:` names interpretation, omissions or par
 
 Text output retains complete table values and pages beyond the output budget. Copy the exact printed `Next:` command, including its instance locator. The snapshot token identifies fixed output; `--start` counts Unicode characters from zero. Continuing does not rerun the operation. The final page restores any workflow continuation from the original result. Before a card or brief write, read every context page.
 
-A potentially long command runs for up to 45 seconds inline. If unfinished, it returns a job token and an exact `jobs wait` continuation. Each wait is bounded to 45 seconds and either returns the original completed result or the next wait. `jobs list` lists recorded jobs; `jobs status <job-token>` inspects one. Waiting never repeats the original operation. A job with an unknown outcome requires state inspection, not blind retry; follow its recovery command.
+A potentially long command runs for up to 45 seconds inline. If unfinished, it returns a job token and an exact `jobs wait` continuation. Each wait is bounded to 45 seconds and either returns the original completed result or the next wait. A job continuation uses the output format of the call that returned it. `jobs list` lists recorded jobs; `jobs status <job-token>` inspects one. Waiting never repeats the original operation. A job with an unknown outcome requires state inspection, not blind retry; follow its recovery command.
 
 If the shell loses a response, run `vwatch activity` for recent command outcomes. Use an available job continuation. If completion was not captured, inspect the affected project, card, brief, task or run before deciding whether to repeat the write. `vwatch usage --since <YYYY-MM-DD>` shows local command usage without argument values. Dates in this filter are UTC and inclusive.
 
@@ -34,6 +34,7 @@ Common recoveries:
 | Invalid card/brief or malformed input | Fix the named field, JSON position or encoding. The error states whether anything was saved. |
 | `context_required` | Read the corresponding complete context, then write with its token. |
 | `version_conflict` | Reread the current context or task and reconcile; never substitute a token/revision without checking the change. |
+| `facts_conflict` | Retry the facts refresh after concurrent refreshes finish; outdated measurements were discarded. |
 | Folder missing or already registered | Use the stated existing project/candidate path. A renamed folder does not justify creating a new project. |
 | Edit saved but facts refresh failed | Keep the saved edit and rerun only the indicated facts refresh. |
 | Run incomplete | Read its remaining project/brief failures, complete what can be completed and finish the same run again. |

@@ -342,15 +342,18 @@ fn project_updates_keep_identity_history_and_owner_state() {
         "cards_changed"
     );
     // A refresh that captured the previous project cannot resurrect its facts.
-    assert!(!svc
-        .store()
-        .save_project_facts(
-            &old_project,
-            &svc.now(),
-            &old_facts.fingerprint,
-            &old_facts.data
-        )
-        .unwrap());
+    assert_eq!(
+        svc.store()
+            .save_project_facts(
+                &old_project,
+                Some(old_facts.revision),
+                &svc.now(),
+                &old_facts.fingerprint,
+                &old_facts.data
+            )
+            .unwrap(),
+        vwatch::store::FactsSave::ProjectChanged
+    );
     assert_eq!(svc.facts("demo").unwrap()["space"]["total_bytes"], 0);
     let after = svc.list_projects().unwrap()[0].clone();
     for field in [

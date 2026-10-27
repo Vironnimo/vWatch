@@ -17,6 +17,16 @@ pub(super) fn digest_text(value: &Value) -> String {
 }
 
 fn digest_identity(category: &str, item: &Value) -> String {
+    if category == "change" {
+        // A repeated title can describe separate events, even on the same day.
+        return json!([
+            category,
+            digest_text(&item["date"]),
+            digest_text(&item["title"]),
+            digest_text(&item["detail"])
+        ])
+        .to_string();
+    }
     format!(
         "{category}:{}:{}",
         digest_text(&item["title"]),

@@ -15,6 +15,9 @@ let lastVersion = null; // data_version of the state shown; the watch reloads wh
 let loadSeq = 0, shownSeq = 0, loading = 0; // a state never replaces one requested later
 let loadRetryAt = 0;
 let shown = false;
+// Pending choices survive state reads, and settled choices survive reads that
+// were already in flight when the save completed.
+const prefWrites = new Map(), prefReadGuards = new Map();
 
 function inputFocus() {
   const el = document.activeElement;
@@ -77,6 +80,12 @@ function toast(text, undo) {
 // response carries the snapshot measured on the service side, not its arrival time.
 function acceptState(seq, next) {
   if (seq <= shownSeq) return;
+  for (const [key, pending] of prefWrites) next.prefs[key] = pending.latest;
+  for (const [key, guard] of prefReadGuards) {
+    if (prefWrites.has(key)) continue;
+    if (seq <= guard.throughSeq) next.prefs[key] = guard.value;
+    else prefReadGuards.delete(key);
+  }
   shownSeq = seq; S = next; lastVersion = next.data_version ?? null; loadRetryAt = 0;
   if (S.prefs.style === 'handbook') S.prefs.style = 'board';
   invalidateStatistics();
@@ -132,14 +141,35 @@ function refreshWhenDue() {
 // Saves the owner's reaction to an item (a rating, an answer, "done"); `note` undefined keeps the stored one.
 
 async function setPref(key, value) {
-  const previous = S.prefs[key];
+  let pending = prefWrites.get(key);
+  const previous = pending?.tail;
+  if (!pending) {
+    pending = { saved: S.prefs[key], latest: value, count: 0, tail: null };
+    prefWrites.set(key, pending);
+  }
+  pending.latest = value;
+  pending.count++;
   S.prefs[key] = value;
   render();
-  try { await call('set_pref', { key, value }); }
-  catch (e) {
-    if (S.prefs[key] === value) { S.prefs[key] = previous; render(); }
-    toast(tr("Setting was not saved."));
-  }
+  const save = async () => {
+    let failed = false;
+    try {
+      await call('set_pref', { key, value });
+      pending.saved = value;
+    } catch (e) {
+      failed = true;
+    } finally {
+      if (--pending.count === 0) {
+        prefWrites.delete(key);
+        prefReadGuards.set(key, { value: pending.saved, throughSeq: loadSeq });
+        S.prefs[key] = pending.saved;
+        render();
+      }
+    }
+    if (failed) toast(tr("Setting was not saved."));
+  };
+  pending.tail = previous ? previous.then(save) : save();
+  await pending.tail;
 }
 async function toggleModule(id) {
   const collapsed = collapsedMods();

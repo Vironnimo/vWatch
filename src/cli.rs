@@ -720,7 +720,7 @@ where
     };
     let mut buffer = Vec::new();
     let mut outcome = None;
-    let code = match execute(cli.command, data_dir, stdin) {
+    let code = match execute(cli.command, data_dir, stdin, json_mode) {
         Ok(mut result) => {
             if key == "status" {
                 result["instance_source"] = json!(instance_source);

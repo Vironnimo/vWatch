@@ -549,7 +549,12 @@ fn collect_at_checkpoint(
     let newest_local = dirty
         .newest
         .map(|t| DateTime::<Local>::from(t).date_naive().to_string());
-    let (worktrees, checkouts) = worktrees(repo);
+    let Some((worktrees, checkouts)) = worktrees(repo) else {
+        if let Some(lookup) = ci {
+            let _ = lookup.join();
+        }
+        return json!({"ok": false, "error": "git_status_failed", "is_git": true});
+    };
     let branches = branches(repo, branch.as_deref());
     let night = night(repo, today, &dirty, &checkouts);
     let collisions = collisions(repo, branch.as_deref(), &dirty, &checkouts, &branches);

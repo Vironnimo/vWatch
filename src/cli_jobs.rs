@@ -185,30 +185,35 @@ fn prefix(data_dir: &Path, json_mode: bool) -> String {
     .to_owned()
 }
 
-fn recovery(request: &Request) -> String {
+fn recovery(request: &Request, json_mode: bool) -> String {
     let action = match request.command.as_str() {
         "runs.start" => "runs status",
         "projects.add" | "projects.update" | "projects.discover" => "projects list",
         _ => "due --no-refresh",
     };
-    format!("{} {action}", prefix(&request.data_dir, request.json))
+    format!("{} {action}", prefix(&request.data_dir, json_mode))
 }
 
-fn inspect(data_dir: &Path, token: &str) -> Result<Value> {
+fn inspect(data_dir: &Path, token: &str, json_mode: bool) -> Result<Value> {
     let request = read_request(data_dir, token)?;
-    if let Some(result) = completed_result(data_dir, token, &request)? {
+    if let Some(result) = completed_result(data_dir, token, &request, json_mode)? {
         return Ok(result);
     }
-    inspect_pending(data_dir, token, &request)
+    inspect_pending(data_dir, token, &request, json_mode)
 }
 
-fn completed_result(data_dir: &Path, token: &str, request: &Request) -> Result<Option<Value>> {
+fn completed_result(
+    data_dir: &Path,
+    token: &str,
+    request: &Request,
+    json_mode: bool,
+) -> Result<Option<Value>> {
     let path = job_path(data_dir, token)?;
-    let wait = format!("{} jobs wait {token}", prefix(data_dir, request.json));
+    let wait = format!("{} jobs wait {token}", prefix(data_dir, json_mode));
     match fs::read(path.join("result.json")) {
         Ok(bytes) => {
             let result: Completed = serde_json::from_slice(&bytes).map_err(|_| VWatchError::new("job_result_invalid", "The saved result is unreadable. The command may have changed data; its outcome is unknown.")
-                .hint(format!("Inspect the current state before retrying: {}", recovery(request))))?;
+                .hint(format!("Inspect the current state before retrying: {}", recovery(request, json_mode))))?;
             Ok(Some(
                 json!({"finished":true,"job":{"token":token,"state":"completed","command":request.command,"created_at":request.created_at,"next":wait},"result":result,"next":wait}),
             ))
@@ -218,14 +223,19 @@ fn completed_result(data_dir: &Path, token: &str, request: &Request) -> Result<O
     }
 }
 
-fn inspect_pending(data_dir: &Path, token: &str, request: &Request) -> Result<Value> {
+fn inspect_pending(
+    data_dir: &Path,
+    token: &str,
+    request: &Request,
+    json_mode: bool,
+) -> Result<Value> {
     let path = job_path(data_dir, token)?;
     let active = running(&path)?;
     // The worker can save its result and release the lock after the initial
     // result read. Once the lock is free, recheck that durable result before
     // describing the outcome as unknown.
     if !active {
-        if let Some(result) = completed_result(data_dir, token, request)? {
+        if let Some(result) = completed_result(data_dir, token, request, json_mode)? {
             return Ok(result);
         }
     }
@@ -243,9 +253,9 @@ fn inspect_pending(data_dir: &Path, token: &str, request: &Request) -> Result<Va
         "unknown"
     };
     let next = if state == "running" {
-        format!("{} jobs wait {token}", prefix(data_dir, request.json))
+        format!("{} jobs wait {token}", prefix(data_dir, json_mode))
     } else {
-        recovery(request)
+        recovery(request, json_mode)
     };
     Ok(
         json!({"finished":false,"job":{"token":token,"state":state,"command":request.command,"created_at":request.created_at,"next":next},"next":next}),
@@ -269,10 +279,10 @@ fn test_fault(data_dir: &Path, name: &str) -> Option<u64> {
     std::env::var(name).ok()?.parse().ok()
 }
 
-fn wait(data_dir: &Path, token: &str, budget: Duration) -> Result<Value> {
+fn wait(data_dir: &Path, token: &str, budget: Duration, json_mode: bool) -> Result<Value> {
     let started = Instant::now();
     loop {
-        let status = inspect(data_dir, token)?;
+        let status = inspect(data_dir, token, json_mode)?;
         if status["job"]["state"] != "running" || started.elapsed() >= budget {
             return Ok(status);
         }
@@ -323,7 +333,12 @@ fn operation_arguments(arguments: &[String]) -> Vec<&str> {
 
 /// Inspect/await a saved request. Completed wait results are rendered by the CLI
 /// in the requested format, from captured output, without executing again.
-pub fn command(action: &str, token: Option<&str>, data_dir: &Path) -> Result<Value> {
+pub fn command(
+    action: &str,
+    token: Option<&str>,
+    data_dir: &Path,
+    json_mode: bool,
+) -> Result<Value> {
     if action == "list" {
         let mut jobs = Vec::new();
         let directory = data_dir.join("jobs");
@@ -336,9 +351,9 @@ pub fn command(action: &str, token: Option<&str>, data_dir: &Path) -> Result<Val
                 {
                     continue;
                 }
-                match inspect(data_dir, &name) {
+                match inspect(data_dir, &name, json_mode) {
                     Ok(status) => jobs.push(status["job"].clone()),
-                    Err(error) => jobs.push(json!({"token":name,"state":"unknown","command":"unknown","error":error.message,"next":crate::cli::scoped_command(data_dir, &format!("vwatch jobs status {name}"))})),
+                    Err(error) => jobs.push(json!({"token":name,"state":"unknown","command":"unknown","error":error.message,"next":format!("{} jobs status {name}", prefix(data_dir, json_mode))})),
                 }
             }
         }
@@ -353,9 +368,9 @@ pub fn command(action: &str, token: Option<&str>, data_dir: &Path) -> Result<Val
         .hint("Run `vwatch jobs list` to see saved jobs.")
     })?;
     if action == "wait" {
-        wait(data_dir, token, deadline(data_dir))
+        wait(data_dir, token, deadline(data_dir), json_mode)
     } else {
-        inspect(data_dir, token)
+        inspect(data_dir, token, json_mode)
     }
 }
 
@@ -412,13 +427,14 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
         if existing.identity == identity {
             // An unreadable result is not evidence that this operation is safe
             // to launch again. Return that uncertainty instead of duplicating it.
-            let existing_status = inspect(&data_dir, &token)?;
+            let existing_status = inspect(&data_dir, &token, plan.json)?;
             if existing_status["job"]["state"] == "running" {
                 drop(launch_lock);
                 return wait(
                     &data_dir,
                     &token,
                     deadline(&data_dir).saturating_sub(deadline_started.elapsed()),
+                    plan.json,
                 );
             }
         }
@@ -501,6 +517,7 @@ fn start(args: &[OsString], data_dir: &Path, plan: &crate::cli::JobPlan) -> Resu
         &data_dir,
         &token,
         deadline(&data_dir).saturating_sub(deadline_started.elapsed()),
+        plan.json,
     )?;
     let _ = child.try_wait(); // Reap a completed child on platforms that require it.
     Ok(result)
@@ -663,7 +680,7 @@ mod tests {
             &json!({"started_at":request.created_at}),
         )
         .unwrap();
-        assert!(completed_result(home.path(), &token, &request)
+        assert!(completed_result(home.path(), &token, &request, false)
             .unwrap()
             .is_none());
 
@@ -675,7 +692,7 @@ mod tests {
             stderr: String::new(),
         };
         atomic_json(&path.join("result.json"), &result).unwrap();
-        let status = inspect_pending(home.path(), &token, &request).unwrap();
+        let status = inspect_pending(home.path(), &token, &request, false).unwrap();
         assert_eq!(status["job"]["state"], "completed");
         assert_eq!(status["result"]["stdout"], result.stdout);
         assert_eq!(status["result"]["exit_code"], 0);
@@ -683,14 +700,14 @@ mod tests {
         // A file appearing in the same window is not automatically success.
         fs::write(path.join("result.json"), "incomplete").unwrap();
         assert_eq!(
-            inspect_pending(home.path(), &token, &request)
+            inspect_pending(home.path(), &token, &request, false)
                 .unwrap_err()
                 .code,
             "job_result_invalid"
         );
         fs::remove_file(path.join("result.json")).unwrap();
         assert_eq!(
-            inspect_pending(home.path(), &token, &request).unwrap()["job"]["state"],
+            inspect_pending(home.path(), &token, &request, false).unwrap()["job"]["state"],
             "unknown"
         );
     }

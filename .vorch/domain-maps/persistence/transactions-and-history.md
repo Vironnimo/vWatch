@@ -18,6 +18,8 @@ Feedback resolves omitted notes and return dates while holding the owner-change 
 
 Task assignment uses the partial `tasks_active_source` unique index for active statuses, returning the existing active assignment on repetition. `replace_task` uses the stored revision in its update predicate so an agent report cannot overwrite a simultaneous owner decision. Business transitions and the meaning of review are in `application/owner-state.md`; transaction tests are in `tests/tasks.rs`.
 
+Project Facts saves also compare the stored Facts revision captured before collection. If another refresh saves first, the service remeasures against its latest cached inputs, with bounded retries. Identity changes reject the measurement separately. Tests: `tests/concurrency.rs::refresh_retries_when_another_refresh_changes_facts` and `::refresh_reports_sustained_facts_contention_without_overwriting_it`.
+
 ## Explicit read acknowledgement
 
 `changes_snapshot` reads current report inputs and the saved baseline consistently without creating a baseline. `acknowledge_changes` rechecks the viewed token and saves the supplied snapshot inside an immediate transaction. A write arriving after the window's snapshot must remain unread. This guard is independent of document context tokens and owner undo receipts. Tests: `tests/digest.rs::concurrent_writes_cannot_be_silently_included_in_read_acknowledgement` and `::report_and_event_markers_share_the_explicit_read_snapshot`.

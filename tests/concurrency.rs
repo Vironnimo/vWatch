@@ -7,6 +7,112 @@ use serde_json::{json, Value};
 use vwatch::service::Result;
 use vwatch::VWatch;
 
+#[test]
+fn refresh_retries_when_another_refresh_changes_facts() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("vwatch.db");
+    let store = vwatch::store::Store::open(&path).unwrap();
+    let other = vwatch::store::Store::open(&path).unwrap();
+    store
+        .add_project(
+            "demo",
+            "demo",
+            tmp.path().to_str().unwrap(),
+            "2026-09-30T08:00:00Z",
+        )
+        .unwrap();
+    store
+        .save_facts(
+            "demo",
+            "2026-09-30T08:00:00Z",
+            "old",
+            &json!({"ok":false,"ci":{"state":"red"}}),
+        )
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let svc = VWatch::with_parts(
+        store,
+        Box::new(move || now),
+        Box::new(move |_, _, _, _| {
+            let call = seen.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                other
+                    .save_facts(
+                        "demo",
+                        "2026-09-30T08:00:00Z",
+                        "new",
+                        &json!({"ok":false,"ci":{"state":"green"}}),
+                    )
+                    .unwrap();
+            }
+            json!({"ok":false,"ci":{"state":"skipped"},"measurement":call})
+        }),
+    );
+    svc.refresh_facts(Some(&["demo".into()]), false).unwrap();
+    let saved = svc.store().facts("demo").unwrap().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(saved.data["measurement"], 1);
+    assert_eq!(saved.data["ci"]["state"], "green");
+}
+
+#[test]
+fn refresh_reports_sustained_facts_contention_without_overwriting_it() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("vwatch.db");
+    let store = vwatch::store::Store::open(&path).unwrap();
+    let other = vwatch::store::Store::open(&path).unwrap();
+    store
+        .add_project(
+            "demo",
+            "demo",
+            tmp.path().to_str().unwrap(),
+            "2026-09-30T08:00:00Z",
+        )
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let now = chrono::DateTime::parse_from_rfc3339("2026-09-30T08:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let svc = VWatch::with_parts(
+        store,
+        Box::new(move || now),
+        Box::new(move |_, _, _, _| {
+            let call = seen.fetch_add(1, Ordering::SeqCst);
+            other
+                .save_facts(
+                    "demo",
+                    "2026-09-30T08:00:00Z",
+                    "other",
+                    &json!({"ok":false,"measurement":call}),
+                )
+                .unwrap();
+            json!({"ok":false,"measurement":"stale"})
+        }),
+    );
+    let error = svc
+        .refresh_facts(Some(&["demo".into()]), false)
+        .unwrap_err();
+    assert_eq!(error.code, "facts_conflict");
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        svc.store().facts("demo").unwrap().unwrap().data["measurement"],
+        2
+    );
+}
+
 fn card_token(svc: &VWatch, id: &str) -> String {
     svc.context(id).unwrap()["context_token"]
         .as_str()

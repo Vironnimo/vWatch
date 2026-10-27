@@ -35,9 +35,11 @@ fn token(output: &Output) -> String {
 
 #[test]
 fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_format() {
-    let home = tempfile::tempdir().unwrap();
+    let fixture = tempfile::tempdir().unwrap();
+    let home = fixture.path().join("instance --json name");
+    std::fs::create_dir(&home).unwrap();
     let start = Instant::now();
-    let first = command(home.path(), 70)
+    let first = command(&home, 70)
         .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["overview", "--refresh"])
         .output()
@@ -51,14 +53,49 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
     let job = token(&first);
 
     // An identical call while work is active joins the same job, never starts it twice.
-    let repeated = command(home.path(), 70)
+    let repeated = command(&home, 70)
         .env("VWATCH_TEST_JOB_BLOCK", "1")
         .args(["--json", "overview", "--refresh"])
         .output()
         .unwrap();
-    assert_eq!(json(&repeated)["job"]["token"], job);
+    let repeated = json(&repeated);
+    assert_eq!(repeated["job"]["token"], job);
+    assert!(repeated["next"].as_str().unwrap().contains(" --json "));
+    assert_eq!(repeated["next"], repeated["job"]["next"]);
+    let different_home = tempfile::tempdir().unwrap();
+    let continued = command(different_home.path(), 70)
+        .args(
+            repeated["next"]
+                .as_str()
+                .unwrap()
+                .split_whitespace()
+                .skip(1),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(json(&continued)["job"]["token"], job);
 
-    let activity = command(home.path(), 70)
+    let pending = command(&home, 70)
+        .args(["--json", "jobs", "status", &job])
+        .output()
+        .unwrap();
+    assert!(json(&pending)["next"]
+        .as_str()
+        .unwrap()
+        .contains(" --json "));
+
+    let pending_text = command(&home, 70)
+        .args(["jobs", "status", &job])
+        .output()
+        .unwrap();
+    let pending_text = String::from_utf8_lossy(&pending_text.stdout);
+    let next = pending_text
+        .lines()
+        .find(|line| line.starts_with("Next: "))
+        .unwrap();
+    assert!(!next.contains(" --json "), "{next}");
+
+    let activity = command(&home, 70)
         .args(["--json", "activity"])
         .output()
         .unwrap();
@@ -75,14 +112,14 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
         "a returned continuation must not be logged as a failed operation"
     );
 
-    std::fs::write(home.path().join(".release-test-job"), "release").unwrap();
+    std::fs::write(home.join(".release-test-job"), "release").unwrap();
 
     // Continue from a fresh shell whose environment selects a different instance.
     let wrong = tempfile::tempdir().unwrap();
     let completed = command(wrong.path(), 2_000)
         .args([
             "--data-dir",
-            home.path().to_str().unwrap(),
+            home.to_str().unwrap(),
             "--json",
             "jobs",
             "wait",
@@ -95,7 +132,7 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
     assert_eq!(result["ok"], true);
     assert_eq!(result["refreshed"], serde_json::json!([]));
 
-    let replay = command(home.path(), 2_000)
+    let replay = command(&home, 2_000)
         .args(["jobs", "wait", &job])
         .output()
         .unwrap();
@@ -106,13 +143,17 @@ fn deadline_returns_a_durable_job_and_wait_replays_complete_result_in_requested_
         "ordinary wait must render text even though capture was JSON"
     );
     assert!(!String::from_utf8_lossy(&replay.stdout).contains("Not finished:"));
-    let jobs = command(home.path(), 2_000)
+    let jobs = command(&home, 2_000)
         .args(["--json", "jobs", "list"])
         .output()
         .unwrap();
     let jobs = json(&jobs);
     assert_eq!(jobs["jobs"].as_array().unwrap().len(), 1);
     assert_eq!(jobs["jobs"][0]["state"], "completed");
+    assert!(jobs["jobs"][0]["next"]
+        .as_str()
+        .unwrap()
+        .contains(" --json "));
 }
 
 #[test]
@@ -145,6 +186,11 @@ fn stopped_worker_reports_unknown_outcome_and_never_claims_rollback() {
     let human = String::from_utf8_lossy(&human.stdout);
     assert!(human.contains("unknown"), "{human}");
     assert!(!human.contains("Nothing was changed"), "{human}");
+    let next = human
+        .lines()
+        .find(|line| line.starts_with("Next: "))
+        .unwrap();
+    assert!(!next.contains(" --json "), "{next}");
 }
 
 #[test]
