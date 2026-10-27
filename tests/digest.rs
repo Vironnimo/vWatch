@@ -439,4 +439,14 @@ fn report_and_event_markers_share_the_explicit_read_snapshot() {
         svc.state(false).unwrap()["projects"][0]["unread_recent_changes"],
         json!([])
     );
+
+    // Repeated titles and descriptions can refer to separate dated events.
+    svc.put_card("demo", json!({"recent_changes": [original, {
+        "date": "2026-10-01", "title": "Suche ergänzt", "detail": "Ergebnisse im Fenster."
+    }, {
+        "date": "2026-10-01", "title": "Suche ergänzt", "detail": "Auch die Filter funktionieren."
+    }]}), true, false).unwrap();
+    let state = svc.state(false).unwrap();
+    assert_eq!(state["projects"][0]["unread_recent_changes"], json!([1, 2]));
+    assert_eq!(titles(&state["changes"], "new").len(), 2);
 }

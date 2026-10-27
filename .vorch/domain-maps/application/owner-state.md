@@ -20,6 +20,8 @@ Tasks keep their own source snapshot and history through later card rewrites. Th
 
 Visits establish re-entry context; they never acknowledge unread changes. `reading_content`, `reading_state` and `mark_changes_read` in `src/service/reading.rs` own semantic report comparisons. Generated IDs, age counters, retired effort estimates and list reordering do not create unread content. Routine fact changes stay outside the digest. A disappearing open end means it is no longer listed, not that the work was completed.
 
+Recent changes are distinct by date, title and detail, so repeated titles do not hide separate events from the digest or unread markers.
+
 The first visit also requires an explicit read action to establish a baseline. Project and event markers share that baseline. State captures the acknowledgement token before loading displayed cards; Store checks it again while saving the baseline. A newer write produces `stale_changes` and stays unread. Historical reads and facts refresh must not move this baseline. `tests/digest.rs` owns these contracts; transaction details are in `persistence/transactions-and-history.md`.
 
 Idea status is projected in `service/ideas.rs`: select the newest active source Task, otherwise the newest historical Task. Each `idea_states` entry includes that Task and the revision of all source Tasks plus the archive row from one Store snapshot; window enrichment uses that selected content directly. Sources retained only in feedback or Task snapshots remain represented. Direct owner implementation can complete an assignment without an agent report; this is distinct from confirming a reported Task. `store/tasks.rs` only applies the service-prepared transition after rechecking the full source revision in its immediate transaction.
