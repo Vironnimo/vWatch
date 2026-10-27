@@ -120,15 +120,24 @@ fn text_matches(value: &Value, query: &str) -> bool {
     }
 }
 
-pub(super) fn execute(cmd: Cmd, data_dir: &Path, stdin: &mut dyn Read) -> Result<Value> {
+pub(super) fn execute(
+    cmd: Cmd,
+    data_dir: &Path,
+    stdin: &mut dyn Read,
+    json_mode: bool,
+) -> Result<Value> {
     if let Cmd::Output { token, start } = cmd {
         return Ok(json!({"page": crate::cli_paging::resume(data_dir, &token, start)?}));
     }
     if let Cmd::Jobs { action } = cmd {
         return match action {
-            JobsCmd::List => crate::cli_jobs::command("list", None, data_dir),
-            JobsCmd::Status { token } => crate::cli_jobs::command("status", Some(&token), data_dir),
-            JobsCmd::Wait { token } => crate::cli_jobs::command("wait", Some(&token), data_dir),
+            JobsCmd::List => crate::cli_jobs::command("list", None, data_dir, json_mode),
+            JobsCmd::Status { token } => {
+                crate::cli_jobs::command("status", Some(&token), data_dir, json_mode)
+            }
+            JobsCmd::Wait { token } => {
+                crate::cli_jobs::command("wait", Some(&token), data_dir, json_mode)
+            }
         };
     }
     if let Cmd::Usage { since } = cmd {
