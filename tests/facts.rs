@@ -221,6 +221,103 @@ fn fingerprint_changes_with_new_work() {
 }
 
 #[test]
+fn fingerprint_tracks_staged_versions_with_unchanged_working_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(tmp.path());
+    let path = repo.to_str().unwrap();
+    let modified = std::fs::metadata(repo.join("f0.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    // The working file and status stay the same while its staged version changes.
+    let stage = |contents: &str| {
+        std::fs::write(repo.join("f0.txt"), contents).unwrap();
+        common::git(&repo, &["add", "f0.txt"]);
+        std::fs::write(repo.join("f0.txt"), "working\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(repo.join("f0.txt"))
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+    };
+    stage("staged one\n");
+    let first_stage = facts::collect(path, today(), false);
+    stage("staged two\n");
+    let second_stage = facts::collect(path, today(), false);
+    assert_ne!(
+        first_stage["dirty"]["fingerprint"],
+        second_stage["dirty"]["fingerprint"]
+    );
+    assert_ne!(
+        facts::fingerprint(&first_stage),
+        facts::fingerprint(&second_stage)
+    );
+}
+
+#[test]
+fn fingerprint_tracks_unresolved_index_stages() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(tmp.path(), "conflict", &[]);
+    commit(
+        &repo,
+        &[("conflict.txt", Some("base\n"))],
+        "2026-09-27T10:00:00",
+    );
+    common::git(&repo, &["checkout", "-q", "-b", "side"]);
+    commit(
+        &repo,
+        &[("conflict.txt", Some("side\n"))],
+        "2026-09-28T10:00:00",
+    );
+    common::git(&repo, &["checkout", "-q", "main"]);
+    commit(
+        &repo,
+        &[("conflict.txt", Some("main\n"))],
+        "2026-09-29T10:00:00",
+    );
+    assert!(!Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(&repo)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let path = repo.to_str().unwrap();
+    let first = facts::collect(path, today(), false);
+    assert_eq!(first["ok"], true);
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD~1:conflict.txt"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let base = String::from_utf8(output.stdout).unwrap();
+    let mut update = Command::new("git")
+        .args(["update-index", "--index-info"])
+        .current_dir(&repo)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(
+        update.stdin.take().unwrap(),
+        "100644 {} 2\tconflict.txt",
+        base.trim()
+    )
+    .unwrap();
+    assert!(update.wait().unwrap().success());
+    let second = facts::collect(path, today(), false);
+    assert_eq!(second["ok"], true);
+    assert_ne!(
+        first["dirty"]["fingerprint"],
+        second["dirty"]["fingerprint"]
+    );
+}
+
+#[test]
 fn facts_count_staged_and_unterminated_lines_before_the_first_commit() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = common::make_repo(tmp.path(), "empty", &[]);
@@ -329,6 +426,49 @@ fn linked_checkout_excludes_itself_and_tracks_dirty_work_in_other_checkouts() {
     assert_ne!(
         second_before,
         facts::fingerprint(&facts::collect(linked_path, today(), false))
+    );
+}
+
+#[test]
+fn linked_checkout_fingerprint_tracks_staged_versions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = common::demo_repo(tmp.path());
+    let wt = tmp.path().join("linked");
+    common::git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature",
+            wt.to_str().unwrap(),
+        ],
+    );
+    let linked_path = wt.to_str().unwrap();
+    std::fs::write(repo.join("f0.txt"), "first staged\n").unwrap();
+    common::git(&repo, &["add", "f0.txt"]);
+    std::fs::write(repo.join("f0.txt"), "working version\n").unwrap();
+    let modified = std::fs::metadata(repo.join("f0.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let first = facts::collect(linked_path, today(), false);
+    std::fs::write(repo.join("f0.txt"), "second staged\n").unwrap();
+    common::git(&repo, &["add", "f0.txt"]);
+    std::fs::write(repo.join("f0.txt"), "working version\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(repo.join("f0.txt"))
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    let second = facts::collect(linked_path, today(), false);
+    assert_ne!(facts::fingerprint(&first), facts::fingerprint(&second));
+    let direct = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(
+        direct["dirty"]["fingerprint"],
+        second["worktrees"]["items"][0]["dirty_fingerprint"]
     );
 }
 

@@ -2,6 +2,7 @@
 use super::{git, Commit, History};
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ const ACTIVITY_METHOD: &str = "git-numstat-v2";
 const ACTIVITY_DAYS: i64 = 365;
 const HOTSPOT_DAYS: i64 = 90;
 const HOTSPOTS: usize = 20;
+const MAX_FILE_BYTES: u64 = 4_000_000;
 const EXCLUDED: &[&str] = &[
     ".git",
     "node_modules",
@@ -133,16 +135,23 @@ fn scan_file(repo: &Path, path: &str, config: &Config) -> (Scan, u64) {
     if meta.file_type().is_symlink() || !meta.is_file() {
         return (Scan::Excluded, 0);
     }
-    if meta.len() > 4_000_000 {
+    if meta.len() > MAX_FILE_BYTES {
         return (Scan::Unread, 0);
     }
     let Some(language) = LanguageType::from_path(&full, config) else {
         return (Scan::Unsupported, 0);
     };
-    let Ok(content) = std::fs::read(&full) else {
+    let mut content = Vec::new();
+    if std::fs::File::open(&full)
+        .and_then(|file| file.take(MAX_FILE_BYTES + 1).read_to_end(&mut content))
+        .is_err()
+    {
         return (Scan::Unread, 0);
-    };
+    }
     let read = content.len() as u64;
+    if read > MAX_FILE_BYTES {
+        return (Scan::Unread, read);
+    }
     if content.contains(&0) {
         return (Scan::Unsupported, read);
     }

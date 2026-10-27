@@ -47,12 +47,19 @@ fn dirty_fingerprint<'a>(
     repo: &Path,
     raw: &str,
     paths: impl Iterator<Item = &'a str>,
-) -> (Value, Vec<Option<SystemTime>>) {
+) -> Option<(Value, Vec<Option<SystemTime>>)> {
     if raw.is_empty() {
-        return (Value::Null, Vec::new());
+        return Some((Value::Null, Vec::new()));
     }
     let mut hash = Sha1::new();
     hash.update(raw.as_bytes());
+    // Status records show that a path is staged, but not which version is in the index.
+    // Include object IDs so changing a staged version with the same working file is visible.
+    if status_entries(raw).any(|(status, _)| status[0] != b' ' && status != *b"??") {
+        // Include all stages, including the multiple entries for an unresolved conflict.
+        let staged = git(repo, &["ls-files", "--stage", "-z"])?;
+        hash.update(staged.as_bytes());
+    }
     let mut remaining = MAX_FINGERPRINT_BYTES;
     let mut mtimes = Vec::new();
     for path in paths {
@@ -85,7 +92,7 @@ fn dirty_fingerprint<'a>(
         }
         mtimes.push(mtime);
     }
-    (json!(format!("{:x}", hash.finalize())), mtimes)
+    Some((json!(format!("{:x}", hash.finalize())), mtimes))
 }
 
 pub(super) fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
@@ -204,7 +211,7 @@ pub(super) fn dirty(repo: &Path, has_head: bool) -> Option<Dirty> {
     } else {
         None
     };
-    let (fingerprint, mtimes) = dirty_fingerprint(repo, &raw, paths.iter().copied());
+    let (fingerprint, mtimes) = dirty_fingerprint(repo, &raw, paths.iter().copied())?;
     let mtimes: Vec<SystemTime> = mtimes.into_iter().flatten().collect();
     let after_commit = mtimes
         .iter()
@@ -258,7 +265,7 @@ pub(super) struct Checkout {
 }
 
 /// The extra worktrees, plus the status of each one that exists for the overnight and collision views.
-pub(super) fn worktrees(repo: &Path) -> (Value, Vec<Checkout>) {
+pub(super) fn worktrees(repo: &Path) -> Option<(Value, Vec<Checkout>)> {
     let mut items: Vec<Value> = Vec::new();
     for line in git(repo, &["worktree", "list", "--porcelain"])
         .unwrap_or_default()
@@ -300,16 +307,17 @@ pub(super) fn worktrees(repo: &Path) -> (Value, Vec<Checkout>) {
                 .map(|(_, path)| path.to_owned())
                 .collect::<Vec<_>>()
         });
-        let (fingerprint, mtimes) = match (raw.as_deref(), paths.as_ref()) {
+        let measured = match (raw.as_deref(), paths.as_ref()) {
             (Some(raw), Some(paths)) => {
                 dirty_fingerprint(&path, raw, paths.iter().map(String::as_str))
             }
-            _ => (Value::Null, Vec::new()),
+            _ => Some((Value::Null, Vec::new())),
         };
-        (path, exists, paths, fingerprint, mtimes)
+        (path, exists, paths, measured)
     });
     let mut checkouts = Vec::new();
-    for (item, (path, exists, paths, fingerprint, mtimes)) in extra.iter_mut().zip(statuses) {
+    for (item, (path, exists, paths, measured)) in extra.iter_mut().zip(statuses) {
+        let (fingerprint, mtimes) = measured?;
         item["dirty_files"] = json!(paths.as_ref().map(Vec::len));
         item["dirty_fingerprint"] = fingerprint;
         if exists {
@@ -325,10 +333,10 @@ pub(super) fn worktrees(repo: &Path) -> (Value, Vec<Checkout>) {
         .iter()
         .filter(|w| w["prunable"] == json!(true))
         .count();
-    (
+    Some((
         json!({"count": extra.len(), "prunable": prunable, "items": extra}),
         checkouts,
-    )
+    ))
 }
 
 pub(super) fn branches(repo: &Path, current: Option<&str>) -> Value {
