@@ -4,7 +4,7 @@ import { fbButtons, hiddenByRating, myNote, noteFor, noteForm, openQs, question,
 import { taskBtn, trackedTask } from './handoff.js';
 import { ideaCard } from './ideas.js';
 import { $, CI, STATUS, VERDICT, VERDICT_STATUS, ago, byId, byLastWork, bytes, collapsedMods, days, daysSince, dmod, dot, esc, fmtDate, fmtShort, foldAttrs, lastWork, mod, num, openSince, plink, shownRow, streak, streakText, visible } from './presentation.js';
-import { cardFreshness, goalLine, openProjectTarget, phasePill, projectUnread } from './projects.js';
+import { cardFreshness, goalLine, openDigestTarget, openProjectTarget, phasePill, projectUnread } from './projects.js';
 
 let showAllRecent = false;
 
@@ -117,7 +117,7 @@ function blockChanges() {
   const entries = c.entries || [];
   const unread = visible().filter(projectUnread);
   if (c.has_baseline && !entries.length && !unread.length && !collapsedMods().has('changes')) return `<p class="digest-empty faint">${tr("No new Project updates since your reading baseline{0}.", c.since ? ` ${tr("from {0}", fmtDate(c.since))}` : '')}</p>`;
-  const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: tr("New"), resolved: tr("No longer open"), decision_applied: tr("Answer incorporated") })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${esc(digestTitle(e))}</div>${e.detail ? `<div class="why">${esc(e.generated_detail ? tr(e.detail) : e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>${tr("Next step:")}</b> ${esc(tr(e.next_step))}</div>` : ''}</div>`;
+  const row = e => `<div class="change-item"><div class="h"><span class="change-kind">${esc(({ new: tr("New"), resolved: tr("No longer open"), decision_applied: tr("Answer incorporated") })[e.kind] || e.kind)}</span>${e.project ? plink(e.project) : ''}</div><div class="t">${e.project && e.target ? `<button type="button" class="linkish" data-digest-project="${esc(e.project)}" data-digest-target="${esc(JSON.stringify(e.target))}" title="${tr("Open in Project")}">${esc(digestTitle(e))}</button>` : esc(digestTitle(e))}</div>${e.detail ? `<div class="why">${esc(e.generated_detail ? tr(e.detail) : e.detail)}</div>` : ''}${e.next_step ? `<div class="why"><b>${tr("Next step:")}</b> ${esc(tr(e.next_step))}</div>` : ''}</div>`;
   const groups = new Map();
   for (const e of entries) { const key = e.project || ''; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(e); }
   const body = entries.length ? `<div class="digest-groups">${[...groups].map(([id, items]) => `<details class="digest-project" ${foldAttrs(`digest:${id}`)}><summary><b>${esc((byId(id) || {}).name || tr("Portfolio brief"))}</b><span class="count">${items.length}</span><span class="digest-preview">${esc(digestTitle(items[0]))}</span></summary><div class="digest-items">${items.map(row).join('')}</div></details>`).join('')}</div>` : `<p class="faint">${c.has_baseline ? tr("Project reports contain unread changes, for example in the handbook or Project voice.") : tr("Explicitly mark the current state as read. Opening the app alone does not set your reading baseline.")}</p>`;
@@ -390,6 +390,8 @@ function handleAttentionClick(e, t) {
 }
 
 function handleOverviewClick(e, t) {
+  const digest = t.closest('[data-digest-project]');
+  if (digest) { openDigestTarget(digest.dataset.digestProject, JSON.parse(digest.dataset.digestTarget)); return true; }
   const warningOpen = t.closest('[data-warning-open]');
   if (warningOpen) { warningFor = `${warningOpen.dataset.project}:${warningOpen.dataset.warningOpen}`; render(); return true; }
   const warningSave = t.closest('[data-warning-save]');

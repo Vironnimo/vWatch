@@ -203,8 +203,12 @@ function openProject(id, searchTarget = null, fromList = false) {
 function renderProjectPage() {
   const p = openId && byId(openId), root = $('#project-page');
   if (!p || !root || S.prefs.style !== 'board') return;
+  if (projectSearch?.digestTarget) Object.assign(projectSearch, digestDestination(p, projectSearch.digestTarget));
   root.innerHTML = projectPageHtml(p);
-  if (projectSearch && projectSearch.id === p.id) revealProjectTarget(projectSearch.anchor, false);
+  if (projectSearch && projectSearch.id === p.id) {
+    const anchor = $(`#project-page [data-search-anchor="${CSS.escape(projectSearch.anchor)}"]`) ? projectSearch.anchor : `group:${projectSearch.group || 'work'}`;
+    revealProjectTarget(anchor, false);
+  }
 }
 function closeProject() {
   if (!openId) return;
@@ -227,9 +231,40 @@ function revealProjectTarget(anchor, focus = true) {
 // `group` names the part of the page that holds the anchor; it is the fallback when the anchor is gone
 function openProjectTarget(id, group = 'work', anchor = 'name') {
   if (!byId(id)) return;
-  openProject(id, { id, anchor });
+  openProject(id, { id, group, anchor });
   if ($(`#project-page [data-search-anchor="${CSS.escape(anchor)}"]`)) revealProjectTarget(anchor);
   else revealProjectTarget(`group:${PROJECT_GROUPS.some(([key]) => key === group) ? group : 'work'}`);
+}
+// Resolve authored content at click time; list positions can change after a refresh.
+function digestDestination(p, target) {
+  const c = p.card || {}, normalized = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const same = (a, b) => normalized(a) === normalized(b);
+  let group = 'work', fallback = 'group:work', anchors = [];
+  if (target?.section === 'recent') {
+    group = 'history'; fallback = 'recent';
+    anchors = (c.recent_changes || []).flatMap((item, i) => ['date', 'title', 'detail'].every(key => same(item[key], target[key])) ? [`recent:${i}`] : []);
+  } else if (target?.section === 'open') {
+    fallback = 'open-ends';
+    anchors = (c.open_ends || []).flatMap((item, i) => same(item.title, target.title) && same(item.source, target.source) ? [`open:${i}`] : []);
+  } else if (target?.section === 'decision') {
+    fallback = 'decisions';
+    anchors = (c.decisions || []).flatMap((item, i) => same(item, target.title) ? [`decision:${i}`] : []);
+  } else if (target?.section === 'question') {
+    fallback = 'questions';
+    anchors = (c.waiting_on_you || []).filter(item => item.id === target.id).map(item => `question:${item.id}`);
+    if (!anchors.length && pastReplies(p).some(([id]) => id === target.id)) {
+      group = 'history'; fallback = 'past-replies'; anchors = [`answer:${target.id}`];
+    }
+  }
+  return { group, anchor: anchors.length === 1 ? anchors[0] : fallback, exact: anchors.length === 1 };
+}
+function openDigestTarget(id, target) {
+  const p = byId(id);
+  if (!p) { toast(tr("This Project is no longer available.")); return; }
+  const destination = digestDestination(p, target);
+  openProjectTarget(id, destination.group, destination.anchor);
+  projectSearch.digestTarget = target;
+  if (!destination.exact) toast(tr("The exact entry is no longer available or is ambiguous. Showing its Project section."));
 }
 function jumpTo(group) {
   const target = $(`#project-group-${group}`);
@@ -312,4 +347,4 @@ function handleProjectKey(e) {
   return false;
 }
 
-export { cardFreshness, closeProject, goalLine, handleProjectChange, handleProjectClick, handleProjectInput, handleProjectKey, openProjectTarget, pastReplies, phasePill, projectUnread, renderBoard, renderProjectPage };
+export { cardFreshness, closeProject, goalLine, handleProjectChange, handleProjectClick, handleProjectInput, handleProjectKey, openDigestTarget, openProjectTarget, pastReplies, phasePill, projectUnread, renderBoard, renderProjectPage };

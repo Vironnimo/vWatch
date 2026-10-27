@@ -22,6 +22,8 @@ Visits establish re-entry context; they never acknowledge unread changes. `readi
 
 Recent changes are distinct by date, title and detail, so repeated titles do not hide separate events from the digest or unread markers.
 
+Digest entries carry source locators for window navigation, including entries removed from the current Card. These locators do not depend on array positions and do not participate in reading acknowledgement; their public shape is documented in `docs/agent-interface.md`.
+
 The first visit also requires an explicit read action to establish a baseline. Project and event markers share that baseline. State captures the acknowledgement token before loading displayed cards; Store checks it again while saving the baseline. A newer write produces `stale_changes` and stays unread. Historical reads and facts refresh must not move this baseline. `tests/digest.rs` owns these contracts; transaction details are in `persistence/transactions-and-history.md`.
 
 Idea status is projected in `service/ideas.rs`: select the newest active source Task, otherwise the newest historical Task. Each `idea_states` entry includes that Task and the revision of all source Tasks plus the archive row from one Store snapshot; window enrichment uses that selected content directly. Sources retained only in feedback or Task snapshots remain represented. Direct owner implementation can complete an assignment without an agent report; this is distinct from confirming a reported Task. `store/tasks.rs` only applies the service-prepared transition after rechecking the full source revision in its immediate transaction.

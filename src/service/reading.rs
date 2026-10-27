@@ -254,6 +254,7 @@ struct DigestItem {
     detail: String,
     next_step: String,
     comparison: Value,
+    target: Value,
 }
 
 fn digest_items(
@@ -274,6 +275,7 @@ fn digest_items(
                 detail,
                 next_step: "Review the open end in the Project or assign it as a Task.".into(),
                 comparison: json!({"kind": item["kind"], "detail": digest_text(&item["detail"])}),
+                target: json!({"section": "open", "title": item["title"], "source": item["source"]}),
             },
         );
     }
@@ -292,6 +294,7 @@ fn digest_items(
                     detail: item["source"].as_str().unwrap_or("").into(),
                     next_step: "Answer the question in the Project.".into(),
                     comparison: item["options"].clone(),
+                    target: json!({"section": "question", "id": item["id"]}),
                 },
             );
         }
@@ -305,6 +308,7 @@ fn digest_items(
                 detail: item["detail"].as_str().unwrap_or("").into(),
                 next_step: String::new(),
                 comparison: json!(digest_text(&item["detail"])),
+                target: json!({"section": "recent", "date": item["date"], "title": item["title"], "detail": item["detail"]}),
             },
         );
     }
@@ -317,6 +321,7 @@ fn digest_items(
                 detail: "Documented in the current Card.".into(),
                 next_step: String::new(),
                 comparison: Value::Null,
+                target: json!({"section": "decision", "title": decision}),
             },
         );
     }
@@ -344,6 +349,7 @@ fn digest_items(
                 detail: feedback["note"].as_str().unwrap_or("").into(),
                 next_step: "Read the current Card.".into(),
                 comparison: Value::Null,
+                target: json!({"section": "question", "id": id}),
             },
         );
     }
@@ -466,6 +472,7 @@ impl VWatch {
                         "title_prefix": prefix, "source_title": item.title,
                         "generated_detail": item.category == "decision",
                         "detail": item.detail, "next_step": item.next_step,
+                        "target": item.target,
                     }));
                 }
                 for (key, item) in &previous {
@@ -483,6 +490,7 @@ impl VWatch {
                         "title_prefix": prefix, "source_title": item.title,
                         "generated_detail": true,
                         "detail": detail, "next_step": "",
+                        "target": item.target,
                     }));
                 }
                 if let Some(id) = project["id"].as_str() {

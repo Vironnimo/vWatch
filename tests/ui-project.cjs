@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('./ui-helpers.cjs');
 
-const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, searchEntries, pickResult, openSearch, renderSearchResults, blockSpace,
+const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, openDigestTarget, searchEntries, pickResult, openSearch, renderSearchResults, blockSpace,
   search: query => { searchQ = query; return searchResults(); },
   ownerEditing: id => projectEditors.has(id),
   allRatings: () => showRated,
@@ -164,6 +164,66 @@ test('opening a hidden suggestion from search reveals only that destination and 
   assert.match(page(a), /data-search-anchor="suggestion:s1"/);
   a.ui.closeProject(); a.ui.openProject('sample');
   assert.doesNotMatch(page(a), /data-search-anchor="suggestion:s1"/);
+});
+
+test('rating notes are searchable across current and retained proposals and open the saved note without changing decisions', async () => {
+  const a = await app(undefined, expose);
+  a.state.feedback.s1 = { value: 'later', note: 'Wait for the mobile release', snoozed_until: '2026-12-01' };
+  a.state.feedback.old = { value: 'down', note: 'Requires a hosted database', project_id: 'sample', item: { kind: 'suggestion', title: 'Cloud archive' } };
+  await a.ui.load(false);
+  for (const [query, id, note] of [['mobile release', 's1', 'Wait for the mobile release'], ['hosted database', 'old', 'Requires a hosted database']]) {
+    const results = a.ui.search(query);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ideaId, id);
+    a.ui.pickResult({ dataset: { sres: '0' } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(a.node('#view').innerHTML, new RegExp(`data-idea-id="${id}"`));
+    assert.ok(a.node('#view').innerHTML.includes(note));
+  }
+  assert.equal(a.state.feedback.s1.value, 'later');
+  assert.equal(a.state.feedback.old.value, 'down');
+  assert.equal(a.calls.filter(c => ['set_feedback', 'set_task_status', 'mark_changes_read'].includes(c.command)).length, 0);
+});
+
+test('digest links resolve current items and keep their identity through reordering with safe section fallbacks', async () => {
+  const a = await app(undefined, expose), c = a.state.projects[0].card;
+  const event = { date: '2026-10-07', title: 'Export works', detail: 'Including archives' };
+  c.recent_changes = [{ ...event, date: '2026-10-06' }, event];
+  c.open_ends = [{ title: 'Check export', source: 'src/export.rs' }];
+  c.decisions = ['Keep exports local'];
+  a.state.feedback.old_q = { value: 'answered', note: 'Local files', project_id: 'sample', item: { kind: 'question', title: 'Where?' } };
+  await a.ui.load(false);
+  const cases = [
+    [{ section: 'recent', ...event }, 'recent:1'],
+    [{ section: 'open', title: 'Check export', source: 'src/export.rs' }, 'open:0'],
+    [{ section: 'decision', title: 'Keep exports local' }, 'decision:0'],
+    [{ section: 'question', id: 'q2' }, 'question:q2'],
+    [{ section: 'question', id: 'old_q' }, 'answer:old_q'],
+  ];
+  for (const [destination, anchor] of cases) {
+    const node = target(a, anchor);
+    const button = { dataset: { digestProject: 'sample', digestTarget: JSON.stringify(destination) } };
+    a.dispatch('click', { target: { closest: selector => selector === '[data-digest-project]' ? button : null } });
+    assert.equal(a.document.activeElement, node, anchor);
+    assert.equal(node.highlight, 'search-hit');
+  }
+  const destination = { section: 'recent', ...event };
+  a.ui.openDigestTarget('sample', destination);
+  c.recent_changes.reverse();
+  const moved = target(a, 'recent:0');
+  await a.ui.load(false);
+  assert.equal(moved.highlight, 'search-hit');
+  c.recent_changes.push({ ...event });
+  const fallback = target(a, 'recent');
+  await a.ui.load(false);
+  a.ui.openDigestTarget('sample', destination);
+  assert.equal(a.document.activeElement, fallback);
+  assert.match(a.node('#toast').innerHTML, /nicht eindeutig/);
+  c.recent_changes = [];
+  await a.ui.load(false);
+  a.ui.openDigestTarget('sample', destination);
+  assert.equal(a.document.activeElement, fallback);
+  assert.equal(a.calls.filter(c => ['set_feedback', 'set_task_status', 'mark_changes_read'].includes(c.command)).length, 0);
 });
 
 test('projects without reports still expose an editable owner intent, folder and measured facts', async () => {

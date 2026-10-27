@@ -19,13 +19,15 @@ test('Today presents owner decisions and waiting work before suggestions and cha
   p.facts = facts({ weekly: [0, 2, 5] });
   a.state.tasks = [task(1, 'blocked'), task(2, 'review'), task(3, 'assigned')];
   a.state.portfolio = { greeting: 'A short morning overview', focus: [{ id: 'focus', project: 'sample', title: 'Continue the export work', why: 'The next useful step' }] };
-  a.state.changes = { has_baseline: true, token: 'read-v2', entries: [{ project: 'sample', kind: 'new', title: 'The export now works' }] };
+  a.state.changes = { has_baseline: true, token: 'read-v2', entries: [{ project: 'sample', kind: 'new', title: 'The export now works', target: { section: 'recent', date: '2026-10-27', title: 'The export now works', detail: 'Quotes: "safe" & <escaped>' } }] };
   await a.ui.load(false);
   const html = a.node('#view').innerHTML, focus = html.indexOf('data-mod="focus"'), changes = html.indexOf('data-mod="changes"');
   for (const text of ['Task 1', 'Task 2', 'Choose the export format', 'Publish the reviewed version']) {
     assert.ok(html.indexOf(text) >= 0 && html.indexOf(text) < focus);
   }
   assert.ok(focus < changes);
+  assert.match(html, /data-digest-project="sample" data-digest-target="\{&quot;section&quot;:&quot;recent&quot;/);
+  assert.match(html, /&lt;escaped&gt;/);
   assert.doesNotMatch(html, /class="tile"|class="spark"|class="prog"|data-mod="projects"|data-mod="pulse"|data-mod="kpis"/);
   assert.doesNotMatch(html, /Task 3/);
   // the header already navigates; Today holds no second set of area links

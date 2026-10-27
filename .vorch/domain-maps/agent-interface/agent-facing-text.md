@@ -80,6 +80,7 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 | Portfolio guide: `A missing integration, shared format or identifier is design work` | Do not reject a useful opportunity merely because its implementation remains unresolved; see the dated 2026-10-08 reflection follow-up. |
 | Portfolio guide: `A retained review describes its historical week, not today's remaining work.` | Prevent a weekly recap from using current state as evidence of a past period. |
 | CLI reference: `The final page restores any workflow continuation from the original result.` | Agents must distinguish saved-output traversal from the next operation after reading. |
+| CLI reference: `JSON change entries include a` `target` `locator for their Card source.` | Explain the additive digest source metadata without implying an acknowledgement or a CLI focus operation; `tests/digest.rs` verifies locators alongside unchanged reading semantics. |
 | CLI reference: `A job continuation uses the output format of the call that returned it.` | A program can follow a continuation after joining or inspecting a Job without unexpectedly receiving text. |
 | CLI reference: `facts_conflict` | A refresh that repeatedly conflicts discards outdated measurements and can be retried after concurrent refreshes finish. |
 | CLI reference: `settings show` includes installation paths, autostart/PATH state and preferences | Expose language alongside existing settings without implying a CLI mutation of autostart or PATH. |

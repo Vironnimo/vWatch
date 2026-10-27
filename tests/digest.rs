@@ -67,6 +67,18 @@ fn meaningful_changes_persist_until_the_viewed_snapshot_is_acknowledged() {
         "Opening the window again does not acknowledge unread work"
     );
     assert_eq!(digest["total"], 3);
+    let targets: Vec<Value> = digest["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["target"].clone())
+        .collect();
+    assert!(targets.contains(&json!({"section":"recent","date":"2026-09-30","title":"Suche ergänzt","detail":"Ergebnisse jetzt im Fenster."})));
+    assert!(targets
+        .contains(&json!({"section":"open","title":"Neue Suche prüfen","source":"src/search.rs"})));
+    assert!(targets.contains(
+        &json!({"section":"open","title":"Alten Export prüfen","source":"src/export.rs"})
+    ));
     assert!(titles(&digest, "new").contains(&"New open end: Neue Suche prüfen".to_owned()));
     assert!(titles(&digest, "new").contains(&"New: Suche ergänzt".to_owned()));
     assert!(titles(&digest, "resolved")
@@ -97,6 +109,11 @@ fn meaningful_changes_persist_until_the_viewed_snapshot_is_acknowledged() {
         "A stale acknowledgement loses no changes"
     );
     let current = changes(&svc);
+    assert!(current["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["target"] == json!({"section":"decision","title":"Suche bleibt lokal."})));
     assert_eq!(
         svc.mark_changes_read(current["token"].as_str().unwrap())
             .unwrap()["changes"]["total"],
@@ -154,6 +171,10 @@ fn an_owner_reply_is_only_incorporated_after_a_subsequent_card_consumes_it() {
         vec!["Answer incorporated into Card: Welche Farbe?"]
     );
     assert_eq!(applied["entries"][0]["detail"], "Blau");
+    assert_eq!(
+        applied["entries"][0]["target"],
+        json!({"section":"question","id":id})
+    );
     assert!(!applied.to_string().contains("implementiert"));
     svc.mark_changes_read(applied["token"].as_str().unwrap())
         .unwrap();
