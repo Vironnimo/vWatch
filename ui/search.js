@@ -56,6 +56,11 @@ function searchEntries() {
     (h.terms || []).forEach((x, i) => add("Handbook · Term", `${x.term}: ${x.meaning}`, 'handbook', `hb-term:${i}`, x));
   }
   for (const idea of ideaCollection()) {
+    const note = S.feedback[idea.s.id]?.note;
+    if (note && ['up', 'later', 'down'].includes(S.feedback[idea.s.id]?.value)) {
+      const project = idea.project && byId(idea.project);
+      out.push({ ideaId: idea.s.id, identity: searchIdentity(['idea-note', idea.s.id]), nameGenerated: !project, name: project ? project.name : 'Ideas', where: 'Your note', text: `${idea.s.title} · ${note}` });
+    }
     if (idea.project && !idea.retained && !idea.own) continue;
     out.push({ ideaId: idea.s.id, identity: searchIdentity(['idea', idea.s.id]), nameGenerated: true, name: idea.own ? 'Your ideas' : 'Ideas', where: idea.own ? 'Own idea' : 'Proposal', text: [idea.s.title, idea.s.why, idea.s.pitch, idea.s.evidence].filter(Boolean).join(' · ') });
   }
@@ -102,7 +107,7 @@ function renderSearchResults() {
   if (!searchSnapshot || searchSnapshot.query !== searchQ) searchSnapshot = { query: searchQ, results: searchResults() };
   const res = searchSnapshot.results;
   searchSel = Math.min(searchSel, Math.max(0, res.length - 1));
-  box.innerHTML = !searchQ.trim() ? `<p class="faint sempty">${tr("Searches Projects, handbooks, Tasks, ideas and your answers. A result opens its source.")}</p>`
+  box.innerHTML = !searchQ.trim() ? `<p class="faint sempty">${tr("Searches Projects, handbooks, Tasks, ideas, your answers and rating notes. A result opens its source.")}</p>`
     : !res.length ? `<p class="faint sempty">${tr("Nothing found.")}</p>`
     : res.map((r, i) => `<button class="sres" type="button" data-sres="${i}" aria-selected="${i === searchSel}"><span class="w">${r.id ? dot(r.id) : ''}<b>${esc(r.nameGenerated ? tr(r.name) : r.name)}</b> · ${esc(tr(r.whereKey || r.where))}</span><span class="x">${highlight(r.text)}</span></button>`).join('');
   const sel = box.querySelector('[aria-selected="true"]');

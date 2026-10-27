@@ -18,6 +18,8 @@ Statistics have separate query and detail request counters. Keep the displayed s
 
 `Projekte` keeps a compact list beside the opened project page. That page is a continuous read with work, startup/handbook and history/facts sections, reached through a jump bar. Arrow keys move through the project list; Escape returns. Handbook commands have individual copy actions. Search must open the exact matched section/item and retain its identity through insertions or reordering, refusing removed or ambiguous targets. See `tests/ui-project.cjs`.
 
+Search includes saved rating notes on current and retained proposals and opens the idea collection with the matching category, rating filter and highlighted item. Today digest titles resolve their source locator against the current Card at click time and after refresh; missing or ambiguous sources open the relevant section with a notice instead of selecting another item. Neither navigation changes ratings, Task status or reading acknowledgement.
+
 The read action uses the token of the displayed semantic snapshot. Newer changes must remain unread if they arrived before the click completes. Project and recent-activity unread markers come from the same explicit reading state; even the first visit is not an acknowledgement. See `tests/ui.cjs` and `tests/digest.rs`.
 
 ## Tasks, ratings and recovery
