@@ -516,52 +516,55 @@ impl VWatch {
     }
 
     fn refresh_one(&self, project: &Project, today: NaiveDate, with_ci: bool) -> Result<Value> {
-        let before = self.store.facts(&project.id)?;
-        // Stored facts always describe the current folder (a relink deletes them), so slow scans
-        // whose inputs are unchanged carry over from them.
-        let mut data = (self.collect)(
-            &project.path,
-            today,
-            with_ci,
-            before.as_ref().map(|b| &b.data),
-        );
-        if !with_ci {
-            if let Some(ci) = before
-                .as_ref()
-                .and_then(|b| b.data.get("ci"))
-                .filter(|ci| ci["state"] != "skipped")
-            {
-                data["ci"] = ci.clone();
+        for _ in 0..3 {
+            let before = self.store.facts(&project.id)?;
+            // Stored facts always describe the current folder (a relink deletes them), so slow scans
+            // whose inputs are unchanged carry over from them.
+            let mut data = (self.collect)(
+                &project.path,
+                today,
+                with_ci,
+                before.as_ref().map(|b| &b.data),
+            );
+            if !with_ci {
+                if let Some(ci) = before
+                    .as_ref()
+                    .and_then(|b| b.data.get("ci"))
+                    .filter(|ci| ci["state"] != "skipped")
+                {
+                    data["ci"] = ci.clone();
+                }
             }
+            if data["ok"] == true {
+                data["space"] = match before
+                    .as_ref()
+                    .map(|b| &b.data["space"])
+                    .filter(|s| s["ok"] == true && s["measured_on"] == today.to_string())
+                {
+                    Some(space) => space.clone(),
+                    None => facts::space(&project.path, today),
+                };
+            }
+            let fp = facts::fingerprint(&data);
+            match self.store.save_project_facts(project, before.as_ref().map(|facts| facts.revision), &self.now(), &fp, &data)? {
+            crate::store::FactsSave::ProjectChanged => return Err(VWatchError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
+                .hint("Read `vwatch projects list` and refresh the project's facts again. The outdated measurement was discarded.")),
+            crate::store::FactsSave::FactsChanged => continue,
+            crate::store::FactsSave::Saved => {}
         }
-        if data["ok"] == true {
-            data["space"] = match before
-                .as_ref()
-                .map(|b| &b.data["space"])
-                .filter(|s| s["ok"] == true && s["measured_on"] == today.to_string())
-            {
-                Some(space) => space.clone(),
-                None => facts::space(&project.path, today),
-            };
+            return Ok(json!({
+                "id": project.id,
+                "ok": data["ok"].as_bool().unwrap_or(false),
+                "error": data.get("error").cloned().unwrap_or(Value::Null),
+                "incomplete_measurements": if data["ok"] == true {
+                    [("dirty_lines", data["dirty"]["line_counts"]["ok"] == true), ("rebuildable_space", data["space"]["ok"] == true)]
+                        .into_iter().filter_map(|(name, ok)| (!ok).then_some(name)).collect::<Vec<_>>()
+                } else { Vec::new() },
+                "changed": before.is_none_or(|b| b.fingerprint != fp),
+            }));
         }
-        let fp = facts::fingerprint(&data);
-        if !self
-            .store
-            .save_project_facts(project, &self.now(), &fp, &data)?
-        {
-            return Err(VWatchError::new("project_changed", format!("Project '{}' changed while its facts were being measured.", project.id))
-                .hint("Read `vwatch projects list` and refresh the project's facts again. The outdated measurement was discarded."));
-        }
-        Ok(json!({
-            "id": project.id,
-            "ok": data["ok"].as_bool().unwrap_or(false),
-            "error": data.get("error").cloned().unwrap_or(Value::Null),
-            "incomplete_measurements": if data["ok"] == true {
-                [("dirty_lines", data["dirty"]["line_counts"]["ok"] == true), ("rebuildable_space", data["space"]["ok"] == true)]
-                    .into_iter().filter_map(|(name, ok)| (!ok).then_some(name)).collect::<Vec<_>>()
-            } else { Vec::new() },
-            "changed": before.is_none_or(|b| b.fingerprint != fp),
-        }))
+        Err(VWatchError::new("facts_conflict", format!("Facts for '{}' kept changing during refresh. The outdated measurements were discarded.", project.id))
+            .hint("Retry the facts refresh after concurrent refreshes finish."))
     }
 
     pub(super) fn stored_facts(&self, id: &str) -> Result<crate::store::StoredFacts> {

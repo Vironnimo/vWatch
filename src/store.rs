@@ -108,9 +108,17 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 }
 
 pub struct StoredFacts {
+    pub revision: i64,
     pub collected_at: String,
     pub fingerprint: String,
     pub data: Value,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FactsSave {
+    Saved,
+    ProjectChanged,
+    FactsChanged,
 }
 
 pub struct StoredCard {
@@ -268,6 +276,7 @@ impl Store {
             ("projects", "goal", "TEXT NOT NULL DEFAULT ''"),
             ("projects", "goal_due", "TEXT"),
             ("projects", "removed_at", "TEXT"),
+            ("facts", "revision", "INTEGER NOT NULL DEFAULT 0"),
             ("ideas", "removed_at", "TEXT"),
             ("ideas", "revision", "INTEGER NOT NULL DEFAULT 1"),
             (

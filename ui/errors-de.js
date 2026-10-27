@@ -8,6 +8,8 @@ export default {
   "No project with id '{0}'.": "Kein Projekt mit der ID '{0}'.",
   "Project '{0}' is not registered. Nothing was changed.": "Projekt '{0}' ist nicht registriert. Nichts wurde geändert.",
   "This folder is already registered as '{0}'.": "Dieser Ordner ist bereits als '{0}' registriert.",
+  "Facts for '{0}' kept changing during refresh. The outdated measurements were discarded.": "Die Facts für '{0}' haben sich während der Aktualisierung wiederholt geändert. Die veralteten Messwerte wurden verworfen.",
+  "Retry the facts refresh after concurrent refreshes finish.": "Versuche die Aktualisierung der Facts erneut, nachdem die gleichzeitigen Aktualisierungen abgeschlossen sind.",
   "The project changed while you were editing it.": "Das Projekt hat sich während der Bearbeitung geändert.",
   "'{0}' is not a date.": "'{0}' ist kein Datum.",
   "'{0}' is not a YYYY-MM-DD date. Nothing was changed.": "'{0}' ist kein Datum im Format JJJJ-MM-TT. Nichts wurde geändert.",

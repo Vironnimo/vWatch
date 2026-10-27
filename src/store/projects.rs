@@ -148,7 +148,7 @@ impl Store {
             db.execute(
                 "INSERT INTO facts(project_id, collected_at, fingerprint, data) VALUES(?1, ?2, ?3, ?4)
                  ON CONFLICT(project_id) DO UPDATE SET collected_at = excluded.collected_at,
-                 fingerprint = excluded.fingerprint, data = excluded.data",
+                 fingerprint = excluded.fingerprint, data = excluded.data, revision = facts.revision + 1",
                 params![id, at, fingerprint, data.to_string()],
             )
             .map(drop)
@@ -159,31 +159,40 @@ impl Store {
     pub fn save_project_facts(
         &self,
         project: &Project,
+        expected_revision: Option<i64>,
         at: &str,
         fingerprint: &str,
         data: &Value,
-    ) -> Result<bool> {
+    ) -> Result<FactsSave> {
         self.with(|db| {
-            db.execute(
+            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let matches: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND path=?2 AND identity_revision=?3 AND removed_at IS NULL)", params![project.id, project.path, project.identity_revision], |row| row.get(0))?;
+            if !matches { return Ok(FactsSave::ProjectChanged); }
+            let revision: Option<i64> = tx.query_row("SELECT revision FROM facts WHERE project_id=?1", [&project.id], |row| row.get(0)).optional()?;
+            if revision != expected_revision { return Ok(FactsSave::FactsChanged); }
+            tx.execute(
                 "INSERT INTO facts(project_id, collected_at, fingerprint, data)
-                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND path = ?5 AND identity_revision = ?6 AND removed_at IS NULL)
+                 VALUES(?1, ?2, ?3, ?4)
                  ON CONFLICT(project_id) DO UPDATE SET collected_at = excluded.collected_at,
-                 fingerprint = excluded.fingerprint, data = excluded.data",
-                params![project.id, at, fingerprint, data.to_string(), project.path, project.identity_revision],
-            ).map(|count| count > 0)
+                 fingerprint = excluded.fingerprint, data = excluded.data, revision = facts.revision + 1",
+                params![project.id, at, fingerprint, data.to_string()],
+            )?;
+            tx.commit()?;
+            Ok(FactsSave::Saved)
         })
     }
 
     pub fn facts(&self, id: &str) -> Result<Option<StoredFacts>> {
         self.with(|db| {
             db.query_row(
-                "SELECT collected_at, fingerprint, data FROM facts WHERE project_id = ?1",
+                "SELECT collected_at, fingerprint, data, revision FROM facts WHERE project_id = ?1",
                 [id],
                 |r| {
                     Ok(StoredFacts {
                         collected_at: r.get(0)?,
                         fingerprint: r.get(1)?,
                         data: crate::facts::measurement_quality(json(r.get(2)?)),
+                        revision: r.get(3)?,
                     })
                 },
             )

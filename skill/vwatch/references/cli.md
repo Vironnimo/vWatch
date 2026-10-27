@@ -34,6 +34,7 @@ Common recoveries:
 | Invalid card/brief or malformed input | Fix the named field, JSON position or encoding. The error states whether anything was saved. |
 | `context_required` | Read the corresponding complete context, then write with its token. |
 | `version_conflict` | Reread the current context or task and reconcile; never substitute a token/revision without checking the change. |
+| `facts_conflict` | Retry the facts refresh after concurrent refreshes finish; outdated measurements were discarded. |
 | Folder missing or already registered | Use the stated existing project/candidate path. A renamed folder does not justify creating a new project. |
 | Edit saved but facts refresh failed | Keep the saved edit and rerun only the indicated facts refresh. |
 | Run incomplete | Read its remaining project/brief failures, complete what can be completed and finish the same run again. |

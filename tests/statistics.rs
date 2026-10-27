@@ -731,13 +731,42 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     drop(svc);
     let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     remove_history_schema(&db);
+    db.execute_batch("ALTER TABLE facts DROP COLUMN revision;")
+        .unwrap();
     db.execute(
         "UPDATE facts SET data=json_remove(data,'$.code','$.activity')",
         [],
     )
     .unwrap();
+    let raw: String = db
+        .query_row(
+            "SELECT data FROM facts WHERE project_id='demo'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let raw: Value = serde_json::from_str(&raw).unwrap();
     drop(db);
     let (svc, _) = service(tmp.path());
+    let project = svc.store().project("demo").unwrap().unwrap();
+    let migrated = svc.store().facts("demo").unwrap().unwrap();
+    assert_eq!(migrated.revision, 0);
+    svc.store()
+        .save_facts("demo", &migrated.collected_at, &migrated.fingerprint, &raw)
+        .unwrap();
+    assert_eq!(svc.store().facts("demo").unwrap().unwrap().revision, 1);
+    assert_eq!(
+        svc.store()
+            .save_project_facts(
+                &project,
+                Some(migrated.revision),
+                &migrated.collected_at,
+                &migrated.fingerprint,
+                &migrated.data
+            )
+            .unwrap(),
+        vwatch::store::FactsSave::FactsChanged
+    );
     assert_eq!(svc.card_history("demo").unwrap()["current_version"], 2);
     assert_eq!(
         svc.proposals(None, None).unwrap()["proposals"]
@@ -750,6 +779,7 @@ fn migration_preserves_old_documents_and_is_idempotent_and_writes_are_atomic() {
     let events = count(&db, "content_history");
     drop(svc);
     let (svc, clock) = service(tmp.path());
+    assert_eq!(svc.store().facts("demo").unwrap().unwrap().revision, 1);
     assert_eq!(count(&db, "content_history"), events);
     assert_eq!(count(&db, "fact_samples"), 1);
     db.execute_batch("CREATE TRIGGER test_abort BEFORE INSERT ON content_history BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
