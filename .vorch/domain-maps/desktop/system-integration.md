@@ -20,7 +20,7 @@ The settings response supplies the exported Skill path and a vBot install comman
 
 ## Windows integration
 
-The app uses the owner's `11-thought` artwork from the v-family icon set. `icons/icon.ico` contains the Windows sizes (16 through 256 pixels); Tauri embeds it in the executable resources and uses it for the default window/taskbar icon. `icons/icon.png` is the 256-pixel PNG used by the README and social-preview source. The embedded frontend keeps its 128-pixel header image and multi-size favicon in `ui/icons/`. The installer explicitly points the Start menu shortcut at the GUI executable's icon. Replace these assets together when changing app identity.
+The app uses the owner's `11-thought` artwork from the v-family icon set. `icons/icon.ico` contains the Windows sizes (16 through 256 pixels); Tauri embeds it in the executable resources and uses it for the default window/taskbar icon. `build.rs` explicitly tracks that file so icon-only edits rebuild cached Windows resources. `icons/icon.png` is the 256-pixel PNG used by the README and social-preview source. The embedded frontend keeps its 128-pixel header image and multi-size favicon in `ui/icons/`. The installer explicitly points the Start menu shortcut at the GUI executable's icon. Replace these assets together when changing app identity.
 
 `set_autostart` updates the current user's vWatch Run entry and targets `vWatch-UI.exe`. `set_agent_access` changes only the app-folder entry in the user's PATH. Its normalization avoids duplicate entries and its `REG_EXPAND_SZ` write preserves environment placeholders; an environment-change broadcast lets other applications notice the update. These capabilities are owner choices in the settings, excluded from routine agent operations.
 
