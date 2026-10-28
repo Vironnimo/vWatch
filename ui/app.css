@@ -49,8 +49,9 @@ p { margin: 0; }
 
 /* top bar */
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-.brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.brand h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+.brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brand h1 { display: inline-flex; align-items: center; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+.brand-icon { flex: none; margin-right: 10px; }
 .brand h1 span { color: var(--accent); }
 .brand .date { color: var(--text-2); font-size: 14px; }
 .tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

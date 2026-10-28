@@ -42,7 +42,7 @@ Display preferences are persisted owner choices. Language is shared with new Age
 Read these only when your task matches - not by default.
 
 - Changing refreshes, navigation, task handoff or owner interaction state -> `desktop/interactions.md`
-- Changing startup, filesystem layout, Skill export or Windows settings -> `desktop/system-integration.md`
+- Changing startup, app icons, filesystem layout, Skill export or Windows settings -> `desktop/system-integration.md`
 - Changing copied task instructions or embedded Skill wording -> `agent-interface/agent-facing-text.md`
 - Changing service behavior or unread-content meaning -> `application.md`
 - Adding/changing a Tauri owner capability or its CLI coverage -> `docs/agent-interface.md`

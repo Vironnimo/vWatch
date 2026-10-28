@@ -74,6 +74,7 @@ $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'vWatch.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut($shortcut)
 $link.TargetPath = $guiExe
+$link.IconLocation = "$guiExe,0"
 $link.WorkingDirectory = $Target
 $link.Description = 'Morning overview of your projects'
 $link.Save()
