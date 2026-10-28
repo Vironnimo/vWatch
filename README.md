@@ -35,7 +35,7 @@
 </p>
 
 > [!NOTE]
-> The window and new agent reports default to English. Choose English or German in Settings → Language; saved content keeps its original language. The CLI, documentation and agent instructions are in English. The screenshots below show the German interface.
+> The window and new agent reports default to English. Choose English or German in Settings → Language; saved content keeps its original language. The CLI, documentation and agent instructions are in English. The screenshots below show the English interface with German example reports.
 
 ## Features
 
@@ -46,7 +46,7 @@
 </tr>
 <tr>
 <td valign="top"><b>Focus across projects</b><br>A daily portfolio brief names up to three things to focus on, patterns across projects, and projects worth parking or reviving.</td>
-<td valign="top"><b>Only what changed</b><br><code>vwatch due</code> tells the agent which projects changed, so the daily run reviews only those. "Seit deinem letzten Lesen" lists what is new in the reports.</td>
+<td valign="top"><b>Only what changed</b><br><code>vwatch due</code> tells the agent which projects changed, so the daily run reviews only those. "Since your last read" lists what is new in the reports.</td>
 </tr>
 <tr>
 <td valign="top"><b>Your decisions stick</b><br>Rate each suggestion good, later or nonsense. The agent reads every rating, never brings back a rejected idea and learns your taste across projects.</td>
@@ -70,7 +70,7 @@ vWatch runs on Windows 11 and needs [Git](https://git-scm.com/download/win) on y
 
    It copies `vWatch.exe` and `vWatch-UI.exe` to `%LOCALAPPDATA%\Programs\vWatch` and adds a Start menu entry. You can read `install.ps1` before you run it; it changes no other system settings. Run it again from a newer package to update; your data stays. The executables are not signed, so Windows SmartScreen may warn when you first open vWatch: choose "More info", then "Run anyway".
 
-2. **Pick your projects.** Open vWatch from the Start menu. In the settings (gear icon), choose your projects folder with "Ordner wählen …" and tick the repositories to watch. Turn on "Für Agents aufrufbar" there, so agents can run `vwatch` from any terminal.
+2. **Pick your projects.** Open vWatch from the Start menu. In the settings (gear icon), choose your projects folder with "Choose folder …" and tick the repositories to watch. Turn on "Available to Agents" there, so agents can run `vwatch` from any terminal.
 
 3. **Connect your agent.** vWatch writes its [operating Skill](skill/vwatch/SKILL.md) to `%LOCALAPPDATA%\Programs\vWatch\skill\vwatch`. Point your agent at that `SKILL.md`, or copy the folder into its skills folder, for Claude Code `%USERPROFILE%\.claude\skills\vwatch`. Then ask it:
 
@@ -86,13 +86,13 @@ vWatch runs on Windows 11 and needs [Git](https://git-scm.com/download/win) on y
 
 ### Today
 
-"Heute" starts with what needs you: questions an agent left, results waiting for your confirmation and the brief's focus for the day. "Auftrag vorbereiten" turns a focus item into a task for your agent. Routine Git activity never pushes a project to the top; unread reports and outdated reports are marked separately.
+"Today" starts with what needs you: questions an agent left, results waiting for your confirmation and the brief's focus for the day. "Prepare Task" turns a focus item into a task for your agent. Routine Git activity never pushes a project to the top; unread reports and outdated reports are marked separately.
 
-![The "Heute" overview: the brief's greeting, four decisions from the ledger-lite, tidewatch, trailnotes and pixel-garden Cards, and three focus items with "Auftrag vorbereiten" links](.github/assets/today.webp)
+![The Today overview: the brief's greeting, four decisions from the ledger-lite, tidewatch, trailnotes and pixel-garden Cards, and three focus items with Prepare Task links](.github/assets/today.webp)
 
 ### All projects
 
-"Projekte" shows one tile per project with its status, the agent's one-line assessment and the decisions waiting for you. Each project also gets a short voice in the first person, which makes it easy to tell projects apart at a glance.
+"Projects" shows one tile per project with its status, the agent's one-line assessment and the decisions waiting for you. Each project also gets a short voice in the first person, which makes it easy to tell projects apart at a glance.
 
 ![Five project tiles: tidewatch, ledger-lite and trailnotes active, pixel-garden and recipe-box dormant, each with its voice, headline and number of open decisions](.github/assets/projects.webp)
 
@@ -100,13 +100,13 @@ vWatch runs on Windows 11 and needs [Git](https://git-scm.com/download/win) on y
 
 Each project gets a page with its purpose, current state and next step, your goal and the questions waiting for you, each with the agent's recommended answer. Further down follow the open ends, the agent's suggestions, the handbook with how to run the project and what to read first, and the facts Git measured.
 
-![The tidewatch project page: current state, the next step with its completion criterion, the goal with its due date, and an open question with three answers, one marked "empfohlen"](.github/assets/project.webp)
+![The tidewatch project page: current state, the next step with its completion criterion, the goal with its due date, and an open question with three answers, one marked recommended](.github/assets/project.webp)
 
 ### Ideas and recommendations
 
 Product ideas and recommendations such as upkeep and repairs are kept apart, each with its own rating round: press 1 for good, 2 for later, 3 for nonsense and optionally add a reason. Ratings are kept with the stable item, also after a later report drops it.
 
-![The ideas collection: separate tabs for ideas and recommendations, a field for your own idea, filters for new, good, later, in progress, implemented, archived and rejected ideas, and two idea cards with gut, später and Quatsch buttons](.github/assets/ideas.webp)
+![The ideas collection: separate tabs for ideas and recommendations, a field for your own idea, filters for new, liked, later, in progress, implemented, archived and rejected ideas, and two idea cards with good, later and Reject buttons](.github/assets/ideas.webp)
 
 ## Security and privacy
 
