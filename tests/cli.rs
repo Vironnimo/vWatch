@@ -196,6 +196,7 @@ fn output_aliases_are_explicit_and_help_remains_readable() {
         vec!["projects", "list", "--format", "json"],
         vec!["projects", "list", "--output", "json"],
         vec!["-o", "json", "project", "ls"],
+        vec!["-oJSON", "project", "ls"],
     ] {
         let (code, out, err) = streams(home.path(), &args);
         assert_eq!(code, 0, "{args:?}: {out}");
@@ -379,6 +380,7 @@ fn invalid_flags_or_unrecognized_targets_cannot_mutate_a_nearby_project() {
 fn expected_errors_keep_recovery_on_stdout_in_both_output_formats() {
     let home = tempfile::tempdir().unwrap();
     for (args, expected_code) in [
+        (vec![], 2),
         (vec!["context", "missing"], 1),
         (vec!["unknown-command"], 2),
         (vec!["projects", "status", "missing", "sleeping"], 2),
@@ -388,24 +390,30 @@ fn expected_errors_keep_recovery_on_stdout_in_both_output_formats() {
         assert!(err.is_empty(), "{args:?}: {err}");
         assert!(out.starts_with("Error:"), "{args:?}: {out}");
         assert!(
-            out.contains("Usage:") || out.contains("projects") || out.contains("possible values:"),
+            out.contains("Usage:") || out.contains("projects") || out.contains("possible values:") || out.contains("subcommand"),
             "The recovery must identify accepted arguments or an available project operation: {args:?}: {out}"
         );
         assert!(serde_json::from_str::<Value>(&out).is_err());
 
-        for position in [0, args.len()] {
-            let mut json_args = args.clone();
-            json_args.insert(position, "--json");
-            let (code, out, err) = streams(home.path(), &json_args);
-            assert_eq!(code, expected_code);
-            assert!(err.is_empty(), "{args:?}: {err}");
-            let result: Value = serde_json::from_str(&out).unwrap();
-            assert_eq!(result["ok"], false);
-            assert!(result["error"]["code"].is_string());
-            assert!(result["error"]["message"].is_string());
-            assert!(result["error"]["hint"].is_string());
+        for flag in ["--json", "-oJSON"] {
+            for position in [0, args.len()] {
+                let mut json_args = args.clone();
+                json_args.insert(position, flag);
+                let (code, out, err) = streams(home.path(), &json_args);
+                assert_eq!(code, expected_code);
+                assert!(err.is_empty(), "{args:?}: {err}");
+                let result: Value = serde_json::from_str(&out).unwrap();
+                assert_eq!(result["ok"], false);
+                assert!(result["error"]["code"].is_string());
+                assert!(result["error"]["message"].is_string());
+                assert!(result["error"]["hint"].is_string());
+            }
         }
     }
+    let (_, out, _) = streams(home.path(), &[]);
+    assert!(out.contains("subcommand"));
+    assert!(!out.contains("Morning overview"));
+    assert!(out.lines().count() < 10);
     let (_, out, err) = streams(home.path(), &["context", "missing"]);
     assert!(err.is_empty());
     assert!(out.contains("missing"));

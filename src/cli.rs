@@ -81,7 +81,9 @@ fn requested_json(args: &[OsString]) -> bool {
         if ["--format=", "--output=", "-o="].iter().any(|prefix| {
             text.strip_prefix(prefix)
                 .is_some_and(|value| value.eq_ignore_ascii_case("json"))
-        }) || text == "-ojson"
+        }) || text
+            .strip_prefix("-o")
+            .is_some_and(|value| value.eq_ignore_ascii_case("json"))
         {
             return true;
         }
@@ -129,7 +131,15 @@ pub struct RuntimeMetadata {
 /// Only parser-owned names are logged. Argument values never leave this helper.
 pub fn runtime_metadata(args: &[OsString]) -> RuntimeMetadata {
     let definition = Cli::command();
-    let matches = definition.clone().try_get_matches_from(args);
+    let parsed = definition.clone().try_get_matches_from(args);
+    let valid = parsed.is_ok();
+    // Retain parser-owned flags recognized before an invalid call was rejected.
+    let matches = parsed.or_else(|_| {
+        definition
+            .clone()
+            .ignore_errors(true)
+            .try_get_matches_from(args)
+    });
     let mut metadata = RuntimeMetadata {
         command: "invalid_arguments".into(),
         flags: Vec::new(),
@@ -174,7 +184,9 @@ pub fn runtime_metadata(args: &[OsString]) -> RuntimeMetadata {
     if let Ok(matches) = matches {
         let mut path = Vec::new();
         collect(&definition, &matches, &mut metadata, &mut path);
-        metadata.command = path.join(".");
+        if valid {
+            metadata.command = path.join(".");
+        }
     }
     metadata.flags.sort();
     metadata.flags.dedup();
@@ -307,6 +319,16 @@ fn requested_data_dir(args: &[OsString], fallback: &Path) -> PathBuf {
 }
 
 fn usage_error(error: &clap::Error) -> VWatchError {
+    if matches!(
+        error.kind(),
+        clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    ) {
+        return VWatchError::new(
+            "invalid_arguments",
+            "A subcommand is required. Nothing was changed.",
+        )
+            .hint("Usage: vwatch <COMMAND> [OPTIONS]\nRun `vwatch --help` for available commands and their usage.");
+    }
     let message = error.to_string().replacen("error:", "Error:", 1);
     let mut definition = Cli::command();
     definition.build();

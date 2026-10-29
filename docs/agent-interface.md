@@ -138,6 +138,8 @@ Common noun/verb aliases and case-insensitive enumerated values tolerate clear s
 
 ## Output and error contracts
 
+Calls without a subcommand report the missing subcommand, exit 2 and give a short help route. The attached output alias `-oJSON` selects JSON for errors as well as successes.
+
 Project status and note edits are independent patches: `projects status <id> --note <text>` preserves the status, while supplying only a status preserves the note. Their guarded Undo receipts cover only supplied fields.
 
 A portfolio merge that omits `idea_checks` preserves the assessments' earlier idea revisions; edited ideas remain unchecked and the receipt warns about their retained assessments.

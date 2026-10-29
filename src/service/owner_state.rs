@@ -419,7 +419,7 @@ impl VWatch {
             {
                 Err(
                     VWatchError::new("invalid_pref", "Invalid style. Nothing was changed.")
-                        .hint("Use handover, board, ideas or statistics."),
+                        .hint("Use handover, board, ideas, handbook or statistics."),
                 )
             }
             "hidden_modules"
