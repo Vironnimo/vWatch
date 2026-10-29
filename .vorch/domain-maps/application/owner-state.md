@@ -4,6 +4,8 @@
 
 Status and note writes patch only supplied fields, with matching field-scoped Undo. A note-only save never writes a previously displayed status.
 
+Legacy Cards without an owner basis also exclude deferred (`later`) questions from answered-input detection.
+
 `vWatch::update_project` validates identity edits; Store preserves the ID and rejects stale identity or duplicate paths. A folder change removes current facts so the old folder's measurements cannot describe the new one. A collector already in progress must also pass Store's identity check before saving. Removed projects and ideas stay restorable with their earlier documents, reactions and history. Tests: `tests/service.rs::projects::project_updates_keep_identity_history_and_owner_state`, `::project_update_validation_is_atomic_and_old_databases_stay_current`, `tests/effects_recovery.rs`.
 
 Owner status, notes, goals and replies become part of the evidence agents consume. A new card stores its owner basis so an answered question is distinguishable from an answer actually incorporated into interpretation. Goal and status changes must invalidate relevant context and freshness even when timestamps are equal. `owner_basis` and `owner_changes` in `src/service/freshness.rs` own these comparisons.
