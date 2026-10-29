@@ -12,7 +12,7 @@ mod reading;
 mod runs;
 mod tasks;
 use documents::context_token;
-pub use runs::StoredAgentRun;
+pub use runs::{RunFailure, StoredAgentRun};
 pub(crate) use tasks::{IdeaChange, IdeaSnapshot, IdeaTaskChange};
 mod history;
 mod undo;

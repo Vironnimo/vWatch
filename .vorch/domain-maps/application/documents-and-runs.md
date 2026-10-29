@@ -24,6 +24,8 @@ Restoring a saved version appends its old content with its old evidence basis. I
 
 ## Due detection and tracked runs
 
+Failure replay compares both error text and current document version inside the Store transaction. The same error after a new Card or brief is another failed review; identical repeats for the same version preserve their original timestamp and basis. Completed Runs remain immutable.
+
 `due` compares a card's saved basis with current evidence. Its reasons are a public contract: no card, changed facts, settled CI change, incorporated owner input needed, stale age, scheduled idea review, or missing schema fields. Missing/unreadable facts go into problems rather than the normal due list. Owner replies remain pending even when an earlier-priority reason explains why the card is due.
 
 CI only becomes interpretation evidence at settled `green`/`red` states. A previously unknown CI basis becomes due on red, rather than every transient state. The repository fingerprint is owned by `repository-facts.md`; informational measurements must not be added to its basis merely because they are available in context.

@@ -332,29 +332,6 @@ fn report_retries_preserve_owner_confirmation_and_unknown_ids_are_named_first() 
 }
 
 #[test]
-fn repeating_a_run_failure_does_not_make_a_newer_repaired_card_fail_again() {
-    let tmp = tempfile::tempdir().unwrap();
-    let (svc, clock) = service(tmp.path());
-    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
-        .unwrap();
-    let run = svc.run_start(false).unwrap()["run_id"].as_i64().unwrap();
-    svc.run_fail(run, Some("demo"), "Analyse unterbrochen")
-        .unwrap();
-    let original = svc.store().agent_run(run).unwrap().unwrap().failures;
-    svc.put_card("demo", card(), false, false).unwrap();
-    clock.advance(chrono::Duration::minutes(10));
-    assert_eq!(
-        svc.run_fail(run, Some("demo"), "Analyse unterbrochen")
-            .unwrap()["already_recorded"],
-        true
-    );
-    assert_eq!(
-        svc.store().agent_run(run).unwrap().unwrap().failures,
-        original
-    );
-}
-
-#[test]
 fn due_preserves_failed_measurements_and_never_calls_their_cards_current() {
     let tmp = tempfile::tempdir().unwrap();
     let (svc, _) = service(tmp.path());

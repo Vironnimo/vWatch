@@ -10,6 +10,12 @@ pub struct StoredAgentRun {
     pub result: Option<Value>,
 }
 
+pub enum RunFailure {
+    Recorded,
+    AlreadyRecorded,
+    Complete,
+}
+
 fn agent_run(row: &Row) -> Result<StoredAgentRun> {
     Ok(StoredAgentRun {
         id: row.get("id")?,
@@ -65,22 +71,43 @@ impl Store {
         self.with(|db| db.query_row("SELECT * FROM agent_runs WHERE outcome = 'complete' ORDER BY finished_at DESC, id DESC LIMIT 1", [], agent_run).optional())
     }
 
-    pub fn fail_agent_run(&self, id: i64, scope: &str, failure: &Value) -> Result<bool> {
+    pub fn fail_agent_run(&self, id: i64, scope: &str, failure: &Value) -> Result<RunFailure> {
         self.with(|db| {
-            let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
-            let mut failures = json(tx.query_row("SELECT failures FROM agent_runs WHERE id = ?1", [id], |row| row.get::<_, String>(0))?);
-            if failures[scope]["error"] == failure["error"] { return Ok(true); }
+            let tx =
+                rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+            let (failures, outcome): (String, Option<String>) = tx.query_row(
+                "SELECT failures, outcome FROM agent_runs WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let mut failures = json(failures);
             let version: i64 = if scope == "@portfolio" {
-                tx.query_row("SELECT COALESCE(MAX(id), 0) FROM portfolio", [], |row| row.get(0))?
+                tx.query_row("SELECT COALESCE(MAX(id), 0) FROM portfolio", [], |row| {
+                    row.get(0)
+                })?
             } else {
-                tx.query_row("SELECT COUNT(*) FROM cards WHERE project_id = ?1", [scope], |row| row.get(0))?
+                tx.query_row(
+                    "SELECT COUNT(*) FROM cards WHERE project_id = ?1",
+                    [scope],
+                    |row| row.get(0),
+                )?
             };
+            if failures[scope]["error"] == failure["error"] && failures[scope]["version"] == version
+            {
+                return Ok(RunFailure::AlreadyRecorded);
+            }
+            if outcome.as_deref() == Some("complete") {
+                return Ok(RunFailure::Complete);
+            }
             let mut failure = failure.clone();
             failure["version"] = Value::from(version);
             failures[scope] = failure;
-            let changed = tx.execute("UPDATE agent_runs SET failures = ?2 WHERE id = ?1 AND (outcome IS NULL OR outcome != 'complete')", params![id, failures.to_string()])?;
+            tx.execute(
+                "UPDATE agent_runs SET failures = ?2 WHERE id = ?1",
+                params![id, failures.to_string()],
+            )?;
             tx.commit()?;
-            Ok(changed > 0)
+            Ok(RunFailure::Recorded)
         })
     }
 

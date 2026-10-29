@@ -152,6 +152,8 @@ On the user's explicit decision, use `tasks confirm <task-id> --revision <revisi
 
 ## Daily-run data
 
+An identical failure report is a replay only for the same current Card or brief version. After a new document version, the same error records a new failure against that version.
+
 Incomplete line or space measurements are unknown, not zero. `dirty.lines_added` and `dirty.lines_removed` are null unless `dirty.line_counts.ok` is true; `line_counts.errors` identifies failed diffs, unread files or limits. Binary files do not contribute text lines. `space.total_bytes` is null unless `space.ok` is true; complete `space.dirs` entries keep their measured bytes. Missing completeness flags do not establish a complete measurement. Incomplete space measurements are retried on the next facts refresh. Refresh receipts name these optional gaps in `incomplete_measurements`; overall `ok` still describes repository readability.
 
 `runs start` refreshes facts and records a run; keep its returned `run_id`. `runs status` shows the latest run, last successful run, pending replies, repair task and history. A run can be `running`, `stalled`, `incomplete`, `failed` or `complete`; `unknown` means no recorded status. `runs fail <run-id> --project <project-id> --error <cause>` records a project failure; omit `--project` for the brief. `runs finish <run-id>` closes that run. Only `complete` confirms current cards, brief and readable facts. `latest` can belong to another agent; use your captured run ID.

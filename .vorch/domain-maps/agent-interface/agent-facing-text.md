@@ -69,6 +69,7 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 |---|---|
 | CLI reference: `projects status` `changes only the owner's note` / `Status-only changes preserve the current note.` | Keep independent owner edits from overwriting concurrent status or note writes. |
 | CLI reference: `Failed remote, branch, worktree or overnight Git reads` / `Their missing values are unknown` | Failed measurements cannot support claims of no overnight activity or no branches/remotes. |
+| CLI reference: `An identical failure report is a replay only for the same current Card or brief version.` / `After a new document version` | The same failure after a rewrite is still failed; a repeated report against the same version remains idempotent. |
 | Portfolio guide: `With` `--merge` `omitting` `idea_checks` `retains the revisions assessed by the previous brief.` / `An inherited assessment of an edited owner idea stays unchecked` | Preserve assessment provenance and explain how an explicitly reviewed list clears the owner-idea Due reason. |
 | Card guide: `A failed facts measurement does not mean a clean repository.` | Missing evidence cannot establish a favorable measured state. |
 | Card guide: `Distinguish committed, tested, installed and actually used` | Each claim needs different evidence; a repository snapshot establishes none of the others automatically. |
