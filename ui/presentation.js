@@ -23,12 +23,15 @@ const foldAttrs = id => `data-fold="${esc(id)}"${openFolds.has(id) ? ' open' : '
 const $ = sel => document.querySelector(sel);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dayMs = 864e5;
-const todayDate = () => new Date(S.today + 'T12:00:00');
-const daysSince = d => Math.round((todayDate() - new Date(String(d).slice(0, 10) + 'T12:00:00')) / dayMs);
+// Calendar dates stay literal; observation timestamps belong to the owner's local day.
+const calendarDate = d => new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? d + 'T12:00:00' : d);
+const dayNumber = d => { const date = calendarDate(d); return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs; };
+const localDay = d => { const date = calendarDate(d); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
+const daysSince = d => dayNumber(S.today) - dayNumber(d);
 const ago = d => { if (!d) return tr("never"); const n = daysSince(d); return n <= 0 ? tr("today") : n === 1 ? tr("yesterday") : tr("{0} days ago", n); };
 const minutesAgo = iso => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
-const fmtDate = d => new Date(String(d).slice(0, 10) + 'T12:00:00').toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
-const fmtShort = d => new Date(String(d).slice(0, 10) + 'T12:00:00').toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' });
+const fmtDate = d => calendarDate(d).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtShort = d => calendarDate(d).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' });
 const num = n => Number(n || 0).toLocaleString(locale());
 const hash = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 // Each project keeps its hashed color unless an earlier project holds it; then it
@@ -52,7 +55,7 @@ const byId = id => S.projects.find(p => p.id === id);
 const plink = id => { const p = byId(id); return p ? `<button class="plink" type="button" data-open="${esc(id)}">${dot(id)}${esc(p.name)}</button>` : esc(id); };
 
 const visible = () => S.projects.filter(p => p.status !== 'archived');
-const lastWork = p => (p.facts && p.facts.last_work) || (p.card_updated_at || '').slice(0, 10) || null;
+const lastWork = p => (p.facts && p.facts.last_work) || (p.card_updated_at ? localDay(p.card_updated_at) : null);
 const byLastWork = list => [...list].sort((a, b) => (lastWork(b) || '').localeCompare(lastWork(a) || ''));
 
 const shownRow = (rows, match) => (rows || []).find(match) || null;
