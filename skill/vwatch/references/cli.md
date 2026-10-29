@@ -44,6 +44,8 @@ Common recoveries:
 
 ## Document writes and history
 
+Required text needs non-whitespace content; valid submitted wording is preserved.
+
 Use `--file <path>` for card and portfolio documents. Paths are absolute Windows paths or relative to the command's working directory; use forward slashes. `--file -` reads stdin. `--input-json '<object>'` supplies inline JSON; it cannot be combined with `--file`. Files and stdin accept UTF-8, with or without BOM, and BOM-marked UTF-16. Prefer a file for multi-line content to avoid shell quoting changes. Keep temporary files in your own folder outside watched repositories.
 
 Neither document schema accepts duration or size estimates. Current contexts and readable latest-document views omit stored `effort` fields; history and explicit JSON document views preserve them. Payload estimates are dropped with warnings; omit them when composing updates.

@@ -68,6 +68,7 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 | Text | Reason |
 |---|---|
 | CLI reference: `A call without a subcommand reports the missing command` | Explain a missing operation without requiring the full help output for every invalid call. |
+| CLI reference: `Required text needs non-whitespace content` | An apparently filled but blank field cannot supply an assessment or title. |
 | CLI reference: `projects status` `changes only the owner's note` / `Status-only changes preserve the current note.` | Keep independent owner edits from overwriting concurrent status or note writes. |
 | CLI reference: `Failed remote, branch, worktree or overnight Git reads` / `Their missing values are unknown` | Failed measurements cannot support claims of no overnight activity or no branches/remotes. |
 | CLI reference: `An identical failure report is a replay only for the same current Card or brief version.` / `After a new document version` | The same failure after a rewrite is still failed; a repeated report against the same version remains idempotent. |
@@ -151,6 +152,7 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 |---|---|
 | `service/projects.rs`: `No status or note was supplied. Nothing was changed.` / `Supply a project status, --note with the owner's text, or both.` | Reject an empty patch and name the supported independent changes. |
 | `owner_state.rs`: `Use handover, board, ideas, handbook or statistics.` | Include every accepted style in recovery, including handbook. |
+| `cards.rs`: `Text has` `non-padding characters; minimum is` | Required text needs non-whitespace content; padding is preserved for otherwise valid wording. |
 | `documents.rs`: `Retained idea checks refer to earlier owner-idea revisions:` / `Reassess these ideas and include idea_checks in the next brief write.` | A merge must disclose that inherited wording does not establish review of an edited idea. |
 | `cards.rs`: `At most {w} words.` | Carry the same readability limit into exported JSON schema as validation uses. |
 | `cards.rs`: `ignored unknown field: {p}` | Lenient input handling must disclose discarded content instead of implying it was stored. |

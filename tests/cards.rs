@@ -2,6 +2,38 @@ use serde_json::{json, Value};
 use vwatch::cards::{json_schema, validate, Kind};
 
 #[test]
+fn required_text_rejects_whitespace_without_rewriting_valid_content() {
+    for text in ["", " ", "\t\n", "\u{2003}\u{00a0}"] {
+        for (kind, payload, field) in [
+            (
+                Kind::Card,
+                json!({"one_liner": text, "phase": "active", "headline": "Ready", "reentry": {"next_step": "Continue"}}),
+                "one_liner",
+            ),
+            (Kind::Portfolio, json!({"greeting": text}), "greeting"),
+            (
+                Kind::Portfolio,
+                json!({"greeting": "Ready", "idea_checks": [{"idea": 1, "verdict": "later", "why": text}]}),
+                "idea_checks[0].why",
+            ),
+        ] {
+            let errors = validate(kind, &payload, &[]).unwrap_err();
+            assert!(
+                errors.iter().any(|error| error.starts_with(field)),
+                "{errors:?}"
+            );
+        }
+    }
+    let (clean, _) = validate(
+        Kind::Portfolio,
+        &json!({"greeting": "  Keep this wording  "}),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(clean["greeting"], "  Keep this wording  ");
+}
+
+#[test]
 fn proposal_categories_preserve_legacy_meaning_and_reserve_room_for_both() {
     let mut doc = json!({"one_liner":"Test", "phase":"active", "headline":"Bereit", "reentry":{"next_step":"Weiter"},
     "suggestions":[
