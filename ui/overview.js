@@ -28,7 +28,7 @@ function warningControls(p) {
     return `<div class="warning-row"><strong>${esc(w.key === 'ci_red' ? tr('CI failed\u0004warning') : tr(w.title || w.kind || w.key))}</strong>${control}</div>`;
   };
   const active = warnings.filter(w => !w.acknowledged), known = warnings.filter(w => w.acknowledged);
-  return dmod(tr("Review warnings"), active.map(row).join('') + (known.length ? `<details class="acknowledged-warnings"><summary>${tr("{0} intentionally accepted", known.length)}</summary>${known.map(row).join('')}</details>` : ''), tr("Your reason applies to this finding. vWatch warns again if it changes materially."));
+  return dmod(tr("Review warnings"), active.map(row).join('') + (known.length ? `<details class="acknowledged-warnings" ${foldAttrs(`acknowledged-warnings:${p.id}`)}><summary>${tr("{0} intentionally accepted", known.length)}</summary>${known.map(row).join('')}</details>` : ''), tr("Your reason applies to this finding. vWatch warns again if it changes materially."));
 }
 function safety(p) {
   const f = p.facts || {};
@@ -219,7 +219,7 @@ function blockWaiting(limitPer = 2) {
     const cut = Math.max(limitPer, items.findIndex(w => w.id === answering) + 1);
     const head = items.slice(0, cut), rest = items.slice(cut);
     return `<div class="group"><div class="group-h">${plink(p.id)}<span class="count">${items.length}</span></div>
-      <ul class="qs">${head.map(w => question(w)).join('')}</ul>${rest.length ? `<details><summary class="more">${tr("+ {0} more", rest.length)}</summary><ul class="qs">${rest.map(w => question(w)).join('')}</ul></details>` : ''}</div>`;
+      <ul class="qs">${head.map(w => question(w)).join('')}</ul>${rest.length ? `<details ${foldAttrs(`questions:${p.id}`)}><summary class="more">${tr("+ {0} more", rest.length)}</summary><ul class="qs">${rest.map(w => question(w)).join('')}</ul></details>` : ''}</div>`;
   }).join('');
   const start = total > 1 ? `<div class="round-start"><button class="btn primary" type="button" data-round-start>${tr("Decision round: all {0} in sequence", total)}</button></div>` : '';
   return mod('waiting', tr("Waiting for you"), tr("{0} {1} only you can make. Agents read your answers in the next Run", total, total === 1 ? tr("Decision") : tr("Decisions")), `${start}<div class="groups">${body}</div>`);
@@ -236,7 +236,7 @@ function blockRecent(limit = 10) {
     const fresh = c.unread ? ` <span class="pill new">${tr("unread")}</span>` : '';
     const p = byId(c.project);
     const head = `<span class="t">${esc(c.title)}${fresh}</span><span class="pmark">${dot(c.project)}${esc(p ? p.name : c.project)}</span>`;
-    return `${h}${c.detail ? `<details class="ev-item"><summary>${head}</summary><p>${esc(c.detail)}</p></details>` : `<div class="ev-item"><div class="sum">${head}</div></div>`}`;
+    return `${h}${c.detail ? `<details class="ev-item" ${foldAttrs(`recent:${c.project}:${c.date}:${c.title}:${c.detail}`)}><summary>${head}</summary><p>${esc(c.detail)}</p></details>` : `<div class="ev-item"><div class="sum">${head}</div></div>`}`;
   }).join('');
   const more = items.length > limit ? `<div class="recent-controls"><span class="faint">${showAllRecent ? tr("{0} entries", items.length) : tr("{0} newest of {1}", limit, items.length)}</span><button class="more" type="button" data-recent-all>${showAllRecent ? tr("show only the newest {0}", limit) : tr("show all {0}", items.length)}</button></div>` : '';
   return mod('recent', tr("What happened"), tr("Last 14 days, newest first. On the same day, recently updated Cards come first. Click for details"), `${more}<div class="events">${body}</div>`);

@@ -8,6 +8,8 @@ Note and status handlers send independent field patches.
 
 Local calendar dates are kept literal, while timestamp labels and age calculations use the owner's local calendar day, including daylight-saving transitions.
 
+Generated disclosures retain their stable fold keys through rendering.
+
 Failed Git measurements do not render clean/zero project facts.
 
 State reads, explicit Task recovery and Facts refreshes in `ui/app.js` share monotonically increasing request numbers allocated before dispatch. Only a response from a later request than the accepted response replaces `S` and its version. A delayed refresh cannot relabel an older snapshot as newer on arrival. A failed background read keeps the last usable display, does not acknowledge the failed version, and schedules a retry; this also recovers an initial load failure. Accepted snapshots invalidate statistics' basis without discarding shown results or drafts. Display preference writes are ordered per preference; pending choices survive reloads, and a failed final save restores the last successful choice. Reads dispatched before a save settles cannot replace that choice.
