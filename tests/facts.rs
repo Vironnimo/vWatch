@@ -187,6 +187,16 @@ fn facts_describe_history_backup_and_unsaved_work() {
         assert_eq!(future["commits"][field], f["commits"][field], "{field}");
     }
     assert_eq!(future["night"], f["night"]);
+    common::git(
+        &repo,
+        &["remote", "set-url", "origin", "C:/local mirrors/backup.git"],
+    );
+    common::git(&repo, &["checkout", "--detach", "-q"]);
+    let detached = facts::collect(repo.to_str().unwrap(), today(), false);
+    assert_eq!(detached["ok"], true);
+    assert!(detached["branch"].is_null());
+    assert_eq!(detached["branches"]["merged_count"], 1);
+    assert_eq!(detached["remotes"][0]["url"], "C:/local mirrors/backup.git");
 }
 
 #[test]
@@ -533,6 +543,43 @@ fn non_repositories_report_why() {
     assert_eq!(f["is_git"], true);
     assert_eq!(f["error"], "git_log_failed");
     assert!(f["commits"].is_null());
+    // Side-branch failures must not masquerade as no branches or no overnight work.
+    for (name, header, expected) in [
+        (
+            "bad-side-parent",
+            format!("parent {}\n", "1".repeat(40)),
+            "git_night_failed",
+        ),
+        ("bad-side-tree", String::new(), "git_night_failed"),
+    ] {
+        let repo = common::make_repo(tmp.path(), name, &["2026-09-29T20:00:00"]);
+        let original = std::process::Command::new("git")
+            .args(["cat-file", "commit", "HEAD"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(original.status.success());
+        let content = String::from_utf8(original.stdout).unwrap();
+        let (_, rest) = content.split_once('\n').unwrap();
+        let content = if header.is_empty() {
+            format!("tree {}\n{rest}", "1".repeat(40))
+        } else {
+            content.replacen('\n', &format!("\n{header}"), 1)
+        };
+        std::fs::write(repo.join(".git/bad-commit"), content).unwrap();
+        let object = std::process::Command::new("git")
+            .args(["hash-object", "-w", "-t", "commit", ".git/bad-commit"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(object.status.success());
+        let object = String::from_utf8(object.stdout).unwrap();
+        common::git(&repo, &["update-ref", "refs/heads/broken", object.trim()]);
+        let measured = facts::collect(repo.to_str().unwrap(), today(), false);
+        assert_eq!(measured["ok"], false, "{name}: {measured}");
+        assert_eq!(measured["error"], expected, "{name}: {measured}");
+        assert!(measured["night"].is_null() && measured["branches"].is_null());
+    }
 }
 
 #[test]
@@ -682,6 +729,13 @@ fn measurement_reuse_keeps_same_head_and_worktree() {
         ),
         (Some(999), Some(777))
     );
+    // Status hides this tracked edit; source counts still describe the working tree.
+    common::git(&repo, &["update-index", "--assume-unchanged", "app.rs"]);
+    std::fs::write(repo.join("app.rs"), "fn main() {}\nfn extra() {}\n").unwrap();
+    let reused = facts::collect_reusing(path, today(), false, Some(&first));
+    assert_eq!(reused["dirty"]["files"], 0);
+    assert_eq!(reused["code"]["source_code"], 2);
+    assert_eq!(reused["code"], facts::collect(path, today(), false)["code"]);
 }
 
 #[test]

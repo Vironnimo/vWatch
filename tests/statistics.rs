@@ -21,11 +21,30 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
     std::fs::create_dir(repo.join("node_modules")).unwrap();
     std::fs::write(repo.join("node_modules/vendor.js"), "lots.of.code();\n").unwrap();
     std::fs::write(repo.join("package-lock.json"), "{}\n").unwrap();
+    std::fs::write(
+        repo.join("manual.tex"),
+        "\\section{Guide}\nDocumentation text.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("manual.rst"),
+        "Guide\n=====\n\nDocumentation text.\n",
+    )
+    .unwrap();
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     let f = svc.facts("demo").unwrap();
     assert_eq!(f["code"]["source_code"], 1);
     assert_eq!(f["code"]["ok"], true);
     assert_eq!(f["code"]["excluded_files"], 2);
+    for name in ["TeX", "ReStructuredText"] {
+        let language = f["code"]["languages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|language| language["language"] == name)
+            .expect("documentation language counted");
+        assert_eq!(language["category"], "documentation");
+    }
     let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     let payloads = count(&db, "fact_payloads");
     let saved = svc.store().facts("demo").unwrap().unwrap();

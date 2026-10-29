@@ -44,6 +44,10 @@ test('incomplete and unverified line and space totals stay unknown while complet
   await a.ui.load(false);
   assert.match(a.ui.blockSpace(), /Gesamtgröße unbekannt/);
   assert.match(a.ui.blockSpace(), /Not measured/);
+  p.facts = { ok: false, is_git: true, error: 'git_night_failed' };
+  const failed = a.ui.projectPageHtml(p);
+  assert.match(failed, /Messen hat nicht geklappt/);
+  assert.doesNotMatch(failed, /0 gesamt|kein Remote eingerichtet|keine nicht committeten Änderungen|Commit-Aktivität ansehen/);
 });
 
 test('a project opens as a page beside the project list, with work, handbook and history on one page', async () => {

@@ -1,6 +1,6 @@
 //! Bounded, read-only measurements. Failed or partial scans never mean zero code.
 use super::{git, Commit, History};
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
@@ -10,8 +10,8 @@ use chrono::NaiveDate;
 use serde_json::{json, Value};
 use tokei::{CodeStats, Config, LanguageType};
 
-const METHOD: &str = "tokei-15/worktree-v1";
-const ACTIVITY_METHOD: &str = "git-numstat-v2";
+const METHOD: &str = "tokei-15/worktree-v2";
+const ACTIVITY_METHOD: &str = "git-numstat-v3";
 const ACTIVITY_DAYS: i64 = 365;
 const HOTSPOT_DAYS: i64 = 90;
 const HOTSPOTS: usize = 20;
@@ -49,7 +49,7 @@ fn excluded(path: &str) -> bool {
 
 fn category(language: &str) -> &'static str {
     match language {
-        "Markdown" | "Plain Text" | "Text" | "reStructuredText" | "AsciiDoc" | "LaTeX" => {
+        "Markdown" | "Plain Text" | "Text" | "ReStructuredText" | "AsciiDoc" | "TeX" => {
             "documentation"
         }
         "JSON" | "JSON5" | "TOML" | "YAML" | "XML" | "INI" | "SVG" | "Csv" | "CSV" => {
@@ -84,6 +84,7 @@ fn add_stats(
 pub(super) struct Files<'a> {
     repo: &'a Path,
     list: OnceCell<Option<String>>,
+    hidden_changes: Cell<bool>,
 }
 
 impl<'a> Files<'a> {
@@ -91,6 +92,7 @@ impl<'a> Files<'a> {
         Files {
             repo,
             list: OnceCell::new(),
+            hidden_changes: Cell::new(false),
         }
     }
 
@@ -101,12 +103,27 @@ impl<'a> Files<'a> {
                     self.repo,
                     &[
                         "ls-files",
+                        "-v",
                         "-z",
                         "--cached",
                         "--others",
                         "--exclude-standard",
                     ],
                 )
+                .map(|output| {
+                    let mut paths = String::new();
+                    for record in output.split('\0').filter(|record| !record.is_empty()) {
+                        let tag = record.as_bytes()[0];
+                        if tag.is_ascii_lowercase() || tag == b'S' {
+                            self.hidden_changes.set(true);
+                        }
+                        if let Some(path) = record.get(2..) {
+                            paths.push_str(path);
+                            paths.push('\0');
+                        }
+                    }
+                    paths
+                })
             })
             .as_deref()
     }
@@ -168,12 +185,15 @@ fn scan_file(repo: &Path, path: &str, config: &Config) -> (Scan, u64) {
 /// Count the working tree's code. `previous` is a scan of the same HEAD and uncommitted state;
 /// a complete one is returned as it is, because the files it read are unchanged.
 pub(super) fn code(repo: &Path, files: &Files, previous: Option<&Value>) -> Value {
-    if let Some(code) = previous.filter(|c| c["ok"] == true && c["method"] == METHOD) {
-        return code.clone();
-    }
     let Some(paths) = files.list() else {
         return json!({"ok":false,"error":"file_list_failed","method":METHOD});
     };
+    // Git status omits assume-unchanged and skip-worktree edits.
+    if let Some(code) =
+        previous.filter(|c| !files.hidden_changes.get() && c["ok"] == true && c["method"] == METHOD)
+    {
+        return code.clone();
+    }
     let started = Instant::now();
     let mut totals = BTreeMap::<String, (usize, CodeStats)>::new();
     let mut files = Vec::new();
@@ -470,6 +490,7 @@ pub(super) fn activity(
             let kept = previous.map(|p| &p["activity"]).filter(|a| {
                 carried.is_some()
                     && unchanged
+                    && !files.hidden_changes.get()
                     && a["head"] == head
                     && a["through"] == today.to_string()
                     && a["hotspots_from"] == hotspots_from.to_string()

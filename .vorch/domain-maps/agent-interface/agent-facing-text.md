@@ -68,6 +68,7 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 | Text | Reason |
 |---|---|
 | CLI reference: `projects status` `changes only the owner's note` / `Status-only changes preserve the current note.` | Keep independent owner edits from overwriting concurrent status or note writes. |
+| CLI reference: `Failed remote, branch, worktree or overnight Git reads` / `Their missing values are unknown` | Failed measurements cannot support claims of no overnight activity or no branches/remotes. |
 | Card guide: `A failed facts measurement does not mean a clean repository.` | Missing evidence cannot establish a favorable measured state. |
 | Card guide: `Distinguish committed, tested, installed and actually used` | Each claim needs different evidence; a repository snapshot establishes none of the others automatically. |
 | Card guide: `Installed is not used; no trace is a finding too.` | Usage research must report missing traces honestly instead of treating installation as adoption. |

@@ -187,6 +187,8 @@ Portfolio due reasons are `missing`, `new_day`, `owner_idea`, `new_fields`, `car
 
 ## Facts
 
+Failed remote, branch, worktree or overnight Git reads make the measurement unsuccessful. Their missing values are unknown, including overnight commits and line counts; an empty successful result is measured zero.
+
 `facts show <project-id>` reads stored facts. `facts refresh <project-id> ...` measures named projects; omit IDs for all. `--no-ci` skips the GitHub CI lookup. Refresh results identify success, error and changed state per project. A failed measurement is not evidence of a clean repository.
 
 The measurements cover:
