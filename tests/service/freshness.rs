@@ -145,12 +145,12 @@ fn portfolio_checks_project_ids_and_is_due_each_day() {
     // Removing or archiving a project invalidates a brief that still recommends it.
     svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
         .unwrap();
-    svc.set_status("demo", "archived", None).unwrap();
+    svc.set_status("demo", Some("archived"), None).unwrap();
     assert_eq!(
         svc.due(14, false).unwrap()["portfolio"]["reason"],
         "cards_changed"
     );
-    svc.set_status("demo", "active", None).unwrap();
+    svc.set_status("demo", Some("active"), None).unwrap();
     svc.put_card("demo", json!({}), true, false).unwrap();
     svc.put_portfolio(json!({"greeting": "Moin"}), false, false)
         .unwrap();
@@ -301,7 +301,7 @@ fn quiet_active_projects_take_turns_for_an_idea_review() {
         svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
         svc.put_card(name, card(), false, false).unwrap();
     }
-    svc.set_status("delta", "parked", None).unwrap();
+    svc.set_status("delta", Some("parked"), None).unwrap();
     svc.put_card("delta", card(), false, false).unwrap();
     let reviews = |svc: &vwatch::VWatch| -> Vec<String> {
         svc.due(14, false).unwrap()["projects"]

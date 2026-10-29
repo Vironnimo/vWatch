@@ -34,7 +34,8 @@ fn stored_cards_and_briefs_keep_working_when_content_bases_are_added() {
         .is_none());
     assert_eq!(svc.due(14, false).unwrap()["portfolio"]["due"], false);
     clock.advance(Duration::minutes(1));
-    svc.set_status("demo", "parked", Some("Später")).unwrap();
+    svc.set_status("demo", Some("parked"), Some("Später"))
+        .unwrap();
     assert_eq!(
         svc.due(14, false).unwrap()["projects"][0]["reason"],
         "status_changed"

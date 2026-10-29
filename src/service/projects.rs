@@ -406,13 +406,20 @@ impl VWatch {
         Ok(with_receipt(project_json(&self.project(id)?), receipt))
     }
 
-    pub fn set_status(&self, id: &str, status: &str, note: Option<&str>) -> Result<Value> {
+    pub fn set_status(&self, id: &str, status: Option<&str>, note: Option<&str>) -> Result<Value> {
         self.project(id)?;
-        if !STATUSES.contains(&status) {
+        if let Some(status) = status.filter(|status| !STATUSES.contains(status)) {
             return Err(
                 VWatchError::new("invalid_status", format!("Unknown status '{status}'."))
                     .hint(format!("Use one of: {}.", STATUSES.join(", "))),
             );
+        }
+        if status.is_none() && note.is_none() {
+            return Err(VWatchError::new(
+                "invalid_status",
+                "No status or note was supplied. Nothing was changed.",
+            )
+            .hint("Supply a project status, --note with the owner's text, or both."));
         }
         let receipt = self.store.set_status(id, status, note, &self.now())?;
         Ok(with_receipt(project_json(&self.project(id)?), receipt))

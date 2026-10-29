@@ -127,7 +127,7 @@ fn status_and_registration_rules() {
         svc.put_card("other-app", card(), false, false).unwrap()["version"],
         1
     );
-    svc.set_status("demo", "parked", Some("wartet auf Key"))
+    svc.set_status("demo", Some("parked"), Some("wartet auf Key"))
         .unwrap();
     let due = svc.due(14, true).unwrap();
     assert!(due["projects"]
@@ -144,10 +144,10 @@ fn status_and_registration_rules() {
     );
     // a goal reaches the agents and makes the card due like a status change
     svc.put_card("demo", card(), true, false).unwrap();
-    svc.set_status("demo", "parked", Some("wartet auf Key"))
+    svc.set_status("demo", Some("parked"), Some("wartet auf Key"))
         .unwrap();
     assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
-    svc.set_status("demo", "parked", Some("wartet auf Entscheidung"))
+    svc.set_status("demo", Some("parked"), Some("wartet auf Entscheidung"))
         .unwrap();
     assert_eq!(
         svc.due(14, false).unwrap()["projects"][0]["reason"],
@@ -174,7 +174,7 @@ fn status_and_registration_rules() {
     svc.set_goal("demo", "v1.0 veröffentlichen", Some("2026-12-15"))
         .unwrap();
     assert_eq!(svc.due(14, false).unwrap()["projects"], json!([]));
-    svc.set_status("demo", "archived", None).unwrap();
+    svc.set_status("demo", Some("archived"), None).unwrap();
     let due = svc.due(14, true).unwrap();
     assert!(due["projects"]
         .as_array()
@@ -243,7 +243,7 @@ fn project_updates_keep_identity_history_and_owner_state() {
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     svc.set_goal("demo", "Version veröffentlichen", Some("2026-12-01"))
         .unwrap();
-    svc.set_status("demo", "parked", Some("Erst nach dem Urlaub"))
+    svc.set_status("demo", Some("parked"), Some("Erst nach dem Urlaub"))
         .unwrap();
     svc.open_project("demo").unwrap();
     svc.put_card(

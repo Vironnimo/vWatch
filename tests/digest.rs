@@ -291,7 +291,7 @@ fn measured_fact_changes_stay_in_project_facts_without_invalidating_the_digest()
         false,
     )
     .unwrap();
-    svc.set_status("demo", "archived", None).unwrap();
+    svc.set_status("demo", Some("archived"), None).unwrap();
     assert_eq!(
         changes(&svc)["total"],
         0,

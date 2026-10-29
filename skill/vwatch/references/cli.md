@@ -78,6 +78,8 @@ Compare any two saved document versions with `card compare <project-id> --from <
 
 ## Projects
 
+`projects status <project-id> --note <text>` changes only the owner's note, preserving the status current when the note is saved. Status-only changes preserve the current note.
+
 `projects list` shows stable IDs, names, status and card presence. `--query <text>` filters case-insensitively by ID, name, path or card text. `projects show <project-id>` includes its folder, measurement dates, card, facts, warnings and history. Names and paths can change; IDs persist.
 
 For requested registration, `projects discover <folder>` lists unwatched repositories without registering them. A selected repository comes first, followed by its neighbors; otherwise discovery searches up to two levels below the folder. Candidates include path, name, suggested ID, last commit and a recommendation for the selected repository or one active within 120 days.

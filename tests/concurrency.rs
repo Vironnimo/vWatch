@@ -352,7 +352,7 @@ fn stale_card_writes_preserve_new_owner_instructions_facts_and_cards() {
 
     // No clock advance: owner changes and competing writes in one second still matter.
     let token = card_token(&svc, "demo");
-    svc.set_status("demo", "parked", Some("Warte auf meine Entscheidung"))
+    svc.set_status("demo", Some("parked"), Some("Warte auf meine Entscheidung"))
         .unwrap();
     rejected_card_leaves_state(&svc, &token);
 
@@ -443,7 +443,7 @@ fn stale_briefs_preserve_cards_owner_reactions_and_ideas() {
     rejected_portfolio_leaves_state(&svc, &token);
 
     let token = portfolio_token(&svc);
-    svc.set_status("demo", "parked", Some("Erst nächste Woche"))
+    svc.set_status("demo", Some("parked"), Some("Erst nächste Woche"))
         .unwrap();
     rejected_portfolio_leaves_state(&svc, &token);
 

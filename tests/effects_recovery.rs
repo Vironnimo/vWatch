@@ -11,7 +11,7 @@ fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions(
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     svc.set_goal("demo", "Offline bleiben", Some("2026-12-01"))
         .unwrap();
-    svc.set_status("demo", "parked", Some("Nächsten Monat"))
+    svc.set_status("demo", Some("parked"), Some("Nächsten Monat"))
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_card("demo", json!({"headline":"Zweite Fassung"}), true, false)
@@ -249,7 +249,7 @@ fn history_restore_appends_old_content_and_keeps_its_stale_evidence() {
             .len(),
         3
     );
-    svc.set_status("demo", "parked", None).unwrap();
+    svc.set_status("demo", Some("parked"), None).unwrap();
     assert_eq!(
         svc.restore_card("demo", 1, Some(token)).unwrap_err().code,
         "version_conflict"

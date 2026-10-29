@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { app } = require('./ui-helpers.cjs');
+const { app, deferred } = require('./ui-helpers.cjs');
 
 const expose = `Object.assign(ui, { projectPageHtml, openProjectTarget, openDigestTarget, searchEntries, pickResult, openSearch, renderSearchResults, blockSpace,
   search: query => { searchQ = query; return searchResults(); },
@@ -103,15 +103,27 @@ test('owner fields stay open across refresh without losing drafts, and the overv
 });
 
 test('status buttons change the project intent, while task cards with a status do not', async () => {
-  const a = await app(command => command === 'set_status' ? { undo_token: 'opaque verdict receipt / v3' } : {}, expose + 'Object.assign(ui, { adoptVerdict });');
+  const noteSave = deferred();
+  const a = await app(async (command, args, state) => {
+    if (command !== 'set_status') return {};
+    if (args.status) state.projects[0].status = args.status;
+    if (Object.hasOwn(args, 'note')) { await noteSave.promise; state.projects[0].status_note = args.note; }
+    return { undo_token: 'opaque verdict receipt / v3' };
+  }, expose + 'Object.assign(ui, { adoptVerdict, handleProjectChange });');
   a.state.tasks = [{ id: 3, source_id: 's1', projects: ['sample'], title: 'Review exports', status: 'review' }];
   await a.ui.load(false);
   a.ui.openProject('sample');
   a.dispatch('click', { target: { closest: selector => selector === '[data-status]' ? { dataset: { status: 'review' } } : null } });
   assert.equal(a.calls.filter(c => c.command === 'set_status').length, 0);
+  const savingNote = a.ui.handleProjectChange({ target: { id: 'status-note', value: 'Keep this intent' } });
   a.dispatch('click', { target: { closest: selector => selector === '.seg [data-status]' ? { dataset: { status: 'parked' } } : null } });
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(a.calls.filter(c => c.command === 'set_status').map(c => c.args.status), ['parked']);
+  const writes = a.calls.filter(c => c.command === 'set_status');
+  assert.deepEqual(writes.map(c => Object.keys(c.args).sort()), [['id', 'note'], ['id', 'status']]);
+  assert.equal(a.state.projects[0].status, 'parked');
+  noteSave.resolve(); await savingNote;
+  assert.equal(a.state.projects[0].status, 'parked');
+  assert.equal(a.state.projects[0].status_note, 'Keep this intent');
   await a.ui.adoptVerdict('sample', 'active');
   a.node('#undo').onclick();
   await new Promise(resolve => setImmediate(resolve));

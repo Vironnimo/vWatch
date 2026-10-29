@@ -427,6 +427,16 @@ fn cli_prints_json_for_success_and_expected_failure() {
         (code, out["ok"].as_bool(), out["project"]["id"].as_str()),
         (0, Some(true), Some("demo"))
     );
+    for args in [
+        vec!["projects", "status", "demo", "parked"],
+        vec!["projects", "status", "demo", "--note", "Keep parked"],
+    ] {
+        let (code, out) = run(&home, &args);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(out["project"]["status"], "parked");
+    }
+    let (_, out) = run(&home, &["projects", "show", "demo"]);
+    assert_eq!(out["project"]["status_note"], "Keep parked");
 
     let (code, out) = run(
         &home,

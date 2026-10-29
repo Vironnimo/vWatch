@@ -283,15 +283,15 @@ async function adoptVerdict(id, status) {
   const p = byId(id);
   if (!p) return;
   try {
-    const result = await call('set_status', { id, status, note: p.status_note || '' });
+    const result = await call('set_status', { id, status });
     await load(false);
     const token = typeof result?.undo_token === 'string' ? result.undo_token : null;
     toast(tr("{0}: applied “{1}”.", p.name, STATUS[status]), token ? async () => { try { await call('undo', { token }); } catch (e) { toast(`${tr("Undo failed:")} ` + errText(e)); } await load(false); } : null);
   } catch (e) { toast(`${tr("Status not saved:")} ` + errText(e)); }
 }
-async function setStatus(status, note) {
+async function setStatus(status) {
   const id = openId;
-  try { await call('set_status', { id, status, note }); clearProjectDraft(id, 'status_note', note); await load(false); }
+  try { await call('set_status', { id, status }); await load(false); }
   catch (e) { toast(tr("Status not saved.")); }
 }
 
@@ -309,7 +309,7 @@ function handleProjectClick(e, t) {
   const vs = t.closest('[data-verdict-status]');
   if (vs) { adoptVerdict(vs.dataset.project, vs.dataset.verdictStatus); return true; }
   const st = t.closest('.seg [data-status]');
-  if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return true; }
+  if (st && openId) { setStatus(st.dataset.status); return true; }
   const op = t.closest('[data-open]');
   if (op) { openProject(op.dataset.open, null, op.classList.contains('plist-item')); }
   return false;
@@ -328,7 +328,7 @@ async function handleProjectChange(e) {
   }
   if (e.target.id === 'status-note' && openId) {
     const id = openId, p = byId(id), note = e.target.value;
-    try { await call('set_status', { id, status: p.status, note }); p.status_note = note; clearProjectDraft(id, 'status_note', note); toast(tr("Note saved.")); }
+    try { await call('set_status', { id, note }); p.status_note = note; clearProjectDraft(id, 'status_note', note); toast(tr("Note saved.")); }
     catch (err) { toast(tr("Note not saved.")); }
   }
   return false;

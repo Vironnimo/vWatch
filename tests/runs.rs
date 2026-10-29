@@ -104,7 +104,7 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     let archived = make_repo(tmp.path(), "archived", &["2026-09-29T10:00:00"]);
     svc.add_project(archived.to_str().unwrap(), None, None)
         .unwrap();
-    svc.set_status("archived", "archived", None).unwrap();
+    svc.set_status("archived", Some("archived"), None).unwrap();
     let saved = svc.put_card("demo", card(), false, false).unwrap();
     let saved_brief = svc.put_portfolio(brief(), false, false).unwrap();
     let started = svc.run_start(false).unwrap();

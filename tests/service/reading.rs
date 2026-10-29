@@ -133,7 +133,9 @@ fn owner_choices_show_up_in_the_window_state() {
         .unwrap();
     svc.set_pref("hidden_modules", &json!(["pulse"])).unwrap();
     assert_eq!(
-        svc.set_status("demo", "sleeping", None).unwrap_err().code,
+        svc.set_status("demo", Some("sleeping"), None)
+            .unwrap_err()
+            .code,
         "invalid_status"
     );
     assert_eq!(

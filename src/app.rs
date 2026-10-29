@@ -220,10 +220,13 @@ async fn set_pref(app: State<'_, AppState>, key: String, value: Value) -> Reply 
 async fn set_status(
     app: State<'_, AppState>,
     id: String,
-    status: String,
+    status: Option<String>,
     note: Option<String>,
 ) -> Reply {
-    write(&app, move |s| s.set_status(&id, &status, note.as_deref())).await
+    write(&app, move |s| {
+        s.set_status(&id, status.as_deref(), note.as_deref())
+    })
+    .await
 }
 
 #[tauri::command(rename_all = "snake_case")]
