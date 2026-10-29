@@ -16,6 +16,8 @@ The settings response supplies the exported Skill path and a vBot install comman
 
 ## Window lifecycle
 
+A database-open failure shows a native error dialog with the selected database path and service recovery message before exiting, including before a WebView is available.
+
 `src/bin/vwatch-ui.rs` selects the Windows GUI subsystem and calls `app::run`. The adapter opens the service, exports the Skill and creates a hidden Tauri WebView using the selected data folder's `webview/` cache. The page's `ready` call shows the rendered window; a timed fallback avoids leaving the application invisible after a page failure. The single-instance plugin focuses the existing window rather than processing console commands there.
 
 ## Windows integration
