@@ -107,7 +107,7 @@ fn status_and_goal_undo_preserve_unrelated_owner_edits_and_noop_timestamps() {
         at
     );
     let status = svc
-        .set_status("demo", "parked", Some("Wait for owner"))
+        .set_status("demo", Some("parked"), Some("Wait for owner"))
         .unwrap();
     let status_at = svc
         .store()
@@ -124,6 +124,32 @@ fn status_and_goal_undo_preserve_unrelated_owner_edits_and_noop_timestamps() {
     let project = svc.store().project("demo").unwrap().unwrap();
     assert_eq!(project.status, "active");
     assert_eq!(project.status_note, "");
+    // A note-only write and a status-only write preserve each other in either order.
+    for note_first in [true, false] {
+        let note = || {
+            svc.set_status("demo", None, Some("Keep this note"))
+                .unwrap()
+        };
+        let status = || svc.set_status("demo", Some("parked"), None).unwrap();
+        let (note, status) = if note_first {
+            (note(), status())
+        } else {
+            let status = status();
+            (note(), status)
+        };
+        let project = svc.store().project("demo").unwrap().unwrap();
+        assert_eq!(project.status, "parked");
+        assert_eq!(project.status_note, "Keep this note");
+        svc.undo(token(&status)).unwrap();
+        let project = svc.store().project("demo").unwrap().unwrap();
+        assert_eq!(project.status, "active");
+        assert_eq!(project.status_note, "Keep this note");
+        svc.undo(token(&note)).unwrap();
+        assert_eq!(
+            svc.store().project("demo").unwrap().unwrap().status_note,
+            ""
+        );
+    }
 }
 
 #[test]

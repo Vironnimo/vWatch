@@ -257,7 +257,7 @@ fn contexts_report_how_long_risks_and_items_have_lasted() {
 #[test]
 fn questions_can_wait_and_cards_keep_decisions_short() {
     let tmp = tempfile::tempdir().unwrap();
-    let (svc, _) = service(tmp.path());
+    let (svc, clock) = service(tmp.path());
     svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
         .unwrap();
     let wrong =
@@ -299,6 +299,7 @@ fn questions_can_wait_and_cards_keep_decisions_short() {
         .as_str()
         .unwrap()
         .to_owned();
+    clock.advance(Duration::seconds(1));
     svc.set_feedback_until(&id, Some("later"), None, Some("2026-10-07"))
         .unwrap();
     let state = svc.state(false).unwrap();
@@ -313,4 +314,17 @@ fn questions_can_wait_and_cards_keep_decisions_short() {
     );
     // Postponing is not an answer, so the card does not become due for it.
     assert_eq!(svc.due(30, false).unwrap()["projects"], json!([]));
+    let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
+    db.execute(
+        "UPDATE cards SET owner_basis = NULL WHERE project_id = 'demo'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(svc.due(30, false).unwrap()["projects"], json!([]));
+    svc.set_feedback(&id, Some("answered"), Some("CSV"))
+        .unwrap();
+    assert_eq!(
+        svc.due(30, false).unwrap()["projects"][0]["reason"],
+        "answered"
+    );
 }

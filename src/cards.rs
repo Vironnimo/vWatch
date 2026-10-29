@@ -632,7 +632,7 @@ fn check(ty: &Ty, value: &Value, path: &str, ctx: &mut Ctx) -> Option<Value> {
         }
         Ty::Str { min, max, words } => match value.as_str() {
             None => fail(ctx, path, "Use a text value".into()),
-            Some(s) if s.chars().count() < *min => fail(ctx, path, format!("Text has {} characters; minimum is {min}", s.chars().count())),
+            Some(s) if s.trim().chars().count() < *min => fail(ctx, path, format!("Text has {} non-padding characters; minimum is {min}", s.trim().chars().count())),
             Some(s) if s.chars().count() > *max => fail(ctx, path, format!("Text has {} characters; limit is {max}", s.chars().count())),
             Some(s) if words.is_some_and(|w| word_count(s) > w) => {
                 let (limit, n) = (words.unwrap_or_default(), word_count(s));

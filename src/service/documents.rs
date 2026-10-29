@@ -646,6 +646,7 @@ impl VWatch {
             return Err(error);
         }
         let previous = self.store.latest_portfolio()?;
+        let inherited_checks = merge && payload.get("idea_checks").is_none();
         let saved = self.saved_items(None)?;
         let mut payload = payload;
         keep_items(Kind::Portfolio, &mut payload, &saved)?;
@@ -732,6 +733,28 @@ impl VWatch {
             &saved,
             &clean,
         );
+        let mut basis = self.portfolio_basis()?;
+        if inherited_checks {
+            let mut stale = Vec::new();
+            for check in clean["idea_checks"].as_array().into_iter().flatten() {
+                let id = check["idea"].to_string();
+                let revision = previous
+                    .as_ref()
+                    .and_then(|brief| brief.basis.as_ref())
+                    .and_then(|basis| basis["@ideas"].get(&id));
+                if revision != basis["@ideas"].get(&id) {
+                    stale.push(id.clone());
+                }
+                if let Some(revision) = revision {
+                    basis["@ideas"][&id] = revision.clone();
+                } else if let Some(ideas) = basis["@ideas"].as_object_mut() {
+                    ideas.remove(&id);
+                }
+            }
+            if !stale.is_empty() {
+                warnings.push(format!("Retained idea checks refer to earlier owner-idea revisions: {}. Reassess these ideas and include idea_checks in the next brief write.", stale.join(", ")));
+            }
+        }
         if dry_run {
             self.check_context(None, context_token, true)?;
             return Ok(
@@ -741,7 +764,7 @@ impl VWatch {
         let write = self.store.add_portfolio_guarded(
             &self.now(),
             &clean,
-            &self.portfolio_basis()?,
+            &basis,
             context_token.expect("checked before validation"),
             &request,
         )?;

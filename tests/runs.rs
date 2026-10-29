@@ -104,7 +104,7 @@ fn current_cards_need_no_rewrite_and_status_does_not_refresh_git() {
     let archived = make_repo(tmp.path(), "archived", &["2026-09-29T10:00:00"]);
     svc.add_project(archived.to_str().unwrap(), None, None)
         .unwrap();
-    svc.set_status("archived", "archived", None).unwrap();
+    svc.set_status("archived", Some("archived"), None).unwrap();
     let saved = svc.put_card("demo", card(), false, false).unwrap();
     let saved_brief = svc.put_portfolio(brief(), false, false).unwrap();
     let started = svc.run_start(false).unwrap();
@@ -192,6 +192,23 @@ fn failures_stay_visible_until_new_current_versions_repair_them() {
     let repaired_card = svc.run_status().unwrap();
     assert_eq!(project(&repaired_card, "demo")["status"], "current");
     assert_eq!(repaired_card["latest"]["portfolio"]["status"], "failed");
+    // The same error against a newer Card is another failed review, not a replay.
+    let failed_again = svc
+        .run_fail(id, Some("demo"), "Die Untersuchung wurde abgebrochen")
+        .unwrap();
+    assert_ne!(failed_again["already_recorded"], true);
+    assert_eq!(project(&failed_again, "demo")["status"], "failed");
+    assert_eq!(
+        svc.run_fail(id, Some("demo"), "Die Untersuchung wurde abgebrochen")
+            .unwrap()["already_recorded"],
+        true
+    );
+    svc.put_card("demo", card(), false, false).unwrap();
+    svc.put_portfolio(brief(), false, false).unwrap();
+    let failed_again = svc
+        .run_fail(id, None, "Die Zusammenfassung konnte nicht fertig werden")
+        .unwrap();
+    assert_eq!(failed_again["latest"]["portfolio"]["status"], "failed");
     svc.put_portfolio(brief(), false, false).unwrap();
     let repaired = svc.run_finish(id).unwrap();
     assert_eq!(repaired["state"], "complete");

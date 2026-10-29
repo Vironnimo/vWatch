@@ -22,6 +22,10 @@ test('statistics show missing values honestly and break curves at incomplete or 
   assert.equal((curve.match(/<circle/g) || []).length, 3); assert.doesNotMatch(curve, / L[0-9]/);
   const bars = a.ui.languageBars([{ language: 'Python', category: 'source', code: 10 }, { language: 'Markdown', category: 'documentation', code: 100 }], 10);
   assert.match(bars, /Python/); assert.match(bars, /100 %/); assert.doesNotMatch(bars, /Markdown/);
+  const languages = Array.from({ length: 7 }, (_, i) => ({ language: `Language ${i}`, code: 1 }));
+  a.ui.openFold('languages:sample');
+  assert.match(a.ui.languageBars(languages, 7, 'sample'), /data-fold="languages:sample" open/);
+  assert.doesNotMatch(a.ui.languageBars(languages, 7, 'other'), /data-fold="languages:other" open/);
 });
 
 test('saved history exposes older pages and escaped before/after comparisons without acknowledging content', async () => {

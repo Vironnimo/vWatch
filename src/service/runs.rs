@@ -94,24 +94,8 @@ impl VWatch {
     }
 
     pub fn run_fail(&self, run_id: i64, project_id: Option<&str>, error: &str) -> Result<Value> {
-        let run = self.require_agent_run(run_id)?;
+        self.require_agent_run(run_id)?;
         let error = error.trim();
-        if run.failures[project_id.unwrap_or("@portfolio")]["error"] == error {
-            let mut response = self.agent_run_response(run_id)?;
-            response["already_recorded"] = json!(true);
-            return Ok(response);
-        }
-        if run
-            .result
-            .as_ref()
-            .is_some_and(|result| result["state"] == "complete")
-        {
-            return Err(VWatchError::new(
-                "run_complete",
-                "A successfully completed run is immutable.",
-            )
-            .hint("Start another run to record new work or failures."));
-        }
         if error.is_empty() || error.chars().count() > 2_000 {
             return Err(VWatchError::new(
                 "invalid_run_error",
@@ -122,18 +106,23 @@ impl VWatch {
         if let Some(id) = project_id {
             self.project(id)?;
         }
-        if !self.store.fail_agent_run(
+        let outcome = self.store.fail_agent_run(
             run_id,
             project_id.unwrap_or("@portfolio"),
             &json!({"error": error, "at": self.now()}),
-        )? {
+        )?;
+        if matches!(outcome, crate::store::RunFailure::Complete) {
             return Err(VWatchError::new(
                 "run_complete",
                 "The run completed before this failure was recorded.",
             )
             .hint("Start another run to record new work or failures."));
         }
-        self.agent_run_response(run_id)
+        let mut response = self.agent_run_response(run_id)?;
+        if matches!(outcome, crate::store::RunFailure::AlreadyRecorded) {
+            response["already_recorded"] = json!(true);
+        }
+        Ok(response)
     }
 
     pub fn run_finish(&self, run_id: i64) -> Result<Value> {

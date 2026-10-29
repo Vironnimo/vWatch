@@ -206,9 +206,11 @@ test('Projects still provide assigned and completed task history after the last 
 test('opened attention, digest, history and fact disclosures survive rendering and state refreshes', async () => {
   const a = await app(undefined, expose);
   a.state.tasks = [task(5, 'review')];
+  a.state.projects[0].card.recent_changes = [{ date: a.state.today, title: 'Detailed change', detail: 'Keeps its disclosure' }];
   a.state.changes = { has_baseline: true, token: 'fold-state', entries: [{ project: 'sample', kind: 'new', title: 'A useful change' }] };
   await a.ui.load(false);
-  for (const id of ['attention:5', 'digest:sample', 'history', 'facts']) fold(a, id, true);
+  const recent = `recent:sample:${a.state.today}:Detailed change:Keeps its disclosure`;
+  for (const id of ['attention:5', 'digest:sample', 'history', 'facts', recent]) fold(a, id, true);
   a.ui.render();
   assert.match(a.node('#view').innerHTML, /data-fold="attention:5" open/);
   assert.match(a.node('#view').innerHTML, /data-fold="digest:sample" open/);
@@ -216,6 +218,7 @@ test('opened attention, digest, history and fact disclosures survive rendering a
   await a.ui.load(false);
   assert.match(a.node('#view').innerHTML, /data-fold="history" open/);
   assert.match(a.node('#view').innerHTML, /data-fold="facts" open/);
+  assert.ok(a.node('#view').innerHTML.includes(`data-fold="${recent}" open`));
   fold(a, 'history', false); a.ui.render();
   assert.match(a.node('#view').innerHTML, /data-fold="history">/);
   assert.match(a.node('#view').innerHTML, /data-fold="facts" open/);

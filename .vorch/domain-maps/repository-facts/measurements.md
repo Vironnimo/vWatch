@@ -4,6 +4,8 @@ Use this when changing collection internals or expensive measurement reuse. Publ
 
 ## Processes and working trees
 
+Remote, branch, worktree-list and overnight Git commands must succeed for overall readable Facts. Failed or timed-out reads return an unsuccessful measurement instead of empty lists or zero overnight counts. Branch enumeration uses actual local refs, excluding detached-HEAD display rows; remote parsing preserves spaces in local URL paths.
+
 `run` in private `src/facts/process.rs` requests the C locale for Git/gh diagnostics and uses English OS error-kind descriptions with numeric OS codes. It uses separate stdout/stderr readers. Its deadline covers the child and both output pipes because a descendant can keep a pipe open after its parent exits. On Windows, `spawn_contained` creates the child suspended, assigns a private kill-on-close Job Object, then resumes its initial thread. A process-local PSS thread snapshot finds that thread without enumerating every thread on the machine; its descriptors require PSS cleanup APIs, with the current process as snapshot owner. Every return closes the job, including after a successful parent exits, so descendants cannot survive by detaching or retaining output pipes. Never resume before assignment or replace this with a PID-tree kill after parent exit: orphaned descendants are no longer reachable that way. Setup failure terminates the still-suspended child; helper console windows remain hidden. The existing `command_timeout_includes_descendant_output_pipes` test checks both deadline and descendant termination.
 
 `dirty` and extra-checkout measurement in private `working_tree.rs` share the NUL-delimited porcelain decoder, including individual untracked files. Rename/copy records consume the following original-path token; status bytes and destination-path order are preserved. Dirty fingerprints hash the original status output, staged index entries (including conflict stages), and bounded file content plus size/high-resolution mtime, so unchanged file/line counts alone do not mean unchanged work. A failed index read makes the collection unsuccessful. Symlink fingerprints use the link target; source counts exclude symlinks.
@@ -15,6 +17,8 @@ Linked-checkout collection excludes the checkout being measured rather than assu
 CI examines the newest returned run per workflow, ignores Dependabot's dynamic update jobs and selects the worst remaining state. It reads a bounded run list, not an unlimited workflow history. Local-only or skipped measurements must not manufacture a green CI result.
 
 ## Source counts
+
+The worktree-v2 method classifies TeX and ReStructuredText as documentation and invalidates older code caches. The git-numstat-v3 method also invalidates hotspot reuse under that classification. Files marked assume-unchanged or skip-worktree force a code rescan because a clean Git status does not establish unchanged file contents.
 
 `Files` in `src/facts/statistics.rs` lists tracked and non-ignored untracked paths once per collection. Counts describe the current working tree, including local edits; extra worktrees are not added to that project's source size. Missing tracked files are absent from the current tree rather than unread source.
 

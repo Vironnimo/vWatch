@@ -89,12 +89,12 @@ impl Store {
     pub fn set_status(
         &self,
         id: &str,
-        status: &str,
+        status: Option<&str>,
         note: Option<&str>,
         at: &str,
     ) -> Result<OwnerReceipt> {
-        self.owner_change(OwnerScope::Project { id:id.into(), fields: std::iter::once("status".into()).chain(note.map(|_| "status_note".into())).collect() },at, |db| {
-            db.execute("UPDATE projects SET status = ?1, status_note = COALESCE(?2,status_note), status_changed_at = ?3 WHERE id = ?4 AND removed_at IS NULL", params![status, note, at, id]).map(drop)
+        self.owner_change(OwnerScope::Project { id:id.into(), fields: status.map(|_| "status".into()).into_iter().chain(note.map(|_| "status_note".into())).collect() },at, |db| {
+            db.execute("UPDATE projects SET status = COALESCE(?1,status), status_note = COALESCE(?2,status_note), status_changed_at = ?3 WHERE id = ?4 AND removed_at IS NULL", params![status, note, at, id]).map(drop)
         })
     }
 

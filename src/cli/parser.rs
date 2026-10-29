@@ -502,11 +502,12 @@ pub(super) enum ProjectsCmd {
         #[arg(long)]
         due: Option<String>,
     },
-    /// Set what the owner intends with the project
+    /// Set the owner's project status, note, or both
     Status {
         id: String,
-        #[arg(ignore_case = true)]
-        status: Status,
+        /// Omit with --note to keep the current status.
+        #[arg(ignore_case = true, required_unless_present = "note")]
+        status: Option<Status>,
         /// Owner's reason, shown to people and agents. Omit to keep the existing note.
         #[arg(long)]
         note: Option<String>,

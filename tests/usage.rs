@@ -135,4 +135,19 @@ fn parser_owned_metadata_ignores_flag_shaped_values() {
             .unwrap()
             .contains("hidden-target")
     );
+    let args = [
+        "vwatch",
+        "--json",
+        "projects",
+        "update",
+        "hidden-target",
+        "--name=--private",
+        "--secret-value",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect::<Vec<_>>();
+    let metadata = vwatch::cli::runtime_metadata(&args);
+    assert_eq!(metadata.command, "invalid_arguments");
+    assert_eq!(metadata.flags, ["--json", "--name"]);
 }

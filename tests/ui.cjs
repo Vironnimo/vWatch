@@ -31,6 +31,32 @@ test('language defaults to English, switches all areas and formats, and preserve
   assert.match(a.ui.renderStatistics(), /Statistics &amp; history|Statistics & history/);
 });
 
+test('timestamps display on their local calendar day while authored dates stay literal', async () => {
+  const a = await app(undefined, `
+    const NativeDate = Date;
+    globalThis.Date = class extends NativeDate {
+      constructor(value) { super(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}T12:00:00$/.test(value) ? value + 'Z' : value); }
+      part(name) { return Number(new Intl.DateTimeFormat('en', { timeZone: 'Europe/Berlin', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(this).find(p => p.type === name).value); }
+      getFullYear() { return this.part('year'); }
+      getMonth() { return this.part('month') - 1; }
+      getDate() { return this.part('day'); }
+      toLocaleDateString(language, options) { return super.toLocaleDateString(language, { ...options, timeZone: 'Europe/Berlin' }); }
+    };
+    Object.assign(ui, { ago, fmtDate, fmtShort, daysSince, lastWork });
+  `);
+  a.state.today = '2026-07-16'; await a.ui.load(false);
+  const stamp = '2026-07-15T22:30:00Z';
+  assert.equal(a.ui.ago(stamp), 'heute');
+  assert.equal(a.ui.fmtDate(stamp), '16.07.2026');
+  assert.equal(a.ui.fmtShort(stamp), '16.07.');
+  assert.equal(a.ui.lastWork({ card_updated_at: stamp }), '2026-07-16');
+  assert.equal(a.ui.fmtDate('2026-07-15'), '15.07.2026');
+  for (const [today, previous] of [['2026-10-26', '2026-10-24T22:30:00Z'], ['2026-03-30', '2026-03-28T23:30:00Z']]) {
+    a.state.today = today; await a.ui.load(false);
+    assert.equal(a.ui.daysSince(previous), 1);
+  }
+});
+
 test('a failed language save restores the selected language and keeps the choice visible', async () => {
   const a = await app(command => { if (command === 'set_pref') throw new Error('Write failed'); }, 'Object.assign(ui, { setPref, panelHtml });');
   await a.ui.setPref('language', 'en');

@@ -283,12 +283,12 @@ pub(super) fn execute(
                 svc.update_project(&id, name.as_deref(), path.as_deref())?
             }
             ProjectsCmd::Status { id, status, note } => {
-                let status = status
+                let status = status.map(|status| status
                     .to_possible_value()
                     .expect("every status has a name")
                     .get_name()
-                    .to_owned();
-                json!({"project": svc.set_status(&id, &status, note.as_deref())?})
+                    .to_owned());
+                json!({"project": svc.set_status(&id, status.as_deref(), note.as_deref())?})
             }
             ProjectsCmd::Goal { id, goal, due } => {
                 json!({"project": svc.set_goal(&id, &goal, due.as_deref())?})

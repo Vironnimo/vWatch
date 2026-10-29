@@ -267,10 +267,7 @@ pub(super) struct Checkout {
 /// The extra worktrees, plus the status of each one that exists for the overnight and collision views.
 pub(super) fn worktrees(repo: &Path) -> Option<(Value, Vec<Checkout>)> {
     let mut items: Vec<Value> = Vec::new();
-    for line in git(repo, &["worktree", "list", "--porcelain"])
-        .unwrap_or_default()
-        .lines()
-    {
+    for line in git(repo, &["worktree", "list", "--porcelain"])?.lines() {
         if let Some(path) = line.strip_prefix("worktree ") {
             items.push(json!({"path": path, "branch": null, "head": null, "prunable": false}));
         } else if let Some(current) = items.last_mut() {
@@ -339,18 +336,27 @@ pub(super) fn worktrees(repo: &Path) -> Option<(Value, Vec<Checkout>)> {
     ))
 }
 
-pub(super) fn branches(repo: &Path, current: Option<&str>) -> Value {
+pub(super) fn branches(repo: &Path, current: Option<&str>, has_head: bool) -> Option<Value> {
+    if !has_head {
+        let refs = git(repo, &["for-each-ref", "--format=%(refname)", "refs/heads"])?;
+        return refs
+            .trim()
+            .is_empty()
+            .then(|| json!({"merged_count": 0, "unmerged": []}));
+    }
     let fmt = "--format=%(refname:short)\t%(committerdate:short)\t%(objectname)";
-    let merged = git(repo, &["branch", "--merged", "HEAD", fmt]).unwrap_or_default();
+    let merged = git(repo, &["for-each-ref", "--merged=HEAD", fmt, "refs/heads"])?;
     let merged_count = merged
         .lines()
         .filter_map(|l| l.split('\t').next())
         .filter(|n| !n.is_empty() && Some(*n) != current)
         .count();
     let mut unmerged = Vec::new();
-    for line in git(repo, &["branch", "--no-merged", "HEAD", fmt])
-        .unwrap_or_default()
-        .lines()
+    for line in git(
+        repo,
+        &["for-each-ref", "--no-merged=HEAD", fmt, "refs/heads"],
+    )?
+    .lines()
     {
         let mut parts = line.split('\t');
         let (name, last, head) = (
@@ -363,19 +369,22 @@ pub(super) fn branches(repo: &Path, current: Option<&str>) -> Value {
             unmerged.push(json!({"name": name, "last": text(last), "head": text(head)}));
         }
     }
-    json!({"merged_count": merged_count, "unmerged": unmerged})
+    Some(json!({"merged_count": merged_count, "unmerged": unmerged}))
 }
 
 /// What happened since yesterday evening: commits on every local branch (worktrees included),
 /// their size, reverts among them, and uncommitted files edited in that time.
-pub(super) fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[Checkout]) -> Value {
+pub(super) fn night(
+    repo: &Path,
+    today: NaiveDate,
+    dirty: &Dirty,
+    checkouts: &[Checkout],
+) -> Option<Value> {
     let evening = today
         .pred_opt()
         .and_then(|d| d.and_hms_opt(EVENING_HOUR, 0, 0))
         .and_then(|t| Local.from_local_datetime(&t).earliest());
-    let Some(evening) = evening else {
-        return Value::Null;
-    };
+    let evening = evening?;
     let since = SystemTime::from(evening);
     let log = git(
         repo,
@@ -391,8 +400,7 @@ pub(super) fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[C
             "--no-ext-diff",
             "--no-textconv",
         ],
-    )
-    .unwrap_or_default();
+    )?;
     let (mut commits, mut reverts, mut added, mut removed) = (0u64, 0u64, 0u64, 0u64);
     for entry in log.split('\u{1e}').filter(|e| !e.trim().is_empty()) {
         commits += 1;
@@ -423,7 +431,9 @@ pub(super) fn night(repo: &Path, today: NaiveDate, dirty: &Dirty, checkouts: &[C
             .flat_map(|c| c.mtimes.iter().flatten())
             .filter(|t| **t >= since)
             .count();
-    json!({"since": iso(since), "commits": commits, "lines_added": added, "lines_removed": removed, "reverts": reverts, "uncommitted_touched": touched})
+    Some(
+        json!({"since": iso(since), "commits": commits, "lines_added": added, "lines_removed": removed, "reverts": reverts, "uncommitted_touched": touched}),
+    )
 }
 
 /// Files that two lines of work change at once: the main checkout's uncommitted files, each extra

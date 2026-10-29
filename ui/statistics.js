@@ -92,11 +92,11 @@ document.addEventListener('toggle', e => {
   statsFolds.delete(e.target.dataset.fold);
   e.target.insertAdjacentHTML('beforeend', body());
 }, true);
-function languageBars(languages, total) {
+function languageBars(languages, total, scope = 'total') {
   const rows = (languages || []).filter(l => l.category == null || l.category === 'source').slice().sort((a, b) => b.code - a.code);
   const row = (l, i) => { const share = total > 0 ? 100 * l.code / total : 0;
     return `<div class="language-row"><div><span>${esc(l.language)}</span><b>${num(l.code)} <span class="faint">· ${share > 0 && share < 0.1 ? tr("&lt; 0.1") : share.toLocaleString(locale(), { maximumFractionDigits: 1 })} %</span></b></div><div class="language-track"><span style="width:${share}%;background:${PALETTE[i % PALETTE.length]}"></span></div></div>`; };
-  return rows.length ? `<div class="language-bars">${rows.slice(0, 6).map(row).join('')}</div>${rows.length > 6 ? `<details class="stat-details"><summary>${tr("{0} more languages", rows.length - 6)}</summary><div class="language-bars">${rows.slice(6).map((l,i) => row(l,i+6)).join('')}</div></details>` : ''}` : `<p class="faint">${tr("No source code languages recorded yet.")}</p>`;
+  return rows.length ? `<div class="language-bars">${rows.slice(0, 6).map(row).join('')}</div>${rows.length > 6 ? `<details class="stat-details" ${foldAttrs(`languages:${scope}`)}><summary>${tr("{0} more languages", rows.length - 6)}</summary><div class="language-bars">${rows.slice(6).map((l,i) => row(l,i+6)).join('')}</div></details>` : ''}` : `<p class="faint">${tr("No source code languages recorded yet.")}</p>`;
 }
 function projectStatistics(p) {
   const c = p.current, code = c?.code, valid = c?.ok === true && code?.ok === true, activity = p.activity || {}, counts = activity.totals;
@@ -113,7 +113,7 @@ function projectStatistics(p) {
     <div class="stat-kpis">${kpi(tr("Source lines"), valid ? measured(code.source_code) : tr("unknown"))}${kpi(tr("files"), valid ? measured(code.files) : tr("unknown"))}${kpi(tr("Commits in period"), measured(counts?.commits))}${kpi(tr("Active days"), measured(counts?.active_days))}${kpi(tr("Confirmed completions"), measured(p.confirmed_completions))}</div>
     <p class="stat-comparison">${p.comparable ? `<b>${tr("{0} source lines{1}", signed(p.change?.code), typeof p.change?.percent === 'number' ? ` (${signed(Math.round(p.change.percent * 10) / 10)} %)` : '')}</b> ${tr("since {0}", esc(observationDate(p.baseline?.at)))}` : tr("No reliable size comparison yet: two complete measurements with the same branch, folder and counting method are required.")}</p>
     ${!valid ? `<p class="note">${tr("Code measurement is missing or incomplete. No complete measurement is assumed.")}</p>` : ''}
-    <div class="stat-columns"><div>${languageBars(valid ? code.languages : [], valid ? code.source_code : 0)}<p class="faint">${tr("Shares by source lines. Documentation and configuration count separately.")}</p></div>${metricCurve(p.samples || [], s => s.ok && s.code?.ok ? s.code.source_code : null, tr("Source lines"), color(p.id))}</div>
+    <div class="stat-columns"><div>${languageBars(valid ? code.languages : [], valid ? code.source_code : 0, p.id)}<p class="faint">${tr("Shares by source lines. Documentation and configuration count separately.")}</p></div>${metricCurve(p.samples || [], s => s.ok && s.code?.ok ? s.code.source_code : null, tr("Source lines"), color(p.id))}</div>
     <div class="stat-columns">${metricCurve(p.samples || [], s => s.ok ? s.dirty?.files : null, tr("Uncommitted files"), '#e8870a')}${metricCurve(p.samples || [], s => s.ok ? s.ahead : null, tr("Unpushed commits"), '#5b8def')}</div>
     <div class="stat-kpis">${kpi(tr("Lines added"), measured(counts?.added))}${kpi(tr("Lines removed"), measured(counts?.removed))}${kpi(tr("CI at latest observation"), esc(CI[c?.ci?.state]?.[0] || tr("unknown")))}${kpi(tr("Additional worktrees"), measured(c?.worktrees?.count))}</div>
     <p class="faint">${tr("Activity reconstructed from Git{0}. {1} Commits and code size describe activity and size, not completion.", activity.coverage_from ? tr(": available {0} to {1}", fmtDate(activity.coverage_from), fmtDate(activity.coverage_through)) : tr(": not available yet"), activity.complete ? '' : tr("The selected period is not fully covered."))}</p>

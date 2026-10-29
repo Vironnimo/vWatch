@@ -11,7 +11,7 @@ fn project_trash_preserves_identity_cards_feedback_tasks_and_owner_instructions(
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     svc.set_goal("demo", "Offline bleiben", Some("2026-12-01"))
         .unwrap();
-    svc.set_status("demo", "parked", Some("Nächsten Monat"))
+    svc.set_status("demo", Some("parked"), Some("Nächsten Monat"))
         .unwrap();
     svc.put_card("demo", card(), false, false).unwrap();
     svc.put_card("demo", json!({"headline":"Zweite Fassung"}), true, false)
@@ -249,7 +249,7 @@ fn history_restore_appends_old_content_and_keeps_its_stale_evidence() {
             .len(),
         3
     );
-    svc.set_status("demo", "parked", None).unwrap();
+    svc.set_status("demo", Some("parked"), None).unwrap();
     assert_eq!(
         svc.restore_card("demo", 1, Some(token)).unwrap_err().code,
         "version_conflict"
@@ -328,29 +328,6 @@ fn report_retries_preserve_owner_confirmation_and_unknown_ids_are_named_first() 
             .unwrap_err()
             .code,
         "invalid_task_transition"
-    );
-}
-
-#[test]
-fn repeating_a_run_failure_does_not_make_a_newer_repaired_card_fail_again() {
-    let tmp = tempfile::tempdir().unwrap();
-    let (svc, clock) = service(tmp.path());
-    svc.add_project(demo_repo(tmp.path()).to_str().unwrap(), None, None)
-        .unwrap();
-    let run = svc.run_start(false).unwrap()["run_id"].as_i64().unwrap();
-    svc.run_fail(run, Some("demo"), "Analyse unterbrochen")
-        .unwrap();
-    let original = svc.store().agent_run(run).unwrap().unwrap().failures;
-    svc.put_card("demo", card(), false, false).unwrap();
-    clock.advance(chrono::Duration::minutes(10));
-    assert_eq!(
-        svc.run_fail(run, Some("demo"), "Analyse unterbrochen")
-            .unwrap()["already_recorded"],
-        true
-    );
-    assert_eq!(
-        svc.store().agent_run(run).unwrap().unwrap().failures,
-        original
     );
 }
 

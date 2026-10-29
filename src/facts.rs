@@ -51,10 +51,6 @@ fn iso(t: SystemTime) -> String {
         .to_string()
 }
 
-fn monday(d: NaiveDate) -> NaiveDate {
-    d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
-}
-
 struct Commit {
     parents: Vec<String>,
     /// Committer time in seconds since the epoch.
@@ -113,9 +109,11 @@ fn commits(history: Option<&History>, today: NaiveDate) -> Value {
         .flat_map(|h| h.0.values().filter_map(|c| c.date))
         .collect();
     let mut weekly = vec![0u32; WEEKS];
-    let this_monday = monday(today);
     for d in dates.iter().filter(|d| **d <= today) {
-        let weeks_ago = (this_monday - monday(*d)).num_days() / 7;
+        // Avoid subtracting past NaiveDate::MIN for unusual historical dates.
+        let weeks_ago = ((today - *d).num_days() + i64::from(d.weekday().num_days_from_monday())
+            - i64::from(today.weekday().num_days_from_monday()))
+            / 7;
         if (0..WEEKS as i64).contains(&weeks_ago) {
             weekly[WEEKS - 1 - weeks_ago as usize] += 1;
         }
@@ -153,15 +151,19 @@ fn strip_credentials(url: &str) -> String {
     url.to_owned()
 }
 
-fn remotes(repo: &Path) -> Vec<(String, String)> {
+fn remotes(repo: &Path) -> Option<Vec<(String, String)>> {
     let mut seen: Vec<(String, String)> = Vec::new();
-    for line in git(repo, &["remote", "-v"]).unwrap_or_default().lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 && !seen.iter().any(|(n, _)| n == parts[0]) {
-            seen.push((parts[0].to_owned(), strip_credentials(parts[1])));
+    for line in git(repo, &["remote", "-v"])?.lines() {
+        if let Some((name, target)) = line.split_once('\t') {
+            let url = target
+                .strip_suffix(" (fetch)")
+                .or_else(|| target.strip_suffix(" (push)"))?;
+            if !seen.iter().any(|(n, _)| n == name) {
+                seen.push((name.to_owned(), strip_credentials(url)));
+            }
         }
     }
-    seen
+    Some(seen)
 }
 
 /// (upstream, ahead, behind, date of the oldest unpushed commit)
@@ -526,7 +528,8 @@ fn collect_at_checkpoint(
     let repo = Path::new(root.trim());
     let trimmed = |v: Option<String>| v.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
     let head = trimmed(git(repo, &["rev-parse", "HEAD"]));
-    let branch = trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]));
+    let read_branch = || trimmed(git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]));
+    let branch = read_branch();
     let history = head.as_deref().and_then(|h| History::read(repo, h));
     if head.is_some() && history.is_none() {
         return json!({"ok": false, "error": "git_log_failed", "is_git": true});
@@ -536,7 +539,9 @@ fn collect_at_checkpoint(
     } else {
         empty_commits()
     };
-    let remotes = remotes(repo);
+    let Some(remotes) = remotes(repo) else {
+        return json!({"ok": false, "error": "git_remotes_failed", "is_git": true});
+    };
     let Some(dirty) = dirty(repo, head.is_some()) else {
         return json!({"ok": false, "error": "git_status_failed", "is_git": true});
     };
@@ -549,14 +554,22 @@ fn collect_at_checkpoint(
     let newest_local = dirty
         .newest
         .map(|t| DateTime::<Local>::from(t).date_naive().to_string());
-    let Some((worktrees, checkouts)) = worktrees(repo) else {
-        if let Some(lookup) = ci {
-            let _ = lookup.join();
-        }
-        return json!({"ok": false, "error": "git_status_failed", "is_git": true});
+    let local = || {
+        let (worktrees, checkouts) = worktrees(repo).ok_or("git_status_failed")?;
+        let branches =
+            branches(repo, branch.as_deref(), head.is_some()).ok_or("git_branches_failed")?;
+        let night = night(repo, today, &dirty, &checkouts).ok_or("git_night_failed")?;
+        Ok::<_, &str>((worktrees, checkouts, branches, night))
     };
-    let branches = branches(repo, branch.as_deref());
-    let night = night(repo, today, &dirty, &checkouts);
+    let (worktrees, checkouts, branches, night) = match local() {
+        Ok(values) => values,
+        Err(error) => {
+            if let Some(lookup) = ci {
+                let _ = lookup.join();
+            }
+            return json!({"ok": false, "error": error, "is_git": true});
+        }
+    };
     let collisions = collisions(repo, branch.as_deref(), &dirty, &checkouts, &branches);
     let last_work = [commits["last"].as_str().map(str::to_owned), newest_local]
         .into_iter()
@@ -609,9 +622,7 @@ fn collect_at_checkpoint(
         "activity": activity,
     });
     before_identity_check();
-    if head != trimmed(git(repo, &["rev-parse", "HEAD"]))
-        || branch != trimmed(git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]))
-    {
+    if head != trimmed(git(repo, &["rev-parse", "HEAD"])) || branch != read_branch() {
         measured["ok"] = json!(false);
         measured["error"] = json!("repository_changed_during_measurement");
         measured["code"]["ok"] = json!(false);
@@ -841,6 +852,9 @@ mod tests {
 
     #[test]
     fn remote_urls_lose_credentials_and_yield_github_slugs() {
+        let not_a_repo = tempfile::tempdir().unwrap();
+        assert!(remotes(not_a_repo.path()).is_none());
+        assert!(branches(not_a_repo.path(), None, true).is_none());
         assert_eq!(
             strip_credentials("https://user:tok@github.com/a/b.git"),
             "https://github.com/a/b.git"
@@ -868,6 +882,29 @@ mod tests {
             github_slug("ssh://git@github.com/owner/repo.git").as_deref(),
             Some("owner/repo")
         );
+    }
+
+    #[test]
+    fn commit_counts_accept_the_earliest_representable_calendar_date() {
+        let history = History(HashMap::from([(
+            "old".into(),
+            Commit {
+                parents: Vec::new(),
+                time: 0,
+                date: Some(NaiveDate::MIN),
+            },
+        )]));
+        let measured = commits(
+            Some(&history),
+            NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
+        );
+        assert_eq!(measured["total"], 1);
+        assert_eq!(measured["last_7d"], 0);
+        assert!(measured["weekly"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|count| count == 0));
     }
 
     #[test]

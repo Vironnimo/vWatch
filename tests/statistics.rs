@@ -21,11 +21,30 @@ fn observations_record_changes_deduplicate_payloads_and_compare_known_measuremen
     std::fs::create_dir(repo.join("node_modules")).unwrap();
     std::fs::write(repo.join("node_modules/vendor.js"), "lots.of.code();\n").unwrap();
     std::fs::write(repo.join("package-lock.json"), "{}\n").unwrap();
+    std::fs::write(
+        repo.join("manual.tex"),
+        "\\section{Guide}\nDocumentation text.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("manual.rst"),
+        "Guide\n=====\n\nDocumentation text.\n",
+    )
+    .unwrap();
     svc.add_project(repo.to_str().unwrap(), None, None).unwrap();
     let f = svc.facts("demo").unwrap();
     assert_eq!(f["code"]["source_code"], 1);
     assert_eq!(f["code"]["ok"], true);
     assert_eq!(f["code"]["excluded_files"], 2);
+    for name in ["TeX", "ReStructuredText"] {
+        let language = f["code"]["languages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|language| language["language"] == name)
+            .expect("documentation language counted");
+        assert_eq!(language["category"], "documentation");
+    }
     let db = rusqlite::Connection::open(tmp.path().join("vwatch.db")).unwrap();
     let payloads = count(&db, "fact_payloads");
     let saved = svc.store().facts("demo").unwrap().unwrap();
@@ -691,6 +710,30 @@ fn owner_edits_undo_and_removal_are_journaled_and_newer_idea_edits_are_guarded()
     assert_eq!(
         svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
         false
+    );
+    let merged = svc
+        .put_portfolio(json!({"greeting": "Unrelated update"}), true, false)
+        .unwrap();
+    assert!(merged["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .unwrap()
+            .contains("earlier owner-idea revisions")));
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "owner_idea"
+    );
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
+        false
+    );
+    svc.put_portfolio(json!({"idea_checks": [{"idea": id, "verdict": "later", "why": "Review the new wording later"}]}), true, false).unwrap();
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
+        true
     );
     let token = edit["undo"]
         .as_str()

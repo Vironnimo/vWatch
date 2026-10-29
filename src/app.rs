@@ -220,10 +220,13 @@ async fn set_pref(app: State<'_, AppState>, key: String, value: Value) -> Reply 
 async fn set_status(
     app: State<'_, AppState>,
     id: String,
-    status: String,
+    status: Option<String>,
     note: Option<String>,
 ) -> Reply {
-    write(&app, move |s| s.set_status(&id, &status, note.as_deref())).await
+    write(&app, move |s| {
+        s.set_status(&id, status.as_deref(), note.as_deref())
+    })
+    .await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -416,7 +419,18 @@ fn show_main(app: &AppHandle) {
 pub fn run() {
     let data = system::data_dir();
     let db = system::db_path(&data);
-    let service = VWatch::open(&db).expect("vWatch cannot open its database");
+    let service = match VWatch::open(&db) {
+        Ok(service) => service,
+        Err(error) => {
+            startup_error(&format!(
+                "Cannot open the vWatch database at {}.\n\n{}\n{}",
+                db.display(),
+                error.message,
+                error.hint.unwrap_or_default()
+            ));
+            return;
+        }
+    };
     let _ = system::export_skill();
 
     tauri::Builder::default()
@@ -489,4 +503,23 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("vWatch could not start its window");
+}
+
+fn startup_error(message: &str) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let message: Vec<u16> = message.encode_utf16().chain([0]).collect();
+        let title: Vec<u16> = "vWatch".encode_utf16().chain([0]).collect();
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                message.as_ptr(),
+                title.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    eprintln!("{message}");
 }

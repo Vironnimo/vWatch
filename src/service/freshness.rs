@@ -87,6 +87,7 @@ fn owner_changes(
             reactions.iter().any(|f| {
                 f.project_id.as_deref() == Some(&project.id)
                     && kind_of(f) == "question"
+                    && f.value != "later"
                     && f.at > card.created_at
             }),
             project

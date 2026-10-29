@@ -67,6 +67,12 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 
 | Text | Reason |
 |---|---|
+| CLI reference: `A call without a subcommand reports the missing command` | Explain a missing operation without requiring the full help output for every invalid call. |
+| CLI reference: `Required text needs non-whitespace content` | An apparently filled but blank field cannot supply an assessment or title. |
+| CLI reference: `projects status` `changes only the owner's note` / `Status-only changes preserve the current note.` | Keep independent owner edits from overwriting concurrent status or note writes. |
+| CLI reference: `Failed remote, branch, worktree or overnight Git reads` / `Their missing values are unknown` | Failed measurements cannot support claims of no overnight activity or no branches/remotes. |
+| CLI reference: `An identical failure report is a replay only for the same current Card or brief version.` / `After a new document version` | The same failure after a rewrite is still failed; a repeated report against the same version remains idempotent. |
+| Portfolio guide: `With` `--merge` `omitting` `idea_checks` `retains the revisions assessed by the previous brief.` / `An inherited assessment of an edited owner idea stays unchecked` | Preserve assessment provenance and explain how an explicitly reviewed list clears the owner-idea Due reason. |
 | Card guide: `A failed facts measurement does not mean a clean repository.` | Missing evidence cannot establish a favorable measured state. |
 | Card guide: `Distinguish committed, tested, installed and actually used` | Each claim needs different evidence; a repository snapshot establishes none of the others automatically. |
 | Card guide: `Installed is not used; no trace is a finding too.` | Usage research must report missing traces honestly instead of treating installation as adoption. |
@@ -114,6 +120,8 @@ Sources: `src/cli.rs` (console delivery), `src/cli/parser.rs` (help), `src/cli/d
 
 | Text | Reason |
 |---|---|
+| `cli.rs`: `A subcommand is required. Nothing was changed.` / `Usage: vwatch <COMMAND> [OPTIONS]` / `Run` `vwatch --help` `for available commands and their usage.` | Name missing command input before offering help; avoid treating the application tagline as the cause. |
+| `cli/parser.rs`: `Set the owner's project status, note, or both` / `Omit with --note to keep the current status.` | Permit note-only writes without resubmitting a potentially stale owner status. |
 | `cli/parser.rs` help: `Use --json when a program parses the output.` | Preserve text for people/agents and complete structured output for programs. |
 | `cli/parser.rs` help: `Exit codes: 0 success, 1 failed or incomplete, 2 invalid call.` | A nonzero result distinguishes invalid invocation from failed or unfinished work without hiding partial effects. |
 | `cli/parser.rs` help: `Owner reaction: up (good), later, down (rejected), answered or done.` | Explain canonical reaction values using English help, independently of UI labels. |
@@ -142,6 +150,10 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 
 | Text | Reason |
 |---|---|
+| `service/projects.rs`: `No status or note was supplied. Nothing was changed.` / `Supply a project status, --note with the owner's text, or both.` | Reject an empty patch and name the supported independent changes. |
+| `owner_state.rs`: `Use handover, board, ideas, handbook or statistics.` | Include every accepted style in recovery, including handbook. |
+| `cards.rs`: `Text has` `non-padding characters; minimum is` | Required text needs non-whitespace content; padding is preserved for otherwise valid wording. |
+| `documents.rs`: `Retained idea checks refer to earlier owner-idea revisions:` / `Reassess these ideas and include idea_checks in the next brief write.` | A merge must disclose that inherited wording does not establish review of an edited idea. |
 | `cards.rs`: `At most {w} words.` | Carry the same readability limit into exported JSON schema as validation uses. |
 | `cards.rs`: `ignored unknown field: {p}` | Lenient input handling must disclose discarded content instead of implying it was stored. |
 | `cards.rs`: `kept from the previous version although over its word limit` | A merge can preserve an inherited field without requiring unrelated rewriting; the warning identifies the later repair. |

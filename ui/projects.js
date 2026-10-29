@@ -124,7 +124,7 @@ function projectPageHtml(p) {
   const editing = projectEditors.has(p.id);
   const statusBar = `<div class="project-intent" ${anchor('owner')}><div class="intent-summary"><span>${tr("Your intent:")} <b>${esc(STATUS[p.status] || p.status)}</b></span><button class="linkish" type="button" data-project-intent-edit aria-expanded="${editing}" aria-controls="project-owner-fields">${editing ? tr("Close editor") : tr("Edit status and goal")}</button></div>${p.status_note ? `<p class="muted">${esc(p.status_note)}</p>` : ''}${goalLine(p)}
     <div id="project-owner-fields"${editing ? '' : ' hidden'}><div class="statusbar"><span class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, l]) => `<button type="button" data-status="${k}" aria-pressed="${p.status === k}">${l}</button>`).join('')}</span><input id="status-note" type="text" placeholder="${tr("Note to Agents, e.g. why parked")}" value="${esc(projectValue(p, 'status_note'))}" aria-label="${tr("Note to Agents")}"></div><div class="statusbar goalbar"><span class="faint">${tr("Your goal:")}</span><input id="goal-text" type="text" placeholder="${tr("e.g. release v1.0, bug fixes only")}" value="${esc(projectValue(p, 'goal'))}" aria-label="${tr("Your goal")}"><input id="goal-due" type="date" value="${esc(projectValue(p, 'goal_due'))}" aria-label="${tr("By when")}" title="${tr("By when (optional)")}"></div><p class="faint edit-hint">${tr("Changes are saved when you leave the field.")}</p></div></div>`;
-  const factsKv = f.is_git ? `<dl class="kv">
+  const factsKv = f.ok === false && f.is_git ? `<p class="muted">${tr("Measurement failed:")} ${esc(f.error)}</p>` : f.is_git ? `<dl class="kv">
     <dt>Commits</dt><dd class="mono">${tr("{0} total · 7 d: {1} · 30 d: {2} · since {3}", num(commits.total), num(commits.last_7d), num(commits.last_30d), commits.first ? fmtDate(commits.first) : '—')}</dd>
     <dt>Branch</dt><dd class="mono">${esc(f.branch || '—')}${f.upstream ? ` → ${esc(f.upstream)}` : ''}${f.ahead ? ` ${tr("· {0} ahead", f.ahead)}` : ''}${f.behind ? ` ${tr("· {0} behind", f.behind)}` : ''}</dd>
     <dt>Remote</dt><dd>${f.has_remote ? esc((f.remotes || []).map(r => `${r.name}: ${r.url}`).join(', ')) : noRemoteTag(p)}</dd>
@@ -181,7 +181,7 @@ function projectPageHtml(p) {
   history += `<button class="btn" type="button" data-project-statistics="${esc(p.id)}">${tr("Open statistics and full history")}</button>`;
   history += section('past-replies', tr("Your earlier answers"), replies.length ? `<ul class="bullets">${replies.map(([id, f]) => `<li ${anchor(`answer:${id}`)}><b>${esc(f.item.title || f.title)}</b><p>${f.value === 'answered' ? tr("Your answer: {0}", esc(f.note)) : tr("Marked as done by you.")}${f.at ? ` <span class="faint">· ${fmtDate(f.at)}</span>` : ''}</p></li>`).join('')}</ul>` : '')
     + warningControls(p) + section('facts', tr("Facts from Git"), factsKv, p.facts_collected_at ? tr("measured {0} min ago", minutesAgo(p.facts_collected_at)) : null)
-    + (f.is_git ? `<details class="commit-history" ${foldAttrs(`commits:${p.id}`)}><summary>${tr("View commit activity")}</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
+    + (f.is_git && f.ok !== false ? `<details class="commit-history" ${foldAttrs(`commits:${p.id}`)}><summary>${tr("View commit activity")}</summary>${spark(weekly(p), color(p.id), 48)}</details>` : '');
   const groups = { work, handbook, history };
   return `<article class="project-detail" aria-label="${esc(p.name)}">${head}${PROJECT_GROUPS.map(([key, title]) => `<section id="project-group-${key}" class="project-group" ${anchor(`group:${key}`)}><h2 class="group-title">${title}</h2>${groups[key]}</section>`).join('')}</article>`;
 }
@@ -283,15 +283,15 @@ async function adoptVerdict(id, status) {
   const p = byId(id);
   if (!p) return;
   try {
-    const result = await call('set_status', { id, status, note: p.status_note || '' });
+    const result = await call('set_status', { id, status });
     await load(false);
     const token = typeof result?.undo_token === 'string' ? result.undo_token : null;
     toast(tr("{0}: applied “{1}”.", p.name, STATUS[status]), token ? async () => { try { await call('undo', { token }); } catch (e) { toast(`${tr("Undo failed:")} ` + errText(e)); } await load(false); } : null);
   } catch (e) { toast(`${tr("Status not saved:")} ` + errText(e)); }
 }
-async function setStatus(status, note) {
+async function setStatus(status) {
   const id = openId;
-  try { await call('set_status', { id, status, note }); clearProjectDraft(id, 'status_note', note); await load(false); }
+  try { await call('set_status', { id, status }); await load(false); }
   catch (e) { toast(tr("Status not saved.")); }
 }
 
@@ -309,7 +309,7 @@ function handleProjectClick(e, t) {
   const vs = t.closest('[data-verdict-status]');
   if (vs) { adoptVerdict(vs.dataset.project, vs.dataset.verdictStatus); return true; }
   const st = t.closest('.seg [data-status]');
-  if (st && openId) { setStatus(st.dataset.status, $('#status-note').value); return true; }
+  if (st && openId) { setStatus(st.dataset.status); return true; }
   const op = t.closest('[data-open]');
   if (op) { openProject(op.dataset.open, null, op.classList.contains('plist-item')); }
   return false;
@@ -328,7 +328,7 @@ async function handleProjectChange(e) {
   }
   if (e.target.id === 'status-note' && openId) {
     const id = openId, p = byId(id), note = e.target.value;
-    try { await call('set_status', { id, status: p.status, note }); p.status_note = note; clearProjectDraft(id, 'status_note', note); toast(tr("Note saved.")); }
+    try { await call('set_status', { id, note }); p.status_note = note; clearProjectDraft(id, 'status_note', note); toast(tr("Note saved.")); }
     catch (err) { toast(tr("Note not saved.")); }
   }
   return false;
