@@ -69,6 +69,7 @@ Sources: `skill/vwatch/references/card-guide.md`, `skill/vwatch/references/portf
 |---|---|
 | CLI reference: `projects status` `changes only the owner's note` / `Status-only changes preserve the current note.` | Keep independent owner edits from overwriting concurrent status or note writes. |
 | CLI reference: `Failed remote, branch, worktree or overnight Git reads` / `Their missing values are unknown` | Failed measurements cannot support claims of no overnight activity or no branches/remotes. |
+| Portfolio guide: `With` `--merge` `omitting` `idea_checks` `retains the revisions assessed by the previous brief.` / `An inherited assessment of an edited owner idea stays unchecked` | Preserve assessment provenance and explain how an explicitly reviewed list clears the owner-idea Due reason. |
 | Card guide: `A failed facts measurement does not mean a clean repository.` | Missing evidence cannot establish a favorable measured state. |
 | Card guide: `Distinguish committed, tested, installed and actually used` | Each claim needs different evidence; a repository snapshot establishes none of the others automatically. |
 | Card guide: `Installed is not used; no trace is a finding too.` | Usage research must report missing traces honestly instead of treating installation as adoption. |
@@ -146,6 +147,7 @@ Sources: `src/cards.rs` validation/schema output; `src/service.rs` storage error
 | Text | Reason |
 |---|---|
 | `service/projects.rs`: `No status or note was supplied. Nothing was changed.` / `Supply a project status, --note with the owner's text, or both.` | Reject an empty patch and name the supported independent changes. |
+| `documents.rs`: `Retained idea checks refer to earlier owner-idea revisions:` / `Reassess these ideas and include idea_checks in the next brief write.` | A merge must disclose that inherited wording does not establish review of an edited idea. |
 | `cards.rs`: `At most {w} words.` | Carry the same readability limit into exported JSON schema as validation uses. |
 | `cards.rs`: `ignored unknown field: {p}` | Lenient input handling must disclose discarded content instead of implying it was stored. |
 | `cards.rs`: `kept from the previous version although over its word limit` | A merge can preserve an inherited field without requiring unrelated rewriting; the warning identifies the later repair. |

@@ -12,6 +12,8 @@ For a new card field, define a default, document it in `skill/vwatch/references/
 
 ## Write semantics
 
+A portfolio merge omitting `idea_checks` retains each inherited assessment's prior owner-idea revision in its basis. Edited ideas remain unchecked; the write receipt warns about stale inherited assessments. Explicitly supplied assessments use the current context's revisions.
+
 `put_card_guarded` and `put_portfolio_guarded` own the complete write pipeline: check context, expand kept IDs, merge if requested, validate content and references, then delegate the atomic write to Store. The context check before validation is not sufficient against concurrent processes; preserve the second check inside Store.
 
 Merge is shallow at the document's top level. Omitted fields remain; supplied lists and objects replace those fields in full. `cards::expand_kept_items` restores an item sent only as its ID from the latest known wording in that scope. Keep IDs when retaining an item so its feedback remains attached. Unsupplied inherited fields may retain old word-limit excess with a warning; submitted fields must satisfy current limits. Unknown fields are ignored with warnings, not persisted as extensions.

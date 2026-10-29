@@ -711,6 +711,30 @@ fn owner_edits_undo_and_removal_are_journaled_and_newer_idea_edits_are_guarded()
         svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
         false
     );
+    let merged = svc
+        .put_portfolio(json!({"greeting": "Unrelated update"}), true, false)
+        .unwrap();
+    assert!(merged["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .unwrap()
+            .contains("earlier owner-idea revisions")));
+    assert_eq!(
+        svc.due(14, false).unwrap()["portfolio"]["reason"],
+        "owner_idea"
+    );
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
+        false
+    );
+    svc.put_portfolio(json!({"idea_checks": [{"idea": id, "verdict": "later", "why": "Review the new wording later"}]}), true, false).unwrap();
+    assert_eq!(
+        svc.portfolio_context(&[]).unwrap()["owner_ideas"][0]["checked"],
+        true
+    );
     let token = edit["undo"]
         .as_str()
         .unwrap()

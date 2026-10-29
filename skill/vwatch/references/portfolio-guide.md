@@ -62,6 +62,8 @@ Check retained `why` and `evidence` against current facts and cards. Correct dem
 
 ## Save
 
+With `--merge`, omitting `idea_checks` retains the revisions assessed by the previous brief. An inherited assessment of an edited owner idea stays unchecked and produces a warning; include the reviewed `idea_checks` list to assess its current revision.
+
 Write the brief as UTF-8 JSON in your own temporary folder. Replace `<context-token>` with the token from the complete context and `<brief-file>` with the absolute Windows path to the payload:
 
 ```powershell
